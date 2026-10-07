@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package forge.v1;
+
+// AuthService tells clients how to log in and who they are.
+service AuthService {
+  // GetServerInfo needs no credentials. The CLI calls it before login to discover
+  // the identity provider and to check version skew.
+  rpc GetServerInfo(GetServerInfoRequest) returns (GetServerInfoResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetStatus returns the caller's identity and permissions.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message GetServerInfoRequest {}
+
+message GetServerInfoResponse {
+  // Semantic version of the server, for example "0.1.0".
+  string server_version = 1;
+  // Oldest CLI version the server accepts.
+  string min_client_version = 2;
+  OIDCConfig oidc = 3;
+}
+
+// OIDCConfig is what a public client needs to run the device flow.
+message OIDCConfig {
+  string issuer = 1;
+  string client_id = 2;
+  repeated string scopes = 3;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  // Subject claim of the token.
+  string subject = 1;
+  string email = 2;
+  repeated string groups = 3;
+  // Permissions granted to the caller, for example "services.read".
+  // Clients use them only to tailor help and prompts; the server enforces them.
+  repeated string permissions = 4;
+}

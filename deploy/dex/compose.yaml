@@ -1,0 +1,10 @@
+# Local identity provider for 'forge auth login'.
+#   docker compose -f deploy/dex/compose.yaml up -d
+services:
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./config.yaml:/etc/dex/config.yaml:ro

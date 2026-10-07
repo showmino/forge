@@ -1,0 +1,83 @@
+version: 2
+project_name: forge
+
+before:
+  hooks:
+    - go mod tidy -diff
+
+builds:
+  - id: forge
+    main: ./cmd/forge
+    binary: forge
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/showmino/forge/internal/version.Version={{ .Version }}
+      - -X github.com/showmino/forge/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/showmino/forge/internal/version.Date={{ .Date }}
+  - id: forge-api
+    main: ./cmd/forge-api
+    binary: forge-api
+    env: [CGO_ENABLED=0]
+    goos: [linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w
+      - -X github.com/showmino/forge/internal/version.Version={{ .Version }}
+      - -X github.com/showmino/forge/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/showmino/forge/internal/version.Date={{ .Date }}
+
+archives:
+  - id: forge
+    ids: [forge]
+    name_template: "forge_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [README.md, LICENSE*]
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args: [sign-blob, "--bundle=${signature}", "${artifact}", "--yes"]
+    artifacts: checksum
+
+dockers_v2:
+  - ids: [forge-api]
+    images: ["ghcr.io/showmino/forge-api"]
+    tags: ["{{ .Version }}", latest]
+    dockerfile: build/forge-api.Dockerfile
+    platforms: [linux/amd64, linux/arm64]
+    labels:
+      org.opencontainers.image.source: https://github.com/showmino/forge
+      org.opencontainers.image.version: "{{ .Version }}"
+
+homebrew_casks:
+  - name: forge
+    ids: [forge]
+    repository:
+      owner: showmino
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/showmino/forge
+    description: CLI for the Forge internal developer platform
+
+changelog:
+  use: github
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+release:
+  draft: false
+  prerelease: auto

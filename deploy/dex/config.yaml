@@ -1,0 +1,42 @@
+# Dex for local development. Start it with 'make dex' (docker compose), then
+# run the API with 'make api'. Log in as admin@example.com / password.
+#
+# The issuer must be the same URL for the CLI (on your machine) and the API,
+# which is why both run on localhost rather than inside one compose network.
+issuer: http://localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  grantTypes:
+    - authorization_code
+    - refresh_token
+    - urn:ietf:params:oauth:grant-type:device_code
+  skipApprovalScreen: true
+
+expiry:
+  idTokens: 1h
+  refreshTokens:
+    validIfNotUsedFor: 168h
+
+staticClients:
+  # Public client: the CLI cannot keep a secret. The device flow's callback is
+  # served by Dex itself.
+  - id: forge-cli
+    name: Forge CLI
+    public: true
+    redirectURIs:
+      - /device/callback
+      - http://127.0.0.1:8085/callback
+
+enablePasswordDB: true
+staticPasswords:
+  - email: admin@example.com
+    # bcrypt of "password"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: admin
+    userID: 08a8684b-db88-4b73-90a9-3cd1661f5466

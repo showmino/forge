@@ -1,0 +1,121 @@
+# Forge
+
+Forge is an internal developer platform. This repo holds the `forge` CLI, the
+Forge API (`forge-api`) and the Protobuf contract they share.
+
+**Status: Phase 1.** The service catalog, contexts, OIDC login and the API
+skeleton work. Templates, environments, deploys and resources come in later
+phases (see the design doc).
+
+```
+cmd/forge/          CLI entry point; maps errors to exit codes
+cmd/forge-api/      API server entry point
+internal/cli/       command tree, one file per noun
+internal/config/    layered config and kubeconfig-style contexts
+internal/auth/      OIDC device flow, keyring storage, token refresh
+internal/output/    table, json, yaml and name printers (golden-tested)
+internal/manifest/  forge.yaml schema and validation
+internal/server/    API handlers: catalog (in memory), auth, OIDC verification
+pkg/client/         Connect client wrapper: auth, retries, request IDs, version headers
+proto/forge/v1/     API contract
+gen/                buf-generated code (committed; CI checks it is current)
+deploy/dex/         Dex for local development
+deploy/k3s/         Dex + forge-api manifests for k3s
+```
+
+## Quick start (no identity provider)
+
+```sh
+make build
+make api-dev                       # forge-api on :8080, accepts the token "dev"
+
+# in another shell
+export FORGE_TOKEN=dev
+bin/forge context set local --api http://localhost:8080 --use
+bin/forge service register payments --team billing --owner you@example.com --lifecycle production
+bin/forge service list
+bin/forge service get payments -o yaml
+bin/forge doctor
+```
+
+## Local login with Dex
+
+```sh
+make dex                           # Dex on :5556 (docker compose)
+make api                           # forge-api verifying Dex ID tokens
+
+unset FORGE_TOKEN
+bin/forge context set local --api http://localhost:8080 --use
+bin/forge auth login               # open the URL, log in as admin@example.com / password
+bin/forge auth status
+```
+
+The CLI asks the API which issuer and client ID to use (`AuthService.GetServerInfo`),
+runs the OIDC device flow, and stores the ID and refresh tokens in the OS
+keychain (a 0600 file on headless Linux). The API verifies ID tokens with the
+CLI's client ID as audience.
+
+## On k3s
+
+```sh
+make image
+docker save forge-api:dev | sudo k3s ctr images import -
+deploy/k3s/render.sh <node-ip>.nip.io | kubectl apply -f -
+
+forge context set k3s --api http://forge.<node-ip>.nip.io --use
+forge auth login
+```
+
+Both the CLI and the forge-api pod must reach Dex at the same issuer URL
+(`http://dex.<node-ip>.nip.io/dex`), which is why the manifests route Dex
+through the Traefik ingress. Change the static password in the ConfigMap
+before sharing the cluster. Phase 1 serves plain HTTP; add TLS (cert-manager)
+before real use.
+
+## Using the CLI
+
+Commands follow `forge <noun> <verb>`:
+
+| Group | Verbs |
+| --- | --- |
+| `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `delete` |
+| `context` | `list`, `use`, `current`, `set` |
+| `auth` | `login`, `logout`, `status`, `token` |
+| utilities | `init`, `doctor`, `version`, `completion` |
+
+Every command takes `-o table|json|yaml|name`. JSON is the API resource
+itself. Settings resolve flags > `FORGE_*` env > `forge.yaml` > user config >
+defaults. Inside a repo with a `forge.yaml` (`forge init --team <team>`),
+service commands default to that service.
+
+Exit codes: 0 ok, 1 unexpected, 2 usage, 3 not found, 4 not authenticated,
+5 permission denied, 6 conflict, 7 operation failed, 8 timed out.
+
+## The API
+
+One Protobuf contract served with [ConnectRPC](https://connectrpc.com): gRPC,
+gRPC-Web and plain JSON over HTTP/1.1 from the same handlers.
+
+```sh
+curl -s localhost:8080/forge.v1.AuthService/GetServerInfo -H 'Content-Type: application/json' -d '{}'
+curl -s localhost:8080/forge.v1.ServiceCatalogService/ListServices \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $(forge auth token)" -d '{}'
+```
+
+## Development
+
+```sh
+make tools        # buf, protoc-gen-go, protoc-gen-connect-go
+make generate     # after editing proto/
+make test lint
+make update-golden
+```
+
+CI runs tests with `-race`, golangci-lint, govulncheck, `buf lint`,
+`buf breaking` against the base branch, a check that `gen/` is current, and
+`goreleaser check`. Tagging `v*` releases binaries for Linux, macOS and Windows
+(amd64, arm64) to GitHub Releases and a Homebrew tap, with checksums, cosign
+signatures and SBOMs, plus a `ghcr.io/showmino/forge-api` image.
+
+Releases need a `HOMEBREW_TAP_GITHUB_TOKEN` secret with write access to
+`showmino/homebrew-tap`.

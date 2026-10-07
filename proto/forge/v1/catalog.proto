@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+// ServiceCatalogService manages the catalog of services known to Forge.
+// Resource names follow AIP style: "services/{service}".
+service ServiceCatalogService {
+  // ListServices returns services, optionally filtered by owning team.
+  rpc ListServices(ListServicesRequest) returns (ListServicesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetService returns one service by name.
+  rpc GetService(GetServiceRequest) returns (GetServiceResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // RegisterService adds a service to the catalog.
+  rpc RegisterService(RegisterServiceRequest) returns (RegisterServiceResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
+  // UpdateService changes the fields named in update_mask.
+  rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse) {}
+
+  // DeleteService removes a service from the catalog.
+  rpc DeleteService(DeleteServiceRequest) returns (DeleteServiceResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+// Lifecycle is where a service is in its life.
+enum Lifecycle {
+  LIFECYCLE_UNSPECIFIED = 0;
+  LIFECYCLE_EXPERIMENTAL = 1;
+  LIFECYCLE_PRODUCTION = 2;
+  LIFECYCLE_DEPRECATED = 3;
+}
+
+// Service is one entry in the catalog.
+message Service {
+  // Resource name, "services/{service}". Output only on register: derived from service_id.
+  string name = 1;
+  // Human-friendly name.
+  string display_name = 2;
+  // Team that owns the service.
+  string owner_team = 3;
+  // Individual owners (emails or handles).
+  repeated string owners = 4;
+  Lifecycle lifecycle = 5;
+  // Source repository URL.
+  string repo_url = 6;
+  // Resource names of services this one depends on.
+  repeated string dependencies = 7;
+  // Free-form labels used for filtering.
+  map<string, string> labels = 8;
+  // Output only.
+  google.protobuf.Timestamp create_time = 9;
+  // Output only.
+  google.protobuf.Timestamp update_time = 10;
+  // Opaque version for optimistic concurrency. Output only, echoed back on update and delete.
+  string etag = 11;
+}
+
+message ListServicesRequest {
+  // Maximum number of services to return. The server caps it at 500; 0 means 50.
+  int32 page_size = 1;
+  string page_token = 2;
+  // Only return services owned by this team.
+  string owner_team = 3;
+}
+
+message ListServicesResponse {
+  repeated Service services = 1;
+  string next_page_token = 2;
+}
+
+message GetServiceRequest {
+  // "services/{service}"
+  string name = 1;
+}
+
+message GetServiceResponse {
+  Service service = 1;
+}
+
+message RegisterServiceRequest {
+  // The short id, which becomes "services/{service_id}". Lowercase DNS label, 1-63 characters.
+  string service_id = 1;
+  Service service = 2;
+  // Client-generated idempotency key. A retry with the same key returns the first result.
+  string request_id = 3;
+  // Validate only; do not create.
+  bool validate_only = 4;
+}
+
+message RegisterServiceResponse {
+  Service service = 1;
+}
+
+message UpdateServiceRequest {
+  // service.name selects the service to update.
+  Service service = 1;
+  google.protobuf.FieldMask update_mask = 2;
+  string request_id = 3;
+  bool validate_only = 4;
+}
+
+message UpdateServiceResponse {
+  Service service = 1;
+}
+
+message DeleteServiceRequest {
+  string name = 1;
+  // If set, the delete fails with FAILED_PRECONDITION unless it matches the current etag.
+  string etag = 2;
+  bool validate_only = 3;
+}
+
+message DeleteServiceResponse {}
