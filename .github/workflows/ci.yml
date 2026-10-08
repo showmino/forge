@@ -29,9 +29,9 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.5.0
+          version: v2.14.0
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   proto:
     runs-on: ubuntu-latest
@@ -49,7 +49,9 @@ jobs:
       - run: buf lint
       - name: buf breaking
         if: github.event_name == 'pull_request'
-        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=${{ github.base_ref }}"
+        # Compare with the base branch from this checkout's own history
+        # (fetch-depth: 0): cloning the private repo over HTTPS fails.
+        run: buf breaking --against ".git#ref=refs/remotes/origin/${{ github.base_ref }}"
       - name: generated code is up to date
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.5

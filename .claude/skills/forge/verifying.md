@@ -6,14 +6,13 @@ Run from the repo root. `$GO` means `PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
 ## 1. Build, test, lint (CI parity)
 
 ```sh
-$GO GOTOOLCHAIN=go1.24.13 make build test lint
+$GO make build test lint
 ```
 
-CI resolves Go from `go 1.24` in go.mod and pins golangci-lint **v2.5.0**
-(`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0`).
-With a newer Go you get `typecheck ... export data version 4 is greater than
-maximum supported version 2`; with a newer golangci-lint you get gosec G117 hits
-on `internal/auth/store.go` that CI does not report. Neither is a code problem.
+CI resolves Go from `go 1.27` in go.mod and pins golangci-lint **v2.14.0**
+(`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0`) and
+govulncheck v1.8.0. Use the same versions locally; an older golangci-lint fails
+with `export data version ... greater than maximum supported` on Go 1.27.
 
 ## 2. Local login against Dex
 

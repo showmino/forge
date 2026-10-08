@@ -40,7 +40,7 @@ Adding an RPC: edit proto, then `make generate`, then the handler in `internal/s
 
 ```sh
 export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH   # Go is not on the system PATH
-GOTOOLCHAIN=go1.24.13 make build test lint           # CI parity (golangci-lint v2.5.0)
+make build test lint                                 # Go 1.27, golangci-lint v2.14.0, as CI
 make generate | make update-golden | make api-dev     # api-dev: token "dev", no IdP
 ```
 
@@ -57,7 +57,7 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
 
 ## Common mistakes
 
-- Running `make lint` with Go 1.25+ or the latest golangci-lint, then "fixing" the typecheck or G117 errors CI never reports.
+- Running lint with an older golangci-lint than CI's v2.14.0 (it cannot read Go 1.27 export data), or "fixing" the two `G117` nolints in `internal/auth/store.go`: storing the refresh token is intended; encrypting the file fallback is the real follow-up.
 - Following the README's `k3s ctr images import` path on the demo cluster: the dev machine is not a node.
 - Exposing Dex through Istio `*.showmino.com`: it is public, and Dex still has the demo password.
 - Adding a package-level variable or calling `os.Exit` outside `main`.
