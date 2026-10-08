@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package forge.v1;
+
+// TemplateService lists the service templates of a release of the template
+// repo. Resource names follow AIP style: "templates/{template}".
+service TemplateService {
+  // ListTemplates returns the templates of one release, the newest by default.
+  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetTemplate returns one template of one release, the newest by default.
+  rpc GetTemplate(GetTemplateRequest) returns (GetTemplateResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Template is a service template at one version.
+message Template {
+  // "templates/{template}".
+  string name = 1;
+  // Release tag, for example "v1.4.0"; "dev" for a local template directory.
+  string version = 2;
+  string title = 3;
+  string description = 4;
+  repeated string tags = 5;
+  // Team that owns the template.
+  string owner = 6;
+  repeated TemplateParameter parameters = 7;
+}
+
+// TemplateParameter is one typed input of a template.
+message TemplateParameter {
+  // Type is the parameter's type.
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_STRING = 1;
+    TYPE_INT = 2;
+    TYPE_BOOL = 3;
+    TYPE_ENUM = 4;
+  }
+  string name = 1;
+  Type type = 2;
+  // True when the parameter has no default.
+  bool required = 3;
+  // The default as written in template.yaml; it may use built-in values.
+  string default_value = 4;
+  // RE2 pattern a string value must match.
+  string pattern = 5;
+  // Allowed values of an enum.
+  repeated string values = 6;
+  string description = 7;
+}
+
+message ListTemplatesRequest {
+  // Release tag; empty means the newest.
+  string version = 1;
+  // Only templates with this tag.
+  string tag = 2;
+}
+
+message ListTemplatesResponse {
+  repeated Template templates = 1;
+}
+
+message GetTemplateRequest {
+  // "templates/{template}".
+  string name = 1;
+  // Release tag; empty means the newest.
+  string version = 2;
+}
+
+message GetTemplateResponse {
+  Template template = 1;
+}

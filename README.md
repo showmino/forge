@@ -97,7 +97,7 @@ Commands follow `forge <noun> <verb>`:
 | Group | Verbs |
 | --- | --- |
 | `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `delete` |
-| `template` | `lint` (Phase 2 adds `list`, `get` and `forge create`) |
+| `template` | `list`, `get`, `lint` (Phase 2 adds `forge create`) |
 | `context` | `list`, `use`, `current`, `set` |
 | `auth` | `login`, `logout`, `status`, `token` |
 | utilities | `init`, `doctor`, `version`, `completion` |
@@ -115,7 +115,14 @@ Exit codes: 0 ok, 1 unexpected, 2 usage, 3 not found, 4 not authenticated,
 Templates live in [`showmino/forge-templates`](https://github.com/showmino/forge-templates):
 one directory per template with a `template.yaml` (typed parameters) and a
 `skeleton/` rendered with Go `text/template`, released by repo-wide semver
-tags. `forge template lint [dir]` checks them locally, with no API or login;
+tags.
+
+`forge template list` and `forge template get <name>[@version]` show the
+templates of a release (the newest by default). forge-api reads them from
+GitHub as the Forge GitHub App (`--github-app-id`, `--github-app-key-file`,
+`--github-org`), or from a local checkout with `--templates-dir` (served as
+version `dev`).
+`forge template lint [dir]` checks templates locally, with no API or login;
 see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
 
 ## The API

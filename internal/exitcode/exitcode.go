@@ -91,6 +91,11 @@ func fromConnect(ce *connect.Error) *Error {
 	case connect.CodeDeadlineExceeded:
 		return &Error{Code: Timeout, Err: msg}
 	case connect.CodeUnavailable:
+		// The API stamps every response with its version (pkg/client.HeaderServerVersion);
+		// with it, the API answered and something it depends on is down.
+		if ce.Meta().Get("Forge-Server-Version") != "" {
+			return &Error{Code: Unexpected, Err: msg, Hint: "a service the Forge API depends on is unavailable; retry later"}
+		}
 		return &Error{Code: Unexpected, Err: msg, Hint: "the Forge API is unreachable; check 'forge doctor'"}
 	default:
 		return &Error{Code: Unexpected, Err: msg}

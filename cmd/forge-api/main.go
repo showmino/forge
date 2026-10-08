@@ -45,6 +45,12 @@ func run() error {
 		insecureDev  = flag.Bool("insecure-dev-token", false, "DEVELOPMENT ONLY: accept the token 'dev' as user dev@example.com instead of verifying OIDC tokens")
 		logJSON      = flag.Bool("log-json", env("FORGE_LOG_FORMAT", "") == "json", "log as JSON")
 		printVersion = flag.Bool("version", false, "print the version and exit")
+
+		templatesDir  = flag.String("templates-dir", env("FORGE_TEMPLATES_DIR", ""), "serve templates from this local checkout as version 'dev' (development)")
+		templatesRepo = flag.String("templates-repo", env("FORGE_TEMPLATES_REPO", "showmino/forge-templates"), "GitHub repo (owner/name) whose semver tags are template releases")
+		appID         = flag.String("github-app-id", env("FORGE_GITHUB_APP_ID", ""), "GitHub App ID forge-api acts as")
+		appKey        = flag.String("github-app-key-file", env("FORGE_GITHUB_APP_KEY_FILE", ""), "file with the GitHub App's private key (PEM)")
+		githubOrg     = flag.String("github-org", env("FORGE_GITHUB_ORG", "showmino"), "GitHub org the App is installed on")
 	)
 	flag.Parse()
 	if *printVersion {
@@ -90,7 +96,19 @@ func run() error {
 			groups = append(groups, g)
 		}
 	}
+	app, err := githubApp(*appID, *appKey, *githubOrg)
+	if err != nil {
+		return err
+	}
+	templates, err := templateSource(*templatesDir, *templatesRepo, app)
+	if err != nil {
+		return err
+	}
+	if templates == nil {
+		log.Info("templates are not configured; set --templates-dir, or --github-app-id and --github-app-key-file")
+	}
 	h, err := server.New(server.Options{
+		Templates:        templates,
 		MinClientVersion: *minClient,
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID},
 		Authenticator:    authn,

@@ -33,7 +33,9 @@ type Options struct {
 	Authenticator    Authenticator
 	Authorizer       Authorizer
 	Catalog          *Catalog
-	Logger           *slog.Logger
+	// Templates serves TemplateService; nil answers FAILED_PRECONDITION.
+	Templates TemplateSource
+	Logger    *slog.Logger
 }
 
 // New returns the API's HTTP handler.
@@ -64,6 +66,7 @@ func New(o Options) (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(o.Catalog, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
+	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger}, opts))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("ok\n"))

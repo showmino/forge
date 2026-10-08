@@ -1,0 +1,29 @@
+{
+  "name": "templates/svc",
+  "version": "dev",
+  "title": "Go service",
+  "description": "Go service fixture",
+  "tags": [
+    "go",
+    "grpc"
+  ],
+  "owner": "platform",
+  "parameters": [
+    {
+      "name": "port",
+      "type": "TYPE_INT",
+      "defaultValue": "8080",
+      "description": "Port the server listens on"
+    },
+    {
+      "name": "tier",
+      "type": "TYPE_ENUM",
+      "required": true,
+      "values": [
+        "gold",
+        "silver"
+      ],
+      "description": "Support tier"
+    }
+  ]
+}

@@ -28,6 +28,9 @@ type harness struct {
 	stdin  string
 	tty    bool
 	issuer string
+
+	authn     server.Authenticator
+	templates server.TemplateSource
 }
 
 const (
@@ -51,6 +54,7 @@ func newHarness(t *testing.T) *harness {
 }
 
 func (h *harness) startAPI(authn server.Authenticator) {
+	h.authn = authn
 	if h.api != nil {
 		h.api.Close()
 	}
@@ -59,6 +63,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		OIDC:          server.OIDC{Issuer: h.issuer, ClientID: "forge-cli"},
 		Authenticator: authn,
 		Authorizer:    server.Authorizer{WriterGroups: []string{"platform"}},
+		Templates:     h.templates,
 	})
 	if err != nil {
 		h.t.Fatal(err)
@@ -68,6 +73,12 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		h.env["FORGE_API_URL"] = h.api.URL
 	}
 	h.t.Cleanup(h.api.Close)
+}
+
+// serveTemplates restarts the in-process API with templates from dir (version "dev").
+func (h *harness) serveTemplates(dir string) {
+	h.templates = server.DirSource{Dir: dir}
+	h.startAPI(h.authn)
 }
 
 type result struct {

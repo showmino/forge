@@ -1,0 +1,3 @@
+NAME   VERSION   TAGS       DESCRIPTION
+svc    dev       go, grpc   Go service fixture
+web    dev       node       Web fixture
