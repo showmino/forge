@@ -58,6 +58,17 @@ func (c *Catalog) has(name string) bool {
 	return ok
 }
 
+// get returns a copy of the service registered under name.
+func (c *Catalog) get(name string) (*forgev1.Service, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.services[name]
+	if !ok {
+		return nil, false
+	}
+	return cloneSvc(s), true
+}
+
 func (c *Catalog) ListServices(ctx context.Context, req *connect.Request[forgev1.ListServicesRequest]) (*connect.Response[forgev1.ListServicesResponse], error) {
 	if err := require(ctx, PermServicesRead); err != nil {
 		return nil, err
