@@ -107,8 +107,13 @@ func run() error {
 	if templates == nil {
 		log.Info("templates are not configured; set --templates-dir, or --github-app-id and --github-app-key-file")
 	}
+	if app == nil {
+		log.Info("creating services is off; set --github-app-id and --github-app-key-file")
+	}
 	h, err := server.New(server.Options{
 		Templates:        templates,
+		Repos:            repoHost(app),
+		GitHubOrg:        *githubOrg,
 		MinClientVersion: *minClient,
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID},
 		Authenticator:    authn,
