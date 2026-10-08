@@ -1427,7 +1427,7 @@ A real HTTP connection can't force a server-side watcher to fall behind, because
 - [ ] **Step 3: Run them to see them fail**
 
 Run: `go test ./internal/cli -run 'TestOpWatch'`
-Expected: build failure, `undefined: opName` (and `f.eventSink`).
+Expected: build failure, `undefined: opName`.
 
 - [ ] **Step 4: Implement**
 
