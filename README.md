@@ -146,6 +146,11 @@ without creating anything, and a failure after the repo exists deletes it again.
 `forge template lint [dir]` checks templates locally, with no API or login;
 see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
 
+`forge env create <name> --service <service>` runs the service's CI image for
+`--ref` (default `main`) in its own namespace with a URL, until `--ttl` (default
+24h) runs out; `forge env list / get / extend / destroy` manage them. forge-api
+serves them with `--previews` (see the k3s section).
+
 ## The API
 
 One Protobuf contract served with [ConnectRPC](https://connectrpc.com): gRPC,

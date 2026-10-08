@@ -65,7 +65,7 @@
 
 ### Task 0: Branch
 
-- [ ] **Step 1:** `cd /home/mino/code/forge && git branch --show-current`. Expected: `phase-3-m2` (created from `main` after milestone 1 merged). If it says `main`, run `git checkout -b phase-3-m2`.
+- [x] **Step 1:** `cd /home/mino/code/forge && git branch --show-current`. Expected: `phase-3-m2` (created from `main` after milestone 1 merged). If it says `main`, run `git checkout -b phase-3-m2`.
 
 ---
 
@@ -83,7 +83,7 @@
   - `forgev1connect.EnvironmentServiceHandler` and `NewEnvironmentServiceHandler`.
   - `client.Client.Environments forgev1connect.EnvironmentServiceClient`.
 
-- [ ] **Step 1: Write `proto/forge/v1/environment.proto`**
+- [x] **Step 1: Write `proto/forge/v1/environment.proto`**
 
 ```protobuf
 syntax = "proto3";
@@ -225,14 +225,14 @@ message DestroyEnvironmentResponse {
 }
 ```
 
-- [ ] **Step 2: Generate and lint**
+- [x] **Step 2: Generate and lint**
 
 Run: `export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH && make generate && buf lint && go build ./...`
 Expected: no `buf lint` output; `gen/forge/v1/environment.pb.go` and `gen/forge/v1/forgev1connect/environment.connect.go` exist.
 
-- [ ] **Step 3: Client.** In `pkg/client/client.go`, add the field `Environments forgev1connect.EnvironmentServiceClient` to `Client` after `Operations`. In `New`, add `Environments: forgev1connect.NewEnvironmentServiceClient(hc, baseURL, opts...),`, then `gofmt -w pkg/client/client.go`.
+- [x] **Step 3: Client.** In `pkg/client/client.go`, add the field `Environments forgev1connect.EnvironmentServiceClient` to `Client` after `Operations`. In `New`, add `Environments: forgev1connect.NewEnvironmentServiceClient(hc, baseURL, opts...),`, then `gofmt -w pkg/client/client.go`.
 
-- [ ] **Step 4: Gate and commit**
+- [x] **Step 4: Gate and commit**
 
 ```bash
 make build test lint
@@ -254,7 +254,7 @@ git commit -m "proto: EnvironmentService"
   - `func (m *Manifest) RunPort() int` (default 8080) and `func (m *Manifest) RunHealth() string` (default `/healthz`).
   - Constants `DefaultRunPort = 8080` and `DefaultRunHealth = "/healthz"`.
 
-- [ ] **Step 1: Write the failing test** (append to `internal/manifest/manifest_test.go`; it already imports `strings` and `testing`, otherwise add them):
+- [x] **Step 1: Write the failing test** (append to `internal/manifest/manifest_test.go`; it already imports `strings` and `testing`, otherwise add them):
 
 ```go
 func TestRun(t *testing.T) {
@@ -286,9 +286,9 @@ func TestRun(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** Run `go test ./internal/manifest -run TestRun`. Expected: build failure, `m.RunPort undefined`.
+- [x] **Step 2:** Run `go test ./internal/manifest -run TestRun`. Expected: build failure, `m.RunPort undefined`.
 
-- [ ] **Step 3: Implement.** In `internal/manifest/manifest.go`:
+- [x] **Step 3: Implement.** In `internal/manifest/manifest.go`:
   - Change the package comment's second sentence to: `Phase 1 covers the catalog fields; Phase 3 adds run, how a preview environment runs the service.`
   - Add `Run *Run \`yaml:"run,omitempty"\`` to `Manifest` after `Namespace`, with the comment `// Run says how preview environments run the service.`
   - Add:
@@ -340,9 +340,9 @@ func (m *Manifest) RunHealth() string {
 
   Add `"strings"` to the imports. A negative port is invalid, and 0 means "default". The test's `port: -1` case covers the negative branch.
 
-- [ ] **Step 4:** Run `go test ./internal/manifest ./internal/template ./internal/cli`. Expected: PASS. Template lint and `forge init` use the manifest; nothing else changes.
+- [x] **Step 4:** Run `go test ./internal/manifest ./internal/template ./internal/cli`. Expected: PASS. Template lint and `forge init` use the manifest; nothing else changes.
 
-- [ ] **Step 5:** `make build test lint`, then `git add internal/manifest && git commit -m "manifest: run settings for preview environments"`.
+- [x] **Step 5:** `make build test lint`, then `git add internal/manifest && git commit -m "manifest: run settings for preview environments"`.
 
 ---
 
@@ -360,7 +360,7 @@ func (m *Manifest) RunHealth() string {
   - `type WorkflowRun struct { Name, Status, Conclusion, HTMLURL string }` (JSON `name`, `status`, `conclusion`, `html_url`).
   - `func (c *Client) RunsFor(ctx context.Context, owner, repo, sha string) ([]WorkflowRun, error)`: newest first.
 
-- [ ] **Step 1: Write the failing test** `internal/github/commits_test.go`:
+- [x] **Step 1: Write the failing test** `internal/github/commits_test.go`:
 
 ```go
 package github
@@ -435,9 +435,9 @@ func TestResolveRefFileAtRunsFor(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./internal/github -run TestResolveRefFileAtRunsFor`. Expected: build failure, `c.ResolveRef undefined`.
+- [x] **Step 2:** `go test ./internal/github -run TestResolveRefFileAtRunsFor`. Expected: build failure, `c.ResolveRef undefined`.
 
-- [ ] **Step 3: Implement** `internal/github/commits.go`:
+- [x] **Step 3: Implement** `internal/github/commits.go`:
 
 ```go
 package github
@@ -520,9 +520,9 @@ func (c *Client) RunsFor(ctx context.Context, owner, repo, sha string) ([]Workfl
 
   Check `repoPath` in `repos.go`: it must return `/repos/<owner>/<name>` with escaped segments. If it does something else, build the path the same way the existing `RepoExists` does.
 
-- [ ] **Step 4:** `go test ./internal/github`. Expected: PASS.
+- [x] **Step 4:** `go test ./internal/github`. Expected: PASS.
 
-- [ ] **Step 5:** Update the package comment's second sentence in `github.go` to `App authentication is in app.go; repos.go creates repos and commits.go reads refs, files and CI runs.`. Then `make build test lint` and `git add internal/github && git commit -m "github: resolve refs, read files and CI runs"`.
+- [x] **Step 5:** Update the package comment's second sentence in `github.go` to `App authentication is in app.go; repos.go creates repos and commits.go reads refs, files and CI runs.`. Then `make build test lint` and `git add internal/github && git commit -m "github: resolve refs, read files and CI runs"`.
 
 ---
 
@@ -540,7 +540,7 @@ func (c *Client) RunsFor(ctx context.Context, owner, repo, sha string) ([]Workfl
 
   ghcr.io uses the registry token flow. `GET <base>/token?service=<host>&scope=repository:<repo>:pull`, with basic auth, returns `{"token": "..."}`. Then `HEAD <base>/v2/<repo>/manifests/<tag>`, with `Authorization: Bearer <token>`, answers 200 when the image exists and 404 when it doesn't.
 
-- [ ] **Step 1: Write the failing test** `internal/registry/registry_test.go`:
+- [x] **Step 1: Write the failing test** `internal/registry/registry_test.go`:
 
 ```go
 package registry
@@ -626,9 +626,9 @@ func TestExists(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./internal/registry`. Expected: build failure (no package).
+- [x] **Step 2:** `go test ./internal/registry`. Expected: build failure (no package).
 
-- [ ] **Step 3: Implement** `internal/registry/registry.go`:
+- [x] **Step 3: Implement** `internal/registry/registry.go`:
 
 ```go
 // Package registry checks whether an image exists in an OCI registry that
@@ -786,9 +786,9 @@ func CredsFromDockerConfig(data []byte, host string) (string, string, error) {
 }
 ```
 
-- [ ] **Step 4:** `go test -race ./internal/registry`. Expected: PASS.
+- [x] **Step 4:** `go test -race ./internal/registry`. Expected: PASS.
 
-- [ ] **Step 5:** `make build test lint`, then `git add internal/registry && git commit -m "registry: check that an image exists"`.
+- [x] **Step 5:** `make build test lint`, then `git add internal/registry && git commit -m "registry: check that an image exists"`.
 
 ---
 
@@ -819,14 +819,14 @@ func CredsFromDockerConfig(data []byte, host string) (string, string, error) {
     - `Deploy(ctx, id string, w Workload) error`, `Status(ctx, id, service string) (ready bool, problem string, err error)`.
     - `DeleteEnv(ctx, id) error`, `EnvGone(ctx, id) (bool, error)`, `PullSecretData(ctx) ([]byte, error)`.
 
-- [ ] **Step 1: Add the dependencies**
+- [x] **Step 1: Add the dependencies**
 
 ```bash
 export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
 go get k8s.io/client-go@v0.35.9 k8s.io/api@v0.35.9 k8s.io/apimachinery@v0.35.9
 ```
 
-- [ ] **Step 2: Write `internal/envtest/envtest.go`**
+- [x] **Step 2: Write `internal/envtest/envtest.go`**
 
 ```go
 // Package envtest holds fakes for preview environment tests: a Kubernetes
@@ -968,7 +968,7 @@ func MarkAvailable(ctx context.Context, kube kubernetes.Interface, skip func(nam
 }
 ```
 
-- [ ] **Step 3: Write the failing test** `internal/server/env_cluster_test.go`:
+- [x] **Step 3: Write the failing test** `internal/server/env_cluster_test.go`:
 
 ```go
 package server
@@ -1133,9 +1133,9 @@ func TestGuardIgnoresForeignNamespaces(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4:** `go test ./internal/server -run 'TestClusterLifecycle|TestGuardIgnores'`. Expected: build failure, `undefined: Cluster`.
+- [x] **Step 4:** `go test ./internal/server -run 'TestClusterLifecycle|TestGuardIgnores'`. Expected: build failure, `undefined: Cluster`.
 
-- [ ] **Step 5: Implement** `internal/server/env_cluster.go`:
+- [x] **Step 5: Implement** `internal/server/env_cluster.go`:
 
 ```go
 package server
@@ -1478,9 +1478,9 @@ func clip(s string) string {
 
 `Status`'s `clip("ImagePullBackOff: pull access denied")` returns the text unchanged. When a waiting reason has no message, the result would end in `": "`; `TrimSuffix(TrimSpace(...), ":")` removes it, so the output is `ImagePullBackOff`.
 
-- [ ] **Step 6:** `go mod tidy && go test -race ./internal/server -run 'TestClusterLifecycle|TestGuardIgnores'`. Expected: PASS.
+- [x] **Step 6:** `go mod tidy && go test -race ./internal/server -run 'TestClusterLifecycle|TestGuardIgnores'`. Expected: PASS.
 
-- [ ] **Step 7:** `make build test lint`. If golangci-lint or govulncheck (CI) flags the new k8s modules, report it rather than changing versions. Then `git add go.mod go.sum internal/envtest internal/server/env_cluster.go internal/server/env_cluster_test.go && git commit -m "server: Kubernetes layer for preview environments"`.
+- [x] **Step 7:** `make build test lint`. If golangci-lint or govulncheck (CI) flags the new k8s modules, report it rather than changing versions. Then `git add go.mod go.sum internal/envtest internal/server/env_cluster.go internal/server/env_cluster_test.go && git commit -m "server: Kubernetes layer for preview environments"`.
 
 ---
 
@@ -1507,7 +1507,7 @@ func clip(s string) string {
   - `(*Catalog).get(name string) (*forgev1.Service, bool)`.
 - Get, List, Extend and Destroy return `CodeUnimplemented` in this task; Task 7 replaces them.
 
-- [ ] **Step 1: Write the failing tests** `internal/server/environments_test.go`:
+- [x] **Step 1: Write the failing tests** `internal/server/environments_test.go`:
 
 ```go
 package server
@@ -1931,9 +1931,9 @@ func TestCancelCreate(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./internal/server -run 'TestCreate|TestCancelCreate'`. Expected: build failure, `undefined: EnvOptions`.
+- [x] **Step 2:** `go test ./internal/server -run 'TestCreate|TestCancelCreate'`. Expected: build failure, `undefined: EnvOptions`.
 
-- [ ] **Step 3: Add `get` to the catalog** (`internal/server/catalog.go`, after `has`):
+- [x] **Step 3: Add `get` to the catalog** (`internal/server/catalog.go`, after `has`):
 
 ```go
 // get returns a copy of the service registered under name.
@@ -1948,7 +1948,7 @@ func (c *Catalog) get(name string) (*forgev1.Service, bool) {
 }
 ```
 
-- [ ] **Step 4: Write `internal/server/environments.go`**
+- [x] **Step 4: Write `internal/server/environments.go`**
 
 ```go
 package server
@@ -2182,7 +2182,7 @@ func (e *Environments) DestroyEnvironment(context.Context, *connect.Request[forg
 }
 ```
 
-- [ ] **Step 5: Write `internal/server/env_create.go`**
+- [x] **Step 5: Write `internal/server/env_create.go`**
 
 ```go
 package server
@@ -2494,7 +2494,7 @@ func (e *Environments) removeNamespace(ctx context.Context, id string) error {
 
   `undo` returns `ctx.Err()` (a `context.Canceled`) on success, and the store maps that to `cancelled` because the work's context was cancelled.
 
-- [ ] **Step 6: Wire into `server.New`.** In `internal/server/server.go`, add to `Options`, after `Operations`:
+- [x] **Step 6: Wire into `server.New`.** In `internal/server/server.go`, add to `Options`, after `Operations`:
 
 ```go
 	// Environments serves EnvironmentService; nil answers FAILED_PRECONDITION.
@@ -2510,9 +2510,9 @@ and after the OperationService handler:
 
   Passing a nil `*Environments` is intended: its methods check `e.ready()` first.
 
-- [ ] **Step 7:** `go test -race -count=3 ./internal/server -run 'TestCreate|TestCancelCreate'`. Expected: PASS three times.
+- [x] **Step 7:** `go test -race -count=3 ./internal/server -run 'TestCreate|TestCancelCreate'`. Expected: PASS three times.
 
-- [ ] **Step 8:** `make build test lint`, then `git add internal/server && git commit -m "server: create preview environments"`.
+- [x] **Step 8:** `make build test lint`, then `git add internal/server && git commit -m "server: create preview environments"`.
 
 ---
 
@@ -2530,7 +2530,7 @@ and after the OperationService handler:
   - `func (e *Environments) startDestroy(ctx context.Context, id, creator string) *forgev1.Operation`.
   - `expiry(ns *corev1.Namespace) time.Time`.
 
-- [ ] **Step 1: Write the failing tests** `internal/server/environments_more_test.go`:
+- [x] **Step 1: Write the failing tests** `internal/server/environments_more_test.go`:
 
 ```go
 package server
@@ -2777,9 +2777,9 @@ func TestReaper(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./internal/server -run 'TestGetListExtend|TestGetReports|TestDestroy|TestGuardOnRPCs|TestReaper'`. Expected: FAIL. `Unimplemented` errors, and `undefined: expiry`.
+- [x] **Step 2:** `go test ./internal/server -run 'TestGetListExtend|TestGetReports|TestDestroy|TestGuardOnRPCs|TestReaper'`. Expected: FAIL. `Unimplemented` errors, and `undefined: expiry`.
 
-- [ ] **Step 3: Replace the four methods in `environments.go`** (delete the `Unimplemented` versions):
+- [x] **Step 3: Replace the four methods in `environments.go`** (delete the `Unimplemented` versions):
 
 ```go
 func (e *Environments) GetEnvironment(ctx context.Context, req *connect.Request[forgev1.GetEnvironmentRequest]) (*connect.Response[forgev1.GetEnvironmentResponse], error) {
@@ -2893,7 +2893,7 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 
   Add `"slices"` to `environments.go`'s imports.
 
-- [ ] **Step 4: Write `internal/server/env_destroy.go`**
+- [x] **Step 4: Write `internal/server/env_destroy.go`**
 
 ```go
 package server
@@ -2994,9 +2994,9 @@ func (e *Environments) RunReaper(ctx context.Context, every time.Duration) {
 
   `startDestroy` holds `e.mu` while it calls `Operations.Start`. That is safe because `Start` never calls back into `Environments`. `CreateEnvironment` also holds `e.mu`, so a destroy and a create of the same environment can't interleave their checks.
 
-- [ ] **Step 5:** `go test -race -count=3 ./internal/server`. Expected: PASS, every server test included.
+- [x] **Step 5:** `go test -race -count=3 ./internal/server`. Expected: PASS, every server test included.
 
-- [ ] **Step 6:** `make build test lint`, then `git add internal/server && git commit -m "server: get, list, extend and destroy environments; the reaper"`.
+- [x] **Step 6:** `make build test lint`, then `git add internal/server && git commit -m "server: get, list, extend and destroy environments; the reaper"`.
 
 ---
 
@@ -3014,7 +3014,7 @@ func (e *Environments) RunReaper(ctx context.Context, every time.Duration) {
   - `func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *server.Operations, org string, log *slog.Logger, cluster func() (kubernetes.Interface, dynamic.Interface, error)) (*server.Environments, error)`.
   - `func kubeClients() (kubernetes.Interface, dynamic.Interface, error)`.
 
-- [ ] **Step 1: Write the failing test** `cmd/forge-api/previews_test.go`:
+- [x] **Step 1: Write the failing test** `cmd/forge-api/previews_test.go`:
 
 ```go
 package main
@@ -3075,9 +3075,9 @@ func TestPreviews(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./cmd/forge-api -run TestPreviews`. Expected: build failure, `undefined: previewFlags`.
+- [x] **Step 2:** `go test ./cmd/forge-api -run TestPreviews`. Expected: build failure, `undefined: previewFlags`.
 
-- [ ] **Step 3: Write `cmd/forge-api/previews.go`**
+- [x] **Step 3: Write `cmd/forge-api/previews.go`**
 
 ```go
 package main
@@ -3191,7 +3191,7 @@ func kubeClients() (kubernetes.Interface, dynamic.Interface, error) {
 }
 ```
 
-- [ ] **Step 4: Wire into `main.go`.**
+- [x] **Step 4: Wire into `main.go`.**
   - Add to the `var (...)` flag block:
 
 ```go
@@ -3238,9 +3238,9 @@ func envInt(key string, def int) int {
   and add `Catalog: catalog, Operations: ops, Environments: envs,` to the `server.Options` literal.
   - Update the command comment to: `Command forge-api is the Forge API server: the service catalog (in memory), templates and new services, operations and preview environments.`
 
-- [ ] **Step 5:** `go mod tidy && go test ./cmd/forge-api && go build ./...`. Expected: PASS. `clientcmd` adds dependencies; let `go mod tidy` record them.
+- [x] **Step 5:** `go mod tidy && go test ./cmd/forge-api && go build ./...`. Expected: PASS. `clientcmd` adds dependencies; let `go mod tidy` record them.
 
-- [ ] **Step 6:** `make build test lint`, then `git add go.mod go.sum cmd/forge-api && git commit -m "forge-api: --previews settings and the reaper"`.
+- [x] **Step 6:** `make build test lint`, then `git add go.mod go.sum cmd/forge-api && git commit -m "forge-api: --previews settings and the reaper"`.
 
 ---
 
@@ -3275,11 +3275,11 @@ func envInt(key string, def int) int {
   - **Confirmation:** without `--yes` and without a terminal, exit 2 (`confirmDestructive("destroy", ...)`).
   - **Default:** watches, then prints `environments/<n> destroyed`. `--wait=false` prints the operation name.
 
-- [ ] **Step 1: Harness support.** In `internal/cli/cli_test.go`:
+- [x] **Step 1: Harness support.** In `internal/cli/cli_test.go`:
   - Add the field `envs *server.Environments` to `harness`.
   - Add `Catalog: h.catalog, Environments: h.envs,` to `startAPI`'s `server.Options`, along with a field `catalog *server.Catalog` set in `newHarness` to `server.NewCatalog(nil)`. Before, `server.New` created its own catalog; the harness now owns one so the environment service can share it. The catalog therefore survives `startAPI` restarts (for example `serveTemplates`). Run the whole CLI suite after this change; if an existing test relied on a restart emptying the catalog, give that test a fresh `server.NewCatalog(nil)` before the restart, not a different design.
 
-- [ ] **Step 2: Write the failing tests** `internal/cli/env_test.go`:
+- [x] **Step 2: Write the failing tests** `internal/cli/env_test.go`:
 
 ```go
 package cli
@@ -3452,9 +3452,9 @@ creator     ana
 
   If the table writer's spacing differs, regenerate with `go test ./internal/cli -run TestEnvLifecycle -update` and check the diff is spacing only.
 
-- [ ] **Step 3:** `go test ./internal/cli -run 'TestEnv|TestUntil'`. Expected: FAIL (`unknown command "env"`, and `undefined: until`).
+- [x] **Step 3:** `go test ./internal/cli -run 'TestEnv|TestUntil'`. Expected: FAIL (`unknown command "env"`, and `undefined: until`).
 
-- [ ] **Step 4: Write `internal/cli/env.go`**
+- [x] **Step 4: Write `internal/cli/env.go`**
 
 ```go
 package cli
@@ -3840,11 +3840,11 @@ it is cancelled first. Asks for the name unless --yes.`,
 - **Extend's `(in 47h)`:** the test expects 47h because `until` rounds down: 48h minus a few milliseconds of test time reads `47h`. That holds when `age` floors hours, which milestone 1's `age` does (`int(d/time.Hour)`). If it does not, adjust the test's expectation to what `age` gives, not the code.
 - **`printStarted`:** `--wait=false` prints the bare operation name in table format, so scripts can capture it, rather than `printOperation`'s `operations/<id> running`.
 
-- [ ] **Step 5: Register the command.** In `internal/cli/root.go`, change the core list to `newServiceCmd(f), newTemplateCmd(f), newCreateCmd(f), newEnvCmd(f), newOpCmd(f)`.
+- [x] **Step 5: Register the command.** In `internal/cli/root.go`, change the core list to `newServiceCmd(f), newTemplateCmd(f), newCreateCmd(f), newEnvCmd(f), newOpCmd(f)`.
 
-- [ ] **Step 6:** `go test -race ./internal/cli`. Expected: PASS, every CLI test included.
+- [x] **Step 6:** `go test -race ./internal/cli`. Expected: PASS, every CLI test included.
 
-- [ ] **Step 7:** `make build test lint`, then `git add internal/cli && git commit -m "cli: forge env create, list, get, extend and destroy"`.
+- [x] **Step 7:** `make build test lint`, then `git add internal/cli && git commit -m "cli: forge env create, list, get, extend and destroy"`.
 
 ---
 
@@ -3853,7 +3853,7 @@ it is cancelled first. Asks for the name unless --yes.`,
 **Files:**
 - Modify: `.claude/skills/forge/scripts/cli-smoke.sh`, `.claude/skills/forge/SKILL.md`, `README.md`, `docs/plans/2026-10-08-phase-3-m2-environments.md` (tick the boxes)
 
-- [ ] **Step 1: Smoke cases.** In `cli-smoke.sh`, after the `#### operations` block, add these cases. They need previews on the API and no side effects. The service `payments` is registered at the top of the script, but without a repo URL.
+- [x] **Step 1: Smoke cases.** In `cli-smoke.sh`, after the `#### operations` block, add these cases. They need previews on the API and no side effects. The service `payments` is registered at the top of the script, but without a repo URL.
 
 ```bash
 echo; echo "#### environments (no side effects)"
@@ -3869,7 +3869,7 @@ t 3 "env destroy missing" -- f env destroy nope-env --yes
 
 Also update the header comment's last sentence to say that the script exercises `forge env` too and needs previews on the API.
 
-- [ ] **Step 2: Docs.**
+- [x] **Step 2: Docs.**
   - **`SKILL.md`:** in the Phase 3 bullet, add after the milestone 1 sentence: `Milestone 2: preview environments (EnvironmentService, internal/server/env_*.go, internal/registry, forge env create/list/get/extend/destroy; forge-api --previews) per docs/plans/2026-10-08-phase-3-m2-environments.md.`
   - **README:** after the `forge op` paragraph, add a blank line and:
 
@@ -3880,7 +3880,7 @@ Also update the header comment's last sentence to say that the script exercises 
 serves them with `--previews` (see the k3s section).
 ```
 
-- [ ] **Step 3: Gate and commit** (no push; the controller pushes after the final review):
+- [x] **Step 3: Gate and commit** (no push; the controller pushes after the final review):
 
 ```bash
 make build test lint

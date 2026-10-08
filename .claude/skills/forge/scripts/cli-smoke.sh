@@ -7,7 +7,8 @@
 # and back in with approve-device-login.py. It registers and deletes the
 # services payments, ledger, billing-db and billing-api in that catalog, and
 # runs 'forge template' and 'forge create --dry-run' (needs templates and the
-# GitHub App configured on the API; nothing is created).
+# GitHub App configured on the API; nothing is created), and 'forge env' (needs
+# previews on the API, forge-api --previews; nothing is created).
 # Each case: t <expected-exit> <description> -- <command...>. Exits 1 on any FAIL.
 set -u
 [ $# -eq 2 ] || { echo "usage: $0 <forge-binary> <context>" >&2; exit 2; }
@@ -83,6 +84,16 @@ t 3 "op watch missing" -- f op watch op_000000000000
 t 2 "op watch bad id" -- f op watch nope
 t 2 "op cancel without --yes (no tty)" -- f op cancel op_000000000000
 t 3 "op cancel missing" -- f op cancel op_000000000000 --yes
+
+echo; echo "#### environments (no side effects)"
+t 0 "env list" -- f env list
+t 0 "env list json" -- f env list -o json
+t 3 "env get missing" -- f env get nope-env
+t 2 "env get bad name" -- f env get Bad_Name
+t 6 "env create, service without a repo" -- f env create smoke-env --service payments --dry-run
+t 2 "env create bad ttl" -- f env create smoke-env --service payments --ttl 30m
+t 2 "env destroy without --yes (no tty)" -- f env destroy nope-env
+t 3 "env destroy missing" -- f env destroy nope-env --yes
 
 echo; echo "#### output and global flags"
 t 2 "bad -o" -- f service list -o xml
