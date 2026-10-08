@@ -124,12 +124,15 @@ func (f *Factory) event(ev *forgev1.OperationEvent) {
 // behind, is watched again; the replay's events already printed are skipped.
 func (f *Factory) watchOperation(ctx context.Context, c *client.Client, name string) (*forgev1.Operation, error) {
 	printed := 0
-	for attempt := 0; ; attempt++ {
+	// attempt counts consecutive drops without new events, so a long watch
+	// survives any number of cut streams as long as it keeps progressing.
+	attempt := 0
+	for ; ; attempt++ {
 		stream, err := c.Operations.WatchOperation(ctx, connect.NewRequest(&forgev1.WatchOperationRequest{Name: name}))
 		if err != nil {
 			return nil, f.watchErr(ctx, name, err)
 		}
-		seen := 0
+		seen, before := 0, printed
 		var final *forgev1.Operation
 		for stream.Receive() {
 			m := stream.Msg()
@@ -149,9 +152,16 @@ func (f *Factory) watchOperation(ctx context.Context, c *client.Client, name str
 			return final, nil
 		}
 		again := err == nil || !connect.IsWireError(err) || connect.CodeOf(err) == connect.CodeResourceExhausted
+		if printed > before {
+			attempt = 0
+		}
 		if again && attempt < 5 && ctx.Err() == nil {
 			if attempt > 0 {
-				time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+				select {
+				case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):
+				case <-ctx.Done():
+					return nil, f.watchErr(ctx, name, ctx.Err())
+				}
 			}
 			continue
 		}

@@ -215,7 +215,7 @@ func TestManyWatchers(t *testing.T) {
 	}
 	// Let the watchers subscribe before the work emits; a watcher that
 	// subscribes late still gets everything through the replay.
-	time.Sleep(20 * time.Millisecond)
+	waitSubscribers(t, s, op.GetName(), len(results))
 	close(gate)
 	wg.Wait()
 	for i, r := range results {
@@ -246,7 +246,7 @@ func TestSlowWatcherDoesNotBlockWork(t *testing.T) {
 			return nil
 		})
 	}()
-	time.Sleep(20 * time.Millisecond) // subscribed
+	waitSubscribers(t, s, op.GetName(), 1)
 	close(gate)
 	wait(t, s, op.GetName()) // finishes although the watcher is stuck
 	close(unblock)
@@ -360,5 +360,21 @@ func TestListAndPrune(t *testing.T) {
 	}
 	if _, ok := s.Get(running.GetName()); !ok {
 		t.Error("running operation pruned after 24h")
+	}
+}
+
+// waitSubscribers polls until name has n watchers subscribed.
+func waitSubscribers(t *testing.T, s *Operations, name string, n int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		s.mu.Lock()
+		got := len(s.ops[name].subs)
+		s.mu.Unlock()
+		if got == n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d subscribers of %s, want %d", got, name, n)
+		}
 	}
 }

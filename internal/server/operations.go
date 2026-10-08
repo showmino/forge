@@ -182,6 +182,8 @@ func (s *Operations) prune() {
 	if len(s.ops) <= s.max {
 		return
 	}
+	// Oldest by creation time first; the spec does not say which order, so
+	// creation order is the deliberate choice.
 	slices.SortFunc(finished, func(a, b *operation) int {
 		return a.pb.CreateTime.AsTime().Compare(b.pb.CreateTime.AsTime())
 	})

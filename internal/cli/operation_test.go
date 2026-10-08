@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -143,6 +144,7 @@ func TestOpWatchReattachPrintsEachEventOnce(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.Handle(forgev1connect.NewOperationServiceHandler(ops))
 		srv := httptest.NewServer(mux)
+		t.Cleanup(srv.Close)
 		c, err := client.New(srv.URL, client.Options{})
 		if err != nil {
 			t.Fatal(err)
@@ -150,7 +152,6 @@ func TestOpWatchReattachPrintsEachEventOnce(t *testing.T) {
 		var errOut strings.Builder
 		f := newFactory(Deps{IO: IOStreams{ErrOut: &errOut, Out: io.Discard}})
 		op, err := f.watchOperation(context.Background(), c, "operations/op_000000000001")
-		srv.Close()
 		if code == connect.CodeInvalidArgument {
 			// Only a dropped stream or RESOURCE_EXHAUSTED reattaches; other errors end the watch.
 			if connect.CodeOf(err) != code || ops.calls.Load() != 1 {
@@ -242,5 +243,56 @@ func TestAge(t *testing.T) {
 		if got := age(d); got != want {
 			t.Errorf("age(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// progressOps drops every watch but the last after it delivered one new
+// event, the way proxies cut a long stream.
+type progressOps struct {
+	forgev1connect.UnimplementedOperationServiceHandler
+	calls atomic.Int32
+	total int32
+}
+
+func (o *progressOps) WatchOperation(_ context.Context, req *connect.Request[forgev1.WatchOperationRequest], s *connect.ServerStream[forgev1.WatchOperationResponse]) error {
+	n := o.calls.Add(1)
+	for i := range n {
+		if err := s.Send(&forgev1.WatchOperationResponse{Kind: &forgev1.WatchOperationResponse_Event{
+			Event: &forgev1.OperationEvent{Step: "step", Message: fmt.Sprint(i + 1)},
+		}}); err != nil {
+			return err
+		}
+	}
+	if n < o.total {
+		return connect.NewError(connect.CodeResourceExhausted, errors.New("fell behind"))
+	}
+	return s.Send(&forgev1.WatchOperationResponse{Kind: &forgev1.WatchOperationResponse_Operation{
+		Operation: &forgev1.Operation{Name: req.Msg.GetName(), Done: true},
+	}})
+}
+
+func TestOpWatchReattachBudgetResetsOnProgress(t *testing.T) {
+	t.Parallel()
+	ops := &progressOps{total: 8}
+	mux := http.NewServeMux()
+	mux.Handle(forgev1connect.NewOperationServiceHandler(ops))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c, err := client.New(srv.URL, client.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var errOut strings.Builder
+	f := newFactory(Deps{IO: IOStreams{ErrOut: &errOut, Out: io.Discard}})
+	op, err := f.watchOperation(context.Background(), c, "operations/op_000000000001")
+	if err != nil || !op.GetDone() || ops.calls.Load() != 8 {
+		t.Fatalf("%v %v after %d watches", op, err, ops.calls.Load())
+	}
+	want := ""
+	for i := 1; i <= 8; i++ {
+		want += fmt.Sprintf("  step       %d\n", i)
+	}
+	if errOut.String() != want {
+		t.Errorf("printed:\n%q\nwant\n%q", errOut.String(), want)
 	}
 }
