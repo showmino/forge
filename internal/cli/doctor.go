@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
@@ -25,7 +26,12 @@ func newDoctorCmd(f *Factory) *cobra.Command {
   forge doctor --context prod -o json`,
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			format, err := f.Format()
+			// An invalid forge.yaml is one of the checks, not a reason to stop.
+			r, err := f.Resolved()
+			if _, _, manifestErr := f.Manifest(); err != nil && !errors.Is(err, manifestErr) {
+				return err
+			}
+			format, err := parseFormat(r)
 			if err != nil {
 				return err
 			}
@@ -65,7 +71,7 @@ func (f *Factory) runChecks(cmd *cobra.Command) []check {
 
 	if m, at, err := f.Manifest(); err != nil {
 		add("manifest", "fail", "%v", err)
-		return out
+		return out // every later check needs a valid forge.yaml
 	} else if m != nil {
 		add("manifest", "ok", "%s (service %s)", at, m.Service.Name)
 	} else {

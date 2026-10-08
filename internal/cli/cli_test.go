@@ -309,6 +309,12 @@ func TestInitAndManifestDefaults(t *testing.T) {
 	if !strings.Contains(r.err, "forge.yaml") || !strings.Contains(r.err, "tem") {
 		t.Errorf("invalid manifest error should name the file and the field:\n%s", r.err)
 	}
+	r = h.fails(1, "doctor", "-o", "json")
+	if !strings.Contains(r.out, `"name": "config",
+      "status": "ok"`) || !strings.Contains(r.out, `"name": "manifest",
+      "status": "fail"`) {
+		t.Errorf("doctor should report config ok and the manifest as failed:\n%s", r.out)
+	}
 }
 
 func TestVersionAndDoctor(t *testing.T) {

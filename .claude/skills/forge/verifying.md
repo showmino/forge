@@ -30,6 +30,11 @@ Then check: `forge auth status` (permissions `services.read, services.write`),
 `forge doctor` (all ok, no version warning), `FORGE_TOKEN=nope forge service list`
 exits 4 with `hint: run 'forge auth login'`.
 
+Whole CLI against a live API (every noun and verb, output formats, exit codes,
+forge.yaml defaults, logout/login): run
+`bash .claude/skills/forge/scripts/cli-smoke.sh bin/forge <context> > smoke.log; tail -1 smoke.log`
+and read every `FAIL` block. When behaviour changes on purpose, change the case's expected exit.
+
 Refresh: set `expiry` in `~/.config/forge/credentials.json` to a past time, run
 `forge auth token`; the token must change and the file stay mode 0600.
 

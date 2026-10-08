@@ -125,14 +125,13 @@ func (f *Factory) load() error {
 		d.Output = string(output.Table)
 		if wd, err := f.Getwd(); err == nil {
 			if p, err := manifest.Find(wd); err == nil && p != "" {
-				m, err := manifest.Load(p)
-				if err != nil {
+				// Resolve the rest even if forge.yaml is invalid, so doctor can report it.
+				if m, err := manifest.Load(p); err != nil {
 					f.manifestErr = exitcode.Usagef("%v", err)
-					f.err = f.manifestErr
-					return
+				} else {
+					f.manifest, f.manifestAt = m, p
+					d.Namespace = m.Namespace
 				}
-				f.manifest, f.manifestAt = m, p
-				d.Namespace = m.Namespace
 			}
 		}
 		f.resolved, f.err = config.Resolve(f.cfg, f.Env, config.Overrides{
@@ -140,6 +139,8 @@ func (f *Factory) load() error {
 		}, d)
 		if f.err != nil {
 			f.err = exitcode.Usagef("%v", f.err)
+		} else if f.manifestErr != nil {
+			f.err = f.manifestErr
 		}
 	})
 	return f.err
@@ -173,6 +174,10 @@ func (f *Factory) Format() (output.Format, error) {
 	if err != nil {
 		return "", err
 	}
+	return parseFormat(r)
+}
+
+func parseFormat(r config.Resolved) (output.Format, error) {
 	fm, err := output.Parse(r.Output)
 	if err != nil {
 		return "", exitcode.Usagef("%v", err)
