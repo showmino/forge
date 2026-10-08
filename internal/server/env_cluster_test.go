@@ -145,6 +145,9 @@ func TestGuardIgnoresForeignNamespaces(t *testing.T) {
 		if err := c.DeleteEnv(ctx, id); !errors.Is(err, errNoEnv) {
 			t.Errorf("DeleteEnv(%s): %v", id, err)
 		}
+		if _, _, err := c.Status(ctx, id, "a"); !errors.Is(err, errNoEnv) {
+			t.Errorf("Status(%s): %v", id, err)
+		}
 		if err := c.Deploy(ctx, id, Workload{Service: "a", Image: "ghcr.io/a/a:1", Host: "h", Port: 80, Health: "/"}); !errors.Is(err, errNoEnv) {
 			t.Errorf("Deploy(%s): %v", id, err)
 		}

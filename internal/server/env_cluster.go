@@ -293,6 +293,9 @@ func deployment(w Workload) *appsv1.Deployment {
 // Status reports whether the service's Deployment in environment id is
 // available and, when it is not, the most telling problem seen.
 func (c *Cluster) Status(ctx context.Context, id, service string) (bool, string, error) {
+	if _, err := c.Env(ctx, id); err != nil {
+		return false, "", err
+	}
 	ns := envNamespace(id)
 	d, err := c.Kube.AppsV1().Deployments(ns).Get(ctx, service, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
