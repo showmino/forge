@@ -3,6 +3,8 @@
 # Render with deploy/k3s/render.sh; do not apply this file directly.
 #   ${DEX_HOST}         host name of Dex, the same for you and for pods
 #   ${FORGE_API_IMAGE}  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:0.1.0
+#   The GitHub App settings (ID, org, template repo): see render.sh.
+#   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -85,7 +87,12 @@ spec:
         # distroless "nonroot" by number: the kubelet cannot check a user name.
         runAsUser: 65532
         runAsGroup: 65532
+        # Secret files are root-owned; the group lets the API read its 0440 key.
+        fsGroup: 65532
         seccompProfile: {type: RuntimeDefault}
+      volumes: #app
+        - name: github-app #app
+          secret: {secretName: forge-github-app, defaultMode: 0440} #app
       containers:
         - name: forge-api
           image: ${FORGE_API_IMAGE}
@@ -94,6 +101,12 @@ spec:
             - {name: FORGE_OIDC_ISSUER, value: "http://${DEX_HOST}/dex"}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
             - {name: FORGE_LOG_FORMAT, value: json}
+            - {name: FORGE_GITHUB_APP_ID, value: "${FORGE_GITHUB_APP_ID}"} #app
+            - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/private-key.pem} #app
+            - {name: FORGE_GITHUB_ORG, value: ${FORGE_GITHUB_ORG}} #app
+            - {name: FORGE_TEMPLATES_REPO, value: ${FORGE_TEMPLATES_REPO}} #app
+          volumeMounts: #app
+            - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true} #app
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
@@ -106,4 +119,5 @@ spec:
             capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 128Mi}
+            # Template releases are cached in memory (up to 100 MiB each).
+            limits: {memory: 256Mi}
