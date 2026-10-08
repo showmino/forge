@@ -32,6 +32,10 @@ func TestCredsFromDockerConfig(t *testing.T) {
 	if u, p, err := CredsFromDockerConfig(data, "docker.io"); err != nil || u != "u" || p != "p" {
 		t.Errorf("username/password: %q %q %v", u, p, err)
 	}
+	scheme := []byte(`{"auths":{"https://ghcr.io":{"auth":"` + auth + `"}}}`)
+	if u, p, err := CredsFromDockerConfig(scheme, "ghcr.io"); err != nil || u != "bot" || p != "s3cret" {
+		t.Errorf("https:// key: %q %q %v", u, p, err)
+	}
 	if _, _, err := CredsFromDockerConfig(data, "quay.io"); err == nil {
 		t.Error("missing host accepted")
 	}

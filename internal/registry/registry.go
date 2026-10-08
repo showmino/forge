@@ -136,6 +136,9 @@ func CredsFromDockerConfig(data []byte, host string) (string, string, error) {
 	}
 	a, ok := cfg.Auths[host]
 	if !ok {
+		a, ok = cfg.Auths["https://"+host]
+	}
+	if !ok {
 		return "", "", fmt.Errorf("pull secret has no login for %s", host)
 	}
 	if a.Username != "" {
