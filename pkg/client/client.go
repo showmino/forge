@@ -49,11 +49,12 @@ type Options struct {
 
 // Client bundles the Forge API service clients.
 type Client struct {
-	Catalog    forgev1connect.ServiceCatalogServiceClient
-	Auth       forgev1connect.AuthServiceClient
-	Templates  forgev1connect.TemplateServiceClient
-	Operations forgev1connect.OperationServiceClient
-	BaseURL    string
+	Catalog      forgev1connect.ServiceCatalogServiceClient
+	Auth         forgev1connect.AuthServiceClient
+	Templates    forgev1connect.TemplateServiceClient
+	Operations   forgev1connect.OperationServiceClient
+	Environments forgev1connect.EnvironmentServiceClient
+	BaseURL      string
 }
 
 // New returns a client for the API at baseURL, for example "https://forge.example.com".
@@ -80,11 +81,12 @@ func New(baseURL string, o Options) (*Client, error) {
 		opts = append(opts, connect.WithGRPC())
 	}
 	return &Client{
-		Catalog:    forgev1connect.NewServiceCatalogServiceClient(hc, baseURL, opts...),
-		Auth:       forgev1connect.NewAuthServiceClient(hc, baseURL, opts...),
-		Templates:  forgev1connect.NewTemplateServiceClient(hc, baseURL, opts...),
-		Operations: forgev1connect.NewOperationServiceClient(hc, baseURL, opts...),
-		BaseURL:    baseURL,
+		Catalog:      forgev1connect.NewServiceCatalogServiceClient(hc, baseURL, opts...),
+		Auth:         forgev1connect.NewAuthServiceClient(hc, baseURL, opts...),
+		Templates:    forgev1connect.NewTemplateServiceClient(hc, baseURL, opts...),
+		Operations:   forgev1connect.NewOperationServiceClient(hc, baseURL, opts...),
+		Environments: forgev1connect.NewEnvironmentServiceClient(hc, baseURL, opts...),
+		BaseURL:      baseURL,
 	}, nil
 }
 
