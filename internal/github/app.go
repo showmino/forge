@@ -132,13 +132,5 @@ func (a *App) call(ctx context.Context, method, path string, out any) error {
 		return err
 	}
 	c := &Client{BaseURL: a.BaseURL, HTTP: a.HTTP, Token: StaticToken(jwt)}
-	resp, err := c.do(ctx, method, path)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode %s %s: %w", method, path, err)
-	}
-	return nil
+	return c.doJSON(ctx, method, path, nil, out)
 }

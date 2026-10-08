@@ -88,3 +88,18 @@ func TestTemplateSource(t *testing.T) {
 		t.Error("repo without owner accepted")
 	}
 }
+
+func TestRepoHost(t *testing.T) {
+	t.Parallel()
+	if h := repoHost(nil); h != nil {
+		t.Errorf("no App: want a nil RepoHost, got %#v", h)
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := repoHost(&github.App{ID: 1, Key: key, Org: "showmino"}).(*github.Client)
+	if !ok || c.Token == nil {
+		t.Errorf("App: want a *github.Client with the App's token, got %#v", c)
+	}
+}

@@ -52,3 +52,12 @@ func templateSource(dir, repo string, app *github.App) (server.TemplateSource, e
 		return nil, nil
 	}
 }
+
+// repoHost returns where new services' repos are created: GitHub as the App,
+// or nil (an untyped nil interface) when no App is configured.
+func repoHost(app *github.App) server.RepoHost {
+	if app == nil {
+		return nil
+	}
+	return &github.Client{Token: app.Token}
+}

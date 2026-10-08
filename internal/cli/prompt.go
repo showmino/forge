@@ -37,3 +37,13 @@ func shortName(name string) string {
 	}
 	return name
 }
+
+// ask prints label on stderr and reads the answer from stdin.
+func (f *Factory) ask(label string) (string, error) {
+	fmt.Fprintf(f.IO.ErrOut, "%s: ", label)
+	answer, err := f.readLine()
+	if err != nil {
+		return "", exitcode.Usagef("no answer for %s", label)
+	}
+	return answer, nil
+}

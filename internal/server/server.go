@@ -35,6 +35,11 @@ type Options struct {
 	Catalog          *Catalog
 	// Templates serves TemplateService; nil answers FAILED_PRECONDITION.
 	Templates TemplateSource
+	// Repos creates the repos of new services; nil answers FAILED_PRECONDITION
+	// to CreateService unless validate_only.
+	Repos RepoHost
+	// GitHubOrg is the org new repos are created in (default "showmino").
+	GitHubOrg string
 	Logger    *slog.Logger
 }
 
@@ -45,6 +50,9 @@ func New(o Options) (http.Handler, error) {
 	}
 	if o.Catalog == nil {
 		o.Catalog = NewCatalog(nil)
+	}
+	if o.GitHubOrg == "" {
+		o.GitHubOrg = "showmino"
 	}
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
@@ -64,7 +72,11 @@ func New(o Options) (http.Handler, error) {
 		&authInterceptor{authn: o.Authenticator, authz: o.Authorizer},
 	)
 	mux := http.NewServeMux()
-	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(o.Catalog, opts))
+	create := &creator{
+		catalog: o.Catalog, templates: o.Templates, repos: o.Repos, org: o.GitHubOrg, log: o.Logger,
+		results: map[string]*outcome{},
+	}
+	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger}, opts))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

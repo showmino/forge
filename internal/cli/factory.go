@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,6 +80,8 @@ type globalFlags struct {
 type Factory struct {
 	Deps
 	flags globalFlags
+	// stdin is created on first use and shared by every prompt.
+	stdin *bufio.Reader
 
 	once       sync.Once
 	configPath string
@@ -239,12 +243,29 @@ func (f *Factory) APIURL() (string, error) {
 
 // Client returns an API client. withAuth=false sends no credentials.
 func (f *Factory) Client(ctx context.Context, withAuth bool) (*client.Client, error) {
+	return f.clientWith(ctx, withAuth, f.HTTPClient)
+}
+
+// StreamClient is Client for long server streams: the HTTP client's overall
+// timeout would cut them off, so only ctx (--timeout) bounds them.
+func (f *Factory) StreamClient(ctx context.Context) (*client.Client, error) {
+	return f.clientWith(ctx, true, withoutTimeout(f.HTTPClient))
+}
+
+// withoutTimeout copies hc with no overall timeout.
+func withoutTimeout(hc *http.Client) *http.Client {
+	c := *hc
+	c.Timeout = 0
+	return &c
+}
+
+func (f *Factory) clientWith(ctx context.Context, withAuth bool, hc *http.Client) (*client.Client, error) {
 	url, err := f.APIURL()
 	if err != nil {
 		return nil, err
 	}
 	o := client.Options{
-		HTTPClient:    f.HTTPClient,
+		HTTPClient:    hc,
 		ClientVersion: f.Version,
 		OnResponse:    f.onResponse,
 	}
@@ -320,4 +341,17 @@ func (f *Factory) infof(format string, args ...any) {
 	if !f.flags.quiet {
 		fmt.Fprintf(f.IO.ErrOut, format+"\n", args...)
 	}
+}
+
+// readLine reads one line from stdin. One buffered reader serves every
+// prompt, so consecutive prompts do not lose each other's input.
+func (f *Factory) readLine() (string, error) {
+	if f.stdin == nil {
+		f.stdin = bufio.NewReader(f.IO.In)
+	}
+	line, err := f.stdin.ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }

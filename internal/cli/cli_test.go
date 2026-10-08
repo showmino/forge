@@ -31,6 +31,7 @@ type harness struct {
 
 	authn     server.Authenticator
 	templates server.TemplateSource
+	repos     server.RepoHost
 }
 
 const (
@@ -64,6 +65,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Authenticator: authn,
 		Authorizer:    server.Authorizer{WriterGroups: []string{"platform"}},
 		Templates:     h.templates,
+		Repos:         h.repos,
 	})
 	if err != nil {
 		h.t.Fatal(err)

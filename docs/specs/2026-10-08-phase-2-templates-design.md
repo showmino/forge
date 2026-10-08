@@ -158,7 +158,7 @@ message GetTemplateResponse { Template template = 1; }
 
 ```proto
 // added to ServiceCatalogService in catalog.proto
-rpc CreateService(CreateServiceRequest) returns (stream CreateServiceEvent) {}
+rpc CreateService(CreateServiceRequest) returns (stream CreateServiceResponse) {}
 
 message CreateServiceRequest {
   string service_id = 1;              // becomes services/{id} and showmino/{id}
@@ -171,7 +171,7 @@ message CreateServiceRequest {
   bool validate_only = 8;             // render and check; create nothing
 }
 
-message CreateServiceEvent {
+message CreateServiceResponse {
   oneof event {
     CreateStep step = 1;
     Service service = 2;              // success: the registered service (last event)
@@ -200,6 +200,8 @@ message CreatePlan {
 }
 ```
 
+The streamed message is named `CreateServiceResponse` because buf's STANDARD lint requires `<Rpc>Response`.
+
 Errors found before any side effect (bad input, unknown template, conflicts, missing configuration) end the stream with a Connect error code. A failure after the repo exists ends with a `CreateFailure` event, because a code alone cannot say which step failed or whether the rollback worked.
 
 ### Components
@@ -219,14 +221,16 @@ Requires `services.write`. Step 1 runs before any event is sent; steps 2, 3, 5, 
 2. **fetch:** resolve the version (newest tag if empty) and fetch the template.
 3. **render:** render with the request values, and check the rendered `forge.yaml` names the requested service and team.
 4. With `validate_only`, stop here and send a `CreatePlan`.
-5. **create_repo:** create the private repo `showmino/{id}` with no auto-init.
-6. **push:** push one commit with every rendered file to `main`. The `.github/workflows` it contains start CI.
+5. **create_repo:** create the private repo `showmino/{id}` with `auto_init` (GitHub's Git Data API cannot write to an empty repository).
+6. **push:** write one commit with every rendered file and no parents, and force-update the default branch to it, so history starts with the scaffold. Text files go into the tree inline; other files are uploaded as blobs. The `.github/workflows` it contains start CI.
 7. **register:** register `services/{id}` in the catalog with `repo_url` and the fields from the rendered `forge.yaml`.
 8. Send the `Service`.
 
 If step 6 or 7 fails, delete the repo (best effort) and send a `CreateFailure` with `rolled_back` set to whether the delete worked.
 
-**Idempotency:** the outcome of each `request_id` (success, failure or in progress) is kept in memory, like the Phase 1 catalog. A retry with the same key gets the stored outcome replayed as a short stream instead of a second repo. A retry while the first attempt is still running gets `ABORTED` ("in progress").
+**Idempotency:** the outcome of each `request_id` (success, failure or in progress) is kept in memory, like the Phase 1 catalog. A retry with the same key gets the stored outcome replayed as a short stream instead of a second repo. A retry while the first attempt is still running waits for it (as long as the caller's deadline allows) and gets its outcome replayed.
+
+Once `create_repo` starts, the pipeline runs to its end even if the client disconnects, so the stored outcome is complete when the client retries. `forge create` pins `template_version` to the version `GetTemplate` resolved.
 
 **Logging:** each create logs the caller's subject, the template and version, the repo and the outcome. The audit log proper is Phase 5.
 
@@ -317,7 +321,7 @@ port         int      no         8080                                        Por
 | Template or version not found | `NOT_FOUND` | 3 |
 | `services/{id}` or `showmino/{id}` exists | `ALREADY_EXISTS` | 6 |
 | Templates or GitHub not configured | `FAILED_PRECONDITION` | 6 |
-| Same `request_id` still running | `ABORTED` | 6 |
+| A retry with the same `request_id` runs out of time waiting for the first | `DEADLINE_EXCEEDED` | 8 |
 | GitHub unavailable or rate-limited before any side effect | `UNAVAILABLE` | 1 |
 | A step fails after the repo exists | `CreateFailure` event | 7 |
 | `--timeout` reached | client deadline | 8 |

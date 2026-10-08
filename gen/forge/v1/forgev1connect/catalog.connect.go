@@ -48,6 +48,9 @@ const (
 	// ServiceCatalogServiceDeleteServiceProcedure is the fully-qualified name of the
 	// ServiceCatalogService's DeleteService RPC.
 	ServiceCatalogServiceDeleteServiceProcedure = "/forge.v1.ServiceCatalogService/DeleteService"
+	// ServiceCatalogServiceCreateServiceProcedure is the fully-qualified name of the
+	// ServiceCatalogService's CreateService RPC.
+	ServiceCatalogServiceCreateServiceProcedure = "/forge.v1.ServiceCatalogService/CreateService"
 )
 
 // ServiceCatalogServiceClient is a client for the forge.v1.ServiceCatalogService service.
@@ -62,6 +65,12 @@ type ServiceCatalogServiceClient interface {
 	UpdateService(context.Context, *connect.Request[v1.UpdateServiceRequest]) (*connect.Response[v1.UpdateServiceResponse], error)
 	// DeleteService removes a service from the catalog.
 	DeleteService(context.Context, *connect.Request[v1.DeleteServiceRequest]) (*connect.Response[v1.DeleteServiceResponse], error)
+	// CreateService scaffolds a service from a template: it renders the
+	// template, creates the GitHub repo, pushes the first commit and registers
+	// the service, streaming progress. Errors before any side effect end the
+	// stream with an error code; a failure after the repo exists ends it with
+	// a CreateFailure.
+	CreateService(context.Context, *connect.Request[v1.CreateServiceRequest]) (*connect.ServerStreamForClient[v1.CreateServiceResponse], error)
 }
 
 // NewServiceCatalogServiceClient constructs a client for the forge.v1.ServiceCatalogService
@@ -109,6 +118,12 @@ func NewServiceCatalogServiceClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithIdempotency(connect.IdempotencyIdempotent),
 			connect.WithClientOptions(opts...),
 		),
+		createService: connect.NewClient[v1.CreateServiceRequest, v1.CreateServiceResponse](
+			httpClient,
+			baseURL+ServiceCatalogServiceCreateServiceProcedure,
+			connect.WithSchema(serviceCatalogServiceMethods.ByName("CreateService")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -119,6 +134,7 @@ type serviceCatalogServiceClient struct {
 	registerService *connect.Client[v1.RegisterServiceRequest, v1.RegisterServiceResponse]
 	updateService   *connect.Client[v1.UpdateServiceRequest, v1.UpdateServiceResponse]
 	deleteService   *connect.Client[v1.DeleteServiceRequest, v1.DeleteServiceResponse]
+	createService   *connect.Client[v1.CreateServiceRequest, v1.CreateServiceResponse]
 }
 
 // ListServices calls forge.v1.ServiceCatalogService.ListServices.
@@ -146,6 +162,11 @@ func (c *serviceCatalogServiceClient) DeleteService(ctx context.Context, req *co
 	return c.deleteService.CallUnary(ctx, req)
 }
 
+// CreateService calls forge.v1.ServiceCatalogService.CreateService.
+func (c *serviceCatalogServiceClient) CreateService(ctx context.Context, req *connect.Request[v1.CreateServiceRequest]) (*connect.ServerStreamForClient[v1.CreateServiceResponse], error) {
+	return c.createService.CallServerStream(ctx, req)
+}
+
 // ServiceCatalogServiceHandler is an implementation of the forge.v1.ServiceCatalogService service.
 type ServiceCatalogServiceHandler interface {
 	// ListServices returns services, optionally filtered by owning team.
@@ -158,6 +179,12 @@ type ServiceCatalogServiceHandler interface {
 	UpdateService(context.Context, *connect.Request[v1.UpdateServiceRequest]) (*connect.Response[v1.UpdateServiceResponse], error)
 	// DeleteService removes a service from the catalog.
 	DeleteService(context.Context, *connect.Request[v1.DeleteServiceRequest]) (*connect.Response[v1.DeleteServiceResponse], error)
+	// CreateService scaffolds a service from a template: it renders the
+	// template, creates the GitHub repo, pushes the first commit and registers
+	// the service, streaming progress. Errors before any side effect end the
+	// stream with an error code; a failure after the repo exists ends it with
+	// a CreateFailure.
+	CreateService(context.Context, *connect.Request[v1.CreateServiceRequest], *connect.ServerStream[v1.CreateServiceResponse]) error
 }
 
 // NewServiceCatalogServiceHandler builds an HTTP handler from the service implementation. It
@@ -201,6 +228,12 @@ func NewServiceCatalogServiceHandler(svc ServiceCatalogServiceHandler, opts ...c
 		connect.WithIdempotency(connect.IdempotencyIdempotent),
 		connect.WithHandlerOptions(opts...),
 	)
+	serviceCatalogServiceCreateServiceHandler := connect.NewServerStreamHandler(
+		ServiceCatalogServiceCreateServiceProcedure,
+		svc.CreateService,
+		connect.WithSchema(serviceCatalogServiceMethods.ByName("CreateService")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.ServiceCatalogService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ServiceCatalogServiceListServicesProcedure:
@@ -213,6 +246,8 @@ func NewServiceCatalogServiceHandler(svc ServiceCatalogServiceHandler, opts ...c
 			serviceCatalogServiceUpdateServiceHandler.ServeHTTP(w, r)
 		case ServiceCatalogServiceDeleteServiceProcedure:
 			serviceCatalogServiceDeleteServiceHandler.ServeHTTP(w, r)
+		case ServiceCatalogServiceCreateServiceProcedure:
+			serviceCatalogServiceCreateServiceHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -240,4 +275,8 @@ func (UnimplementedServiceCatalogServiceHandler) UpdateService(context.Context, 
 
 func (UnimplementedServiceCatalogServiceHandler) DeleteService(context.Context, *connect.Request[v1.DeleteServiceRequest]) (*connect.Response[v1.DeleteServiceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ServiceCatalogService.DeleteService is not implemented"))
+}
+
+func (UnimplementedServiceCatalogServiceHandler) CreateService(context.Context, *connect.Request[v1.CreateServiceRequest], *connect.ServerStream[v1.CreateServiceResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ServiceCatalogService.CreateService is not implemented"))
 }
