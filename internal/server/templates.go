@@ -33,7 +33,8 @@ func authenticated(ctx context.Context) error {
 	return nil
 }
 
-// release resolves version (empty = newest) and fetches its tree.
+// release resolves version (empty = newest) and fetches its tree, for any
+// authenticated caller.
 func (s *templateService) release(ctx context.Context, version string) (string, fs.FS, error) {
 	if err := authenticated(ctx); err != nil {
 		return "", nil, err
@@ -41,8 +42,14 @@ func (s *templateService) release(ctx context.Context, version string) (string, 
 	if s.src == nil {
 		return "", nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("templates are not configured on this Forge API"))
 	}
+	return resolveRelease(ctx, s.src, version)
+}
+
+// resolveRelease resolves version (empty = newest) and fetches its tree.
+// Errors are Connect errors.
+func resolveRelease(ctx context.Context, src TemplateSource, version string) (string, fs.FS, error) {
 	if version == "" {
-		vs, err := s.src.Versions(ctx)
+		vs, err := src.Versions(ctx)
 		if err != nil {
 			return "", nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("list template versions: %w", err))
 		}
@@ -51,7 +58,7 @@ func (s *templateService) release(ctx context.Context, version string) (string, 
 		}
 		version = vs[0]
 	}
-	tree, err := s.src.Fetch(ctx, version)
+	tree, err := src.Fetch(ctx, version)
 	switch {
 	case errors.Is(err, ErrVersionNotFound):
 		return "", nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("template version %s not found", version))
@@ -66,6 +73,18 @@ func (s *templateService) release(ctx context.Context, version string) (string, 
 }
 
 var errTemplateNotFound = errors.New("template not found")
+
+// templateFromRelease loads template name from a release tree, as a Connect error.
+func templateFromRelease(tree fs.FS, name, version string) (*template.Template, error) {
+	t, err := loadTemplate(tree, name)
+	if errors.Is(err, errTemplateNotFound) {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("%s%s not found in %s", templatePrefix, name, version))
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s in %s is invalid: %w", templatePrefix, name, version, err))
+	}
+	return t, nil
+}
 
 // loadTemplate parses and validates template name in tree.
 func loadTemplate(tree fs.FS, name string) (*template.Template, error) {
@@ -122,12 +141,9 @@ func (s *templateService) GetTemplate(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, err
 	}
-	t, err := loadTemplate(tree, name)
-	if errors.Is(err, errTemplateNotFound) {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("%s%s not found in %s", templatePrefix, name, version))
-	}
+	t, err := templateFromRelease(tree, name, version)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s in %s is invalid: %w", templatePrefix, name, version, err))
+		return nil, err
 	}
 	return connect.NewResponse(&forgev1.GetTemplateResponse{Template: templateProto(t, version)}), nil
 }

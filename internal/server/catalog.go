@@ -17,7 +17,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
-	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/manifest"
 )
 
@@ -38,8 +37,6 @@ type Catalog struct {
 	now         func() time.Time
 }
 
-var _ forgev1connect.ServiceCatalogServiceHandler = (*Catalog)(nil)
-
 // NewCatalog returns an empty catalog.
 func NewCatalog(now func() time.Time) *Catalog {
 	if now == nil {
@@ -51,6 +48,14 @@ func NewCatalog(now func() time.Time) *Catalog {
 		idempotency: map[string]*forgev1.Service{},
 		now:         now,
 	}
+}
+
+// has reports whether a service is registered under name.
+func (c *Catalog) has(name string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.services[name]
+	return ok
 }
 
 func (c *Catalog) ListServices(ctx context.Context, req *connect.Request[forgev1.ListServicesRequest]) (*connect.Response[forgev1.ListServicesResponse], error) {
