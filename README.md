@@ -97,7 +97,8 @@ Commands follow `forge <noun> <verb>`:
 | Group | Verbs |
 | --- | --- |
 | `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `delete` |
-| `template` | `list`, `get`, `lint` (Phase 2 adds `forge create`) |
+| `template` | `list`, `get`, `lint` |
+| `create` | scaffold a service from a template: repo, first commit, catalog entry |
 | `context` | `list`, `use`, `current`, `set` |
 | `auth` | `login`, `logout`, `status`, `token` |
 | utilities | `init`, `doctor`, `version`, `completion` |
@@ -122,6 +123,11 @@ templates of a release (the newest by default). forge-api reads them from
 GitHub as the Forge GitHub App (`--github-app-id`, `--github-app-key-file`,
 `--github-org`), or from a local checkout with `--templates-dir` (served as
 version `dev`).
+`forge create <name> --template <template> --team <team>` asks forge-api to
+render the template, create the private repo `github.com/<org>/<name>` as the
+Forge GitHub App, push the first commit (which starts its CI) and register the
+service. `--set name=value` sets parameters, `--dry-run` lists the files
+without creating anything, and a failure after the repo exists deletes it again.
 `forge template lint [dir]` checks templates locally, with no API or login;
 see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
 

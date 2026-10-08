@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,6 +80,8 @@ type globalFlags struct {
 type Factory struct {
 	Deps
 	flags globalFlags
+	// stdin is created on first use and shared by every prompt.
+	stdin *bufio.Reader
 
 	once       sync.Once
 	configPath string
@@ -320,4 +324,17 @@ func (f *Factory) infof(format string, args ...any) {
 	if !f.flags.quiet {
 		fmt.Fprintf(f.IO.ErrOut, format+"\n", args...)
 	}
+}
+
+// readLine reads one line from stdin. One buffered reader serves every
+// prompt, so consecutive prompts do not lose each other's input.
+func (f *Factory) readLine() (string, error) {
+	if f.stdin == nil {
+		f.stdin = bufio.NewReader(f.IO.In)
+	}
+	line, err := f.stdin.ReadString('\n')
+	if err != nil && line == "" {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }
