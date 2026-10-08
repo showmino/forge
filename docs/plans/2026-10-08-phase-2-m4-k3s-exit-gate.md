@@ -208,14 +208,14 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 **Files:** none in the repo.
 
-- [ ] **Step 1: Build and push the image from this branch's code**
+- [x] **Step 1: Build and push the image from this branch's code**
 
 ```bash
 IMG=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD)
 docker build --build-arg COMMIT=$(git rev-parse HEAD) -t $IMG . && docker push $IMG
 ```
 
-- [ ] **Step 2: The Secret comes from 1Password** (owner decision): the owner creates the item `forge-github-app` in the vault `Kube` with a field `github_app_private_key` holding the PEM. Rendering with `FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app` adds a `OnePasswordItem`, and the cluster's 1Password operator creates the Secret `forge-github-app`. After applying (Step 3), check without printing the key:
+- [x] **Step 2: The Secret comes from 1Password** (owner decision): the owner creates the item `forge-github-app` in the vault `Kube` with a field `github_app_private_key` holding the PEM. Rendering with `FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app` adds a `OnePasswordItem`, and the cluster's 1Password operator creates the Secret `forge-github-app`. After applying (Step 3), check without printing the key:
 
 ```bash
 kubectl -n forge get secret forge-github-app -o jsonpath='{.data}' | python3 -I -c 'import json,sys; print(sorted(json.load(sys.stdin)))'
@@ -223,7 +223,7 @@ kubectl -n forge get secret forge-github-app -o jsonpath='{.data}' | python3 -I 
 
 Expected: a list containing `github_app_private_key`.
 
-- [ ] **Step 3: Deploy**
+- [x] **Step 3: Deploy**
 
 ```bash
 FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_API_IMAGE=$IMG \
@@ -234,7 +234,7 @@ kubectl -n forge logs deploy/forge-api | tail -3
 
 Expected: rollout succeeds; logs show `forge-api listening`, no "templates are not configured" line.
 
-- [ ] **Step 4: Check templates through the cluster and run the smoke script**
+- [x] **Step 4: Check templates through the cluster and run the smoke script**
 
 ```bash
 bin/forge context use k3s
@@ -249,7 +249,7 @@ Expected: `go-grpc  v1.0.0 …`; the smoke script reports `0 failed`.
 
 ### Task 4: The Phase 2 exit gate on k3s (owner confirms first)
 
-- [ ] **Step 1: Create**
+- [x] **Step 1: Create**
 
 ```bash
 NAME=forge-e2e-$(date +%Y%m%d)
@@ -259,7 +259,7 @@ bin/forge --context k3s service get $NAME -o json | grep -E '"name"|"repoUrl"'
 
 Expected: five `✓` lines, `services/<name> created`, and the catalog entry with `repoUrl`.
 
-- [ ] **Step 2: Its CI passes**
+- [x] **Step 2: Its CI passes**
 
 ```bash
 sleep 10; gh run watch -R showmino/$NAME --exit-status "$(gh run list -R showmino/$NAME -L1 --json databaseId -q '.[0].databaseId')"
@@ -267,7 +267,7 @@ sleep 10; gh run watch -R showmino/$NAME --exit-status "$(gh run list -R showmin
 
 Expected: `test` and `image` green. This is the exit gate.
 
-- [ ] **Step 3: Clean up, whatever Step 2 showed**
+- [ ] **Step 3: Clean up, whatever Step 2 showed** (catalog entry deleted; repo deletion waits for the owner)
 
 Delete the catalog entry (`bin/forge --context k3s service delete $NAME --yes`) and the repo with an App installation token (JWT from the key with `openssl`, installation `169296924`, `DELETE /repos/showmino/$NAME` → 204, then revoke the token → 204), as in milestone 3. `gh repo view showmino/$NAME` must report it gone. Tell the owner the ghcr package `forge-e2e-<date>` remains.
 
@@ -278,9 +278,9 @@ Delete the catalog entry (`bin/forge --context k3s service delete $NAME --yes`) 
 **Files:**
 - Modify: `.claude/skills/forge/verifying.md` (section 3), `.claude/skills/forge/SKILL.md` (status), `README.md` (k3s section), `docs/index.md` (Phase 2 row: done)
 
-- [ ] **Step 1:** In `verifying.md` section 3, add the App Secret command, the `FORGE_GITHUB_APP_ID=5239131` render line, and the note that every rollout empties the in-memory catalog. In `SKILL.md`, mark Phase 2 done (milestones 1–4, exit gate passed on k3s on the date of Task 4) and list the deferred minors from milestones 1–3 as the follow-up backlog. In `README.md`'s k3s section, add the two App lines. In `docs/index.md`, mark Phase 2 done in the delivery table the way Phase 1 is marked.
+- [x] **Step 1:** In `verifying.md` section 3, add the App Secret command, the `FORGE_GITHUB_APP_ID=5239131` render line, and the note that every rollout empties the in-memory catalog. In `SKILL.md`, mark Phase 2 done (milestones 1–4, exit gate passed on k3s on the date of Task 4) and list the deferred minors from milestones 1–3 as the follow-up backlog. In `README.md`'s k3s section, add the two App lines. In `docs/index.md`, mark Phase 2 done in the delivery table the way Phase 1 is marked.
 
-- [ ] **Step 2: Gate, PR, merge**
+- [x] **Step 2: Gate, PR, merge**
 
 ```bash
 make build test lint

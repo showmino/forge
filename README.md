@@ -84,6 +84,20 @@ forge context set k3s --api http://forge.<api-ip>.nip.io --use
 forge auth login
 ```
 
+For templates and `forge create`, run forge-api as a GitHub App. Put the App's key
+in the Secret `forge-github-app` (key `github_app_private_key`), or let the
+1Password operator create it, and render with the App ID:
+
+```sh
+kubectl -n forge create secret generic forge-github-app --from-file=github_app_private_key=<key.pem>
+FORGE_GITHUB_APP_ID=<app-id> FORGE_API_IMAGE=<image> deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+# or, with the 1Password operator instead of the manual Secret:
+#   FORGE_ONEPASSWORD_ITEM=vaults/<vault>/items/<item> FORGE_GITHUB_APP_ID=<app-id> ...
+```
+
+`FORGE_GITHUB_ORG` (default `showmino`) and `FORGE_TEMPLATES_REPO` (default
+`showmino/forge-templates`) pick the org for new repos and the templates repo.
+
 Both the CLI and the forge-api pod must reach Dex at the same issuer URL
 (`http://dex.<node-ip or dex-ip>.nip.io/dex`), which is why Dex is exposed
 outside the cluster rather than called by its Service name. Change the static
