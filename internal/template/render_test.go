@@ -183,6 +183,24 @@ func TestCheckSyntax(t *testing.T) {
 	}
 }
 
+// Template repos and scaffolded repos must check out on Windows, where NTFS
+// rejects <>:"|?* and \ in file names.
+func TestPathsMustWorkOnWindows(t *testing.T) {
+	t.Parallel()
+	tp := mustParse(t, validYAML)
+	got := tp.CheckSyntax(fstest.MapFS{
+		`proto/{% .Service.Name | replace "-" "" %}/v1/a.proto`: {Data: []byte("x")},
+		"ok/{% replace `-` `` .Service.Name %}.txt":            {Data: []byte("x")},
+	})
+	if len(got) != 1 || !strings.Contains(got[0].String(), `proto/{% .Service.Name | replace "-" "" %}: `) || !strings.Contains(got[0].Message, "Windows") {
+		t.Errorf("want one finding for the directory with \" and |, got %v", got)
+	}
+	_, err := tp.Render(fstest.MapFS{"{% printf \"a%cb\" 63 %}": {Data: []byte("x")}}, renderValues(t, tp))
+	if err == nil || !strings.Contains(err.Error(), `renders to "a?b"`) {
+		t.Errorf("rendered name with ?: %v", err)
+	}
+}
+
 func TestCheckManifest(t *testing.T) {
 	t.Parallel()
 	ok := []File{{Path: "forge.yaml", Data: []byte("apiVersion: forge.dev/v1\nservice:\n  name: billing-api\n  team: billing\n")}}

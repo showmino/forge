@@ -346,7 +346,7 @@ go-grpc/skeleton/
   README.md
   go.mod                          # module {% .Params.goModule %}, go 1.24
   buf.yaml  buf.gen.yaml
-  proto/{% .Service.Name | replace "-" "" %}/v1/greeter.proto  # Go and proto names cannot contain "-"
+  proto/{% replace `-` `` .Service.Name %}/v1/greeter.proto  # no "-" in Go and proto names; no " or | (Windows)
   .gitignore                      # gen/
   cmd/{% .Service.Name %}/main.go # slog, graceful shutdown, /healthz, Connect handler
   internal/server/greeter.go

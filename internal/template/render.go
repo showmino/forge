@@ -93,6 +93,10 @@ func templateError(name string, err error) error {
 	return fmt.Errorf("%s:%s", name, msg)
 }
 
+// notOnWindows are the characters NTFS rejects in file names. Skeleton paths
+// and rendered paths avoid them so every repo checks out on Windows.
+const notOnWindows = `<>:"|?*\`
+
 // renderPath renders src one segment at a time. It returns "" when a segment
 // renders empty, which drops the file or directory.
 func (t *Template) renderPath(src string, v Values) (string, error) {
@@ -106,7 +110,7 @@ func (t *Template) renderPath(src string, v Values) (string, error) {
 		if r == "" {
 			return "", nil
 		}
-		if r == "." || r == ".." || strings.ContainsAny(r, `/\`) {
+		if r == "." || r == ".." || strings.ContainsAny(r, "/"+notOnWindows) {
 			return "", fmt.Errorf("path %s: a segment renders to %q", src, r)
 		}
 		out = append(out, r)
@@ -207,8 +211,12 @@ func (t *Template) CheckSyntax(skeleton fs.FS) []Finding {
 			add(src, errors.New("symlinks are not allowed"))
 			return nil
 		}
-		if _, err := t.parse(src, path.Base(src)); err != nil {
-			add(src, err) // each entry checks only its own name
+		name := path.Base(src) // each entry checks only its own name
+		if strings.ContainsAny(name, notOnWindows) {
+			add(src, fmt.Errorf("the name has a character Windows does not allow (%s); in template actions use `raw strings` and function calls instead of \" and |", notOnWindows))
+		}
+		if _, err := t.parse(src, name); err != nil {
+			add(src, err)
 		}
 		if d.IsDir() {
 			return nil
