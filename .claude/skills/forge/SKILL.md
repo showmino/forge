@@ -7,8 +7,10 @@ description: Use when working in the Forge repo (showmino/forge) - the internal 
 
 Forge is an internal developer platform: the `forge` CLI, the `forge-api` server and
 the Protobuf contract they share, in one Go module (`github.com/showmino/forge`).
-README.md has the layout and user-facing docs; this skill holds what the code
-does not say.
+The approved design doc is `docs/index.md` (command surface, auth, API, output
+and exit codes, phases with exit gates, open questions): read the relevant
+section before designing anything. README.md has the user-facing docs; this
+skill holds what neither says.
 
 ## Decisions (settled; do not reopen without the owner)
 
@@ -48,7 +50,8 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
 ## Status and roadmap
 
 - **Phase 1 (done):** catalog (in memory), contexts, auth, init, doctor, version, CI, GoReleaser. Dex login verified locally and on k3s (2026-10-08).
-- **Phase 2 (next):** `forge template list/get/lint` and `forge create`. Not yet designed. Open questions: whether the design doc (not in the repo) already fixes the template format; Forge-native format vs compatibility with the owner's Backstage-style `~/code/template-*` repos (`${{ values.x }}`, `catalog-info.yaml`); whether rendering and repo creation run in the CLI or the API; one template repo with per-template tags vs one repo per template. Brainstorm and get a written spec approved before code.
+- **Phase 2 (next):** `forge template list/get/lint` and `forge create`; first golden path a Go gRPC service. Exit gate: a scaffolded service passes its own CI and appears in the catalog. Blocking open question in the design doc: the template format (doc recommends a Forge format, `template.yaml` with typed parameters plus a `skeleton/` rendered with Go `text/template`, and a Backstage importer only if the `~/code/template-*` repos are still used). Brainstorm and get a written spec approved before code.
+- **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
 - **Later:** environments, deploys (Argo CD), resources (OpenTofu jobs).
 - **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP with Dex's demo password.
 
