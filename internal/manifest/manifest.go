@@ -87,22 +87,31 @@ func Find(dir string) (string, error) {
 	}
 }
 
+// Parse decodes and validates forge.yaml content. Unknown fields are errors.
+func Parse(data []byte) (*Manifest, error) {
+	var m Manifest
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&m); err != nil {
+		return nil, err
+	}
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // Load parses and validates the manifest at path.
 func Load(path string) (*Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var m Manifest
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&m); err != nil {
+	m, err := Parse(data)
+	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	if err := m.Validate(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return &m, nil
+	return m, nil
 }
 
 // Marshal renders the manifest as YAML.

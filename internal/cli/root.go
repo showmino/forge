@@ -99,7 +99,7 @@ exit codes:
 		&cobra.Group{ID: "core", Title: "Core commands:"},
 		&cobra.Group{ID: "setup", Title: "Setup commands:"},
 	)
-	for _, c := range []*cobra.Command{newServiceCmd(f)} {
+	for _, c := range []*cobra.Command{newServiceCmd(f), newTemplateCmd(f)} {
 		c.GroupID = "core"
 		root.AddCommand(c)
 	}

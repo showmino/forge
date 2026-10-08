@@ -97,6 +97,7 @@ Commands follow `forge <noun> <verb>`:
 | Group | Verbs |
 | --- | --- |
 | `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `delete` |
+| `template` | `lint` (Phase 2 adds `list`, `get` and `forge create`) |
 | `context` | `list`, `use`, `current`, `set` |
 | `auth` | `login`, `logout`, `status`, `token` |
 | utilities | `init`, `doctor`, `version`, `completion` |
@@ -108,6 +109,14 @@ service commands default to that service.
 
 Exit codes: 0 ok, 1 unexpected, 2 usage, 3 not found, 4 not authenticated,
 5 permission denied, 6 conflict, 7 operation failed, 8 timed out.
+
+## Templates
+
+Templates live in [`showmino/forge-templates`](https://github.com/showmino/forge-templates):
+one directory per template with a `template.yaml` (typed parameters) and a
+`skeleton/` rendered with Go `text/template`, released by repo-wide semver
+tags. `forge template lint [dir]` checks them locally, with no API or login;
+see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
 
 ## The API
 
