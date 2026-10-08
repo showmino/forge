@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -45,5 +46,20 @@ func TestUnauthenticatedHint(t *testing.T) {
 	e := From(connect.NewError(connect.CodeUnauthenticated, errors.New("token expired")))
 	if e.Hint == "" || e.Error() != "token expired" {
 		t.Errorf("got %q hint %q", e.Error(), e.Hint)
+	}
+}
+
+// UNAVAILABLE from the API itself (it answered, with its version header)
+// means something behind it is down; without a response the API is unreachable.
+func TestUnavailableHint(t *testing.T) {
+	t.Parallel()
+	transport := connect.NewError(connect.CodeUnavailable, errors.New("dial tcp: connection refused"))
+	if h := From(transport).Hint; !strings.Contains(h, "Forge API is unreachable") {
+		t.Errorf("transport failure hint: %q", h)
+	}
+	answered := connect.NewError(connect.CodeUnavailable, errors.New("template source unavailable: github 503"))
+	answered.Meta().Set("Forge-Server-Version", "0.1.0")
+	if h := From(answered).Hint; strings.Contains(h, "unreachable") || !strings.Contains(h, "depends on") {
+		t.Errorf("server-side outage hint: %q", h)
 	}
 }

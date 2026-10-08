@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -165,4 +168,24 @@ func TestTemplateGetErrors(t *testing.T) {
 	h.fails(2, "template", "get")
 	delete(h.env, "FORGE_TOKEN")
 	h.fails(4, "template", "list")
+}
+
+// downSource is a template source whose backend (GitHub) is down.
+type downSource struct{}
+
+func (downSource) Versions(context.Context) ([]string, error) { return nil, errors.New("github: 503") }
+func (downSource) Fetch(context.Context, string) (fs.FS, error) {
+	return nil, errors.New("github: 503")
+}
+
+// When GitHub is down the API still answers, so the hint must not blame the API.
+func TestTemplateSourceDownHint(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.templates = downSource{}
+	h.startAPI(h.authn)
+	r := h.fails(1, "template", "list")
+	if !strings.Contains(r.err, "503") || !strings.Contains(r.err, "depends on") || strings.Contains(r.err, "unreachable") {
+		t.Errorf("hint for a GitHub outage:\n%s", r.err)
+	}
 }

@@ -28,6 +28,12 @@ const (
 // fstest.MapFS is the standard library's in-memory fs.FS; the API's root
 // filesystem is read-only, so the tree cannot go to disk.
 func untar(r io.Reader) (fs.FS, error) {
+	return untarLimited(r, maxTreeBytes, maxTreeFiles)
+}
+
+// untarLimited is untar with explicit whole-tree limits. Entry names count
+// toward maxBytes: a tar name can be up to a megabyte long.
+func untarLimited(r io.Reader, maxBytes, maxFiles int) (fs.FS, error) {
 	zr, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("read tarball: %w", err)
@@ -58,9 +64,9 @@ func untar(r io.Reader) (fs.FS, error) {
 		if h.Size > template.MaxBytes {
 			return nil, fmt.Errorf("tarball entry %s is larger than %d bytes", name, template.MaxBytes)
 		}
-		total += int(h.Size)
-		if total > maxTreeBytes || len(out) == maxTreeFiles {
-			return nil, fmt.Errorf("the template repo is larger than %d bytes or %d files", maxTreeBytes, maxTreeFiles)
+		total += int(h.Size) + len(name)
+		if total > maxBytes || len(out) == maxFiles {
+			return nil, fmt.Errorf("the template repo is larger than %d bytes or %d files", maxBytes, maxFiles)
 		}
 		data, err := io.ReadAll(io.LimitReader(tr, h.Size))
 		if err != nil {

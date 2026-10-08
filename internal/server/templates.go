@@ -52,11 +52,15 @@ func (s *templateService) release(ctx context.Context, version string) (string, 
 		version = vs[0]
 	}
 	tree, err := s.src.Fetch(ctx, version)
-	if errors.Is(err, ErrVersionNotFound) {
+	switch {
+	case errors.Is(err, ErrVersionNotFound):
 		return "", nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("template version %s not found", version))
-	}
-	if err != nil {
-		return "", nil, connect.NewError(connect.CodeUnavailable, err)
+	case errors.Is(err, ErrInvalidRelease):
+		return "", nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "", nil, connect.NewError(connect.CodeDeadlineExceeded, err)
+	case err != nil:
+		return "", nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("template source unavailable: %w", err))
 	}
 	return version, tree, nil
 }

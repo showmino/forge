@@ -107,3 +107,33 @@ func TestUntarRejects(t *testing.T) {
 		t.Error("garbage accepted")
 	}
 }
+
+// The whole-tree caps are the defence against a decompression bomb. Entry
+// names count too: a tar entry's name can be up to a megabyte.
+func TestUntarTreeLimits(t *testing.T) {
+	t.Parallel()
+	files := func(n, size int) []entry {
+		var es []entry
+		for i := range n {
+			es = append(es, entry{name: top + "f" + strings.Repeat("x", i), typ: tar.TypeReg, data: strings.Repeat("a", size)})
+		}
+		return es
+	}
+	tests := map[string]struct {
+		entries         []entry
+		maxBytes, files int
+	}{
+		"too many files":   {files(3, 1), 1 << 20, 2},
+		"too many bytes":   {files(3, 10), 25, 100},
+		"long names count": {[]entry{{name: top + strings.Repeat("n", 100), typ: tar.TypeReg}}, 50, 100},
+	}
+	for name, tt := range tests {
+		_, err := untarLimited(bytes.NewReader(tarball(t, tt.entries...)), tt.maxBytes, tt.files)
+		if err == nil || !strings.Contains(err.Error(), "larger than") {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+	if _, err := untarLimited(bytes.NewReader(tarball(t, files(2, 10)...)), 1<<20, 2); err != nil {
+		t.Errorf("exactly at the file limit: %v", err)
+	}
+}

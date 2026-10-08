@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"strings"
@@ -33,6 +34,12 @@ func (s staticSource) Fetch(_ context.Context, v string) (fs.FS, error) {
 	}
 	return nil, ErrVersionNotFound
 }
+
+// fetchFails knows one version but cannot fetch it.
+type fetchFails struct{ err error }
+
+func (fetchFails) Versions(context.Context) ([]string, error)     { return []string{"v1.0.0"}, nil }
+func (f fetchFails) Fetch(context.Context, string) (fs.FS, error) { return nil, f.err }
 
 func templateYAML(name, tags string, params string) string {
 	return "apiVersion: forge.dev/v1\nkind: Template\nname: " + name + "\ntitle: " + name + " title\ndescription: " + name + " description\ntags: [" + tags + "]\nowner: platform\n" + params
@@ -140,6 +147,8 @@ func TestTemplateErrors(t *testing.T) {
 		{"not configured", get(nil, ctx, "templates/go-grpc", ""), connect.CodeFailedPrecondition, "templates are not configured"},
 		{"no releases", get(staticSource{}, ctx, "templates/go-grpc", ""), connect.CodeFailedPrecondition, "no release tags"},
 		{"source down", get(staticSource{err: errors.New("github: 503")}, ctx, "templates/go-grpc", ""), connect.CodeUnavailable, "503"},
+		{"source down on fetch", get(fetchFails{fmt.Errorf("download: %w", errors.New("timeout"))}, ctx, "templates/go-grpc", ""), connect.CodeUnavailable, "template source unavailable"},
+		{"invalid release", get(fetchFails{fmt.Errorf("x@v1.0.0: %w: symlink", ErrInvalidRelease)}, ctx, "templates/go-grpc", ""), connect.CodeFailedPrecondition, "release is invalid"},
 		{"anonymous", get(twoReleases, context.Background(), "templates/go-grpc", ""), connect.CodeUnauthenticated, ""},
 	}
 	for _, tt := range tests {

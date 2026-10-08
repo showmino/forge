@@ -28,6 +28,10 @@ type TemplateSource interface {
 // ErrVersionNotFound means a template version does not exist.
 var ErrVersionNotFound = errors.New("template version not found")
 
+// ErrInvalidRelease means a release exists but cannot be served (for
+// example its tarball breaks the extraction rules): retrying will not help.
+var ErrInvalidRelease = errors.New("the template release is invalid")
+
 // DirSource serves a local checkout of the template repo as the single
 // version "dev", for development.
 type DirSource struct{ Dir string }
@@ -49,18 +53,31 @@ const tagTTL = time.Minute
 
 var semverTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
+// tagRetry is how soon a failed tag refresh is retried while the last known
+// tags are served.
+const tagRetry = 10 * time.Second
+
 // GitHubSource serves the semver tags of a GitHub repo. Each tag's tree is
-// downloaded once and kept in memory: tags do not change.
+// downloaded once and kept in memory: tags do not change. No lock is held
+// while talking to GitHub, so a slow download stalls only its own callers.
 type GitHubSource struct {
 	client      *github.Client
 	owner, repo string
 	// Now defaults to time.Now; tests replace it.
 	Now func() time.Time
 
-	mu     sync.Mutex
-	tags   []string
-	tagsAt time.Time
-	trees  map[string]fs.FS
+	mu       sync.Mutex
+	tags     []string
+	tagsAt   time.Time
+	trees    map[string]fs.FS
+	inflight map[string]*download
+}
+
+// download is one tarball fetch that concurrent callers share.
+type download struct {
+	done chan struct{}
+	tree fs.FS
+	err  error
 }
 
 // NewGitHubSource returns a source for repo, "owner/name".
@@ -69,23 +86,32 @@ func NewGitHubSource(c *github.Client, repo string) (*GitHubSource, error) {
 	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 		return nil, fmt.Errorf("template repo %q must be owner/name", repo)
 	}
-	return &GitHubSource{client: c, owner: owner, repo: name, Now: time.Now, trees: map[string]fs.FS{}}, nil
+	return &GitHubSource{
+		client: c, owner: owner, repo: name, Now: time.Now,
+		trees: map[string]fs.FS{}, inflight: map[string]*download{},
+	}, nil
 }
 
-// Versions implements TemplateSource.
+// Versions implements TemplateSource. While GitHub is failing it serves the
+// last known tags and retries every tagRetry.
 func (s *GitHubSource) Versions(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	vs, err := s.versionsLocked(ctx)
-	return slices.Clone(vs), err
-}
-
-func (s *GitHubSource) versionsLocked(ctx context.Context) ([]string, error) {
 	if s.tags != nil && s.Now().Sub(s.tagsAt) < tagTTL {
-		return s.tags, nil
+		tags := slices.Clone(s.tags)
+		s.mu.Unlock()
+		return tags, nil
 	}
+	s.mu.Unlock()
+
 	all, err := s.client.ListTags(ctx, s.owner, s.repo)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err != nil {
+		if s.tags != nil {
+			s.tagsAt = s.Now().Add(tagRetry - tagTTL)
+			return slices.Clone(s.tags), nil
+		}
 		return nil, fmt.Errorf("list tags of %s/%s: %w", s.owner, s.repo, err)
 	}
 	tags := []string{}
@@ -96,23 +122,62 @@ func (s *GitHubSource) versionsLocked(ctx context.Context) ([]string, error) {
 	}
 	slices.SortFunc(tags, func(a, b string) int { return version.Compare(b, a) })
 	s.tags, s.tagsAt = tags, s.Now()
-	return tags, nil
+	return slices.Clone(tags), nil
 }
 
-// Fetch implements TemplateSource.
+// Fetch implements TemplateSource. Concurrent callers of one uncached tag
+// share a single download; each waits only as long as its own context allows.
 func (s *GitHubSource) Fetch(ctx context.Context, v string) (fs.FS, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if tree, ok := s.trees[v]; ok {
+	tree, cached := s.trees[v]
+	d, running := s.inflight[v]
+	s.mu.Unlock()
+	if cached {
 		return tree, nil
 	}
-	tags, err := s.versionsLocked(ctx)
-	if err != nil {
-		return nil, err
+	if !running {
+		tags, err := s.Versions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(tags, v) {
+			return nil, fmt.Errorf("%w: %s", ErrVersionNotFound, v)
+		}
+		s.mu.Lock()
+		if tree, ok := s.trees[v]; ok {
+			s.mu.Unlock()
+			return tree, nil
+		}
+		if d, running = s.inflight[v]; !running {
+			d = &download{done: make(chan struct{})}
+			s.inflight[v] = d
+			// The download outlives the caller that started it: others may be
+			// waiting for it. The HTTP client's timeout bounds it.
+			go s.download(context.WithoutCancel(ctx), v, d)
+		}
+		s.mu.Unlock()
 	}
-	if !slices.Contains(tags, v) {
-		return nil, fmt.Errorf("%w: %s", ErrVersionNotFound, v)
+	select {
+	case <-d.done:
+		return d.tree, d.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
+}
+
+func (s *GitHubSource) download(ctx context.Context, v string, d *download) {
+	tree, err := s.fetchTree(ctx, v)
+	s.mu.Lock()
+	if err == nil {
+		s.trees[v] = tree
+	}
+	delete(s.inflight, v)
+	s.mu.Unlock()
+	d.tree, d.err = tree, err
+	close(d.done)
+}
+
+func (s *GitHubSource) fetchTree(ctx context.Context, v string) (fs.FS, error) {
 	body, err := s.client.Tarball(ctx, s.owner, s.repo, v)
 	if err != nil {
 		return nil, fmt.Errorf("download %s/%s@%s: %w", s.owner, s.repo, v, err)
@@ -120,8 +185,7 @@ func (s *GitHubSource) Fetch(ctx context.Context, v string) (fs.FS, error) {
 	defer body.Close()
 	tree, err := untar(body)
 	if err != nil {
-		return nil, fmt.Errorf("%s/%s@%s: %w", s.owner, s.repo, v, err)
+		return nil, fmt.Errorf("%s/%s@%s: %w: %w", s.owner, s.repo, v, ErrInvalidRelease, err)
 	}
-	s.trees[v] = tree
 	return tree, nil
 }
