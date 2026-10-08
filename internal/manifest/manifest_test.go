@@ -3,8 +3,26 @@ package manifest
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestParse(t *testing.T) {
+	t.Parallel()
+	m, err := Parse([]byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Service.Name != "payments" || m.Service.Team != "billing" {
+		t.Errorf("got %+v", m.Service)
+	}
+	if _, err := Parse([]byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  tem: billing\n")); err == nil || !strings.Contains(err.Error(), "tem") {
+		t.Errorf("unknown field: %v", err)
+	}
+	if _, err := Parse([]byte("apiVersion: forge.dev/v1\nservice:\n  name: Bad_Name\n  team: billing\n")); err == nil {
+		t.Error("invalid name accepted")
+	}
+}
 
 func TestRoundTripAndFind(t *testing.T) {
 	t.Parallel()
