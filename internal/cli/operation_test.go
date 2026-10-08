@@ -166,3 +166,81 @@ func TestOpWatchReattachPrintsEachEventOnce(t *testing.T) {
 		}
 	}
 }
+
+func TestOpList(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if r := h.ok("op", "list"); r.out != "" || !strings.Contains(r.err, "No operations.") {
+		t.Errorf("empty: %v", r)
+	}
+	if r := h.ok("op", "list", "-o", "json"); !strings.Contains(r.out, `"operations": []`) {
+		t.Errorf("empty json: %q", r.out)
+	}
+	done := h.startOp("environments/a", func(context.Context, func(string, string)) error { return nil })
+	h.waitOp(done)
+	gate := make(chan struct{})
+	t.Cleanup(func() { close(gate) })
+	running := h.startOp("environments/b", func(context.Context, func(string, string)) error { <-gate; return nil })
+
+	r := h.ok("op", "list")
+	// Ids are random: replace them before comparing with the golden file.
+	out := strings.NewReplacer(done, "op_done", running, "op_running").Replace(r.out)
+	golden(t, "op_list_table", out)
+	js := strings.NewReplacer(done, "op_done", running, "op_running").Replace(h.ok("op", "list", "-o", "json").out)
+	if !strings.Contains(js, `"name": "operations/op_running"`) || strings.Contains(js, `"events"`) {
+		t.Errorf("json: %s", js)
+	}
+	if r := h.ok("op", "list", "--running", "-o", "name"); r.out != "operations/"+running+"\n" {
+		t.Errorf("running: %q", r.out)
+	}
+	if r := h.ok("op", "list", "--target", "environments/a", "-o", "name"); r.out != "operations/"+done+"\n" {
+		t.Errorf("target: %q", r.out)
+	}
+}
+
+func TestOpCancel(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	id := h.startOp("environments/a", func(ctx context.Context, emit func(string, string)) error {
+		emit("image", "waiting")
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	h.fails(2, "op", "cancel", id) // no terminal, no --yes
+	r := h.ok("op", "cancel", id, "--yes")
+	if r.out != "operations/"+id+" cancelling\n" {
+		t.Errorf("cancel: %q", r.out)
+	}
+	h.waitOp(id)
+	r = h.ok("op", "cancel", id, "--yes")
+	if r.out != "operations/"+id+" already finished (cancelled)\n" {
+		t.Errorf("again: %q", r.out)
+	}
+	h.fails(3, "op", "cancel", "op_000000000000", "--yes")
+
+	waited := h.startOp("environments/a", func(ctx context.Context, _ func(string, string)) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	r = h.fails(7, "op", "cancel", waited, "--yes", "--wait")
+	if !strings.Contains(r.err, "operations/"+waited+" was cancelled") {
+		t.Errorf("--wait: %v", r)
+	}
+
+	// A reader may not cancel.
+	h.env["FORGE_TOKEN"] = readerToken
+	other := h.startOp("environments/a", func(ctx context.Context, _ func(string, string)) error { <-ctx.Done(); return nil })
+	h.fails(5, "op", "cancel", other, "--yes")
+	h.ops.Cancel("operations/" + other)
+}
+
+func TestAge(t *testing.T) {
+	t.Parallel()
+	for d, want := range map[time.Duration]string{
+		0: "<1m", 59 * time.Second: "<1m", 5 * time.Minute: "5m", 3*time.Hour + time.Minute: "3h", 50 * time.Hour: "2d",
+	} {
+		if got := age(d); got != want {
+			t.Errorf("age(%v) = %q, want %q", d, got, want)
+		}
+	}
+}

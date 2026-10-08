@@ -22,7 +22,7 @@ func newOpCmd(f *Factory) *cobra.Command {
 the Forge API. Commands that start one watch it until it ends; with
 --wait=false they print its id instead, and 'forge op watch <id>' picks it up
 again. Operations live in the API's memory for 24 hours.`
-	cmd.AddCommand(newOpWatchCmd(f))
+	cmd.AddCommand(newOpListCmd(f), newOpWatchCmd(f), newOpCancelCmd(f))
 	return cmd
 }
 
@@ -169,4 +169,128 @@ func (f *Factory) watchErr(ctx context.Context, name string, err error) error {
 			WithHint("resume with: forge op watch " + opID(name))
 	}
 	return err
+}
+
+func newOpListCmd(f *Factory) *cobra.Command {
+	var target string
+	var running bool
+	cmd := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List operations, newest first",
+		Example: `  forge op list
+  forge op list --running
+  forge op list --target environments/pr-142 -o json`,
+		Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Operations.ListOperations(ctx, connect.NewRequest(&forgev1.ListOperationsRequest{Target: target, Running: running}))
+			if err != nil {
+				return err
+			}
+			ops := resp.Msg.GetOperations()
+			if len(ops) == 0 && format == output.Table {
+				f.infof("No operations.")
+				return nil
+			}
+			v := output.View{Headers: []string{"id", "kind", "target", "state", "age"}, Data: resp.Msg}
+			if len(ops) == 0 {
+				v.Data = map[string]any{"operations": []any{}} // keep '.operations[]' working in jq
+			}
+			now := f.Now()
+			for _, op := range ops {
+				v.Rows = append(v.Rows, []string{opID(op.GetName()), op.GetKind(), op.GetTarget(), opState(op), age(now.Sub(op.GetCreateTime().AsTime()))})
+				v.Names = append(v.Names, op.GetName())
+			}
+			return output.Print(f.IO.Out, format, v)
+		},
+	}
+	cmd.Flags().StringVar(&target, "target", "", "only operations on this resource, for example environments/pr-142")
+	cmd.Flags().BoolVar(&running, "running", false, "only operations that are still running")
+	return cmd
+}
+
+func newOpCancelCmd(f *Factory) *cobra.Command {
+	var yes, wait bool
+	cmd := &cobra.Command{
+		Use:   "cancel <id>",
+		Short: "Stop a running operation",
+		Long: `Ask a running operation to stop. Work it already did is undone where the
+operation's kind allows it (a cancelled environment create removes the
+environment). Cancelling a finished operation changes nothing.`,
+		Example: `  forge op cancel op_9f2c4a1b0c3d --yes
+  forge op cancel op_9f2c4a1b0c3d --yes --wait`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			name := opName(args[0])
+			if !validOpID(name) {
+				return exitcode.Usagef("%q is not an operation id (op_<id>)", args[0]).WithHint("see 'forge op list'")
+			}
+			if err := f.confirmDestructive("cancel", name, yes); err != nil {
+				return err
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.StreamClient(ctx)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Operations.CancelOperation(ctx, connect.NewRequest(&forgev1.CancelOperationRequest{Name: name}))
+			if err != nil {
+				return err
+			}
+			op := resp.Msg.GetOperation()
+			if op.GetDone() {
+				if format != output.Table {
+					return f.printOperation(format, op)
+				}
+				_, err := fmt.Fprintf(f.IO.Out, "%s already finished (%s)\n", name, opState(op))
+				return err
+			}
+			if !wait {
+				if format != output.Table {
+					return f.printOperation(format, op)
+				}
+				_, err := fmt.Fprintf(f.IO.Out, "%s cancelling\n", name)
+				return err
+			}
+			if op, err = f.watchOperation(ctx, c, name); err != nil {
+				return err
+			}
+			if err := opFailure(op); err != nil {
+				return err
+			}
+			return f.printOperation(format, op)
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
+	cmd.Flags().BoolVar(&wait, "wait", false, "watch the operation until it has stopped")
+	return cmd
+}
+
+// age reads a duration coarsely: <1m, 5m, 3h, 2d.
+func age(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "<1m"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	default:
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	}
 }
