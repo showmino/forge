@@ -137,7 +137,7 @@ message TemplateParameter {
   string name = 1;
   Type type = 2;
   bool required = 3;
-  string default = 4;           // as written in template.yaml
+  string default_value = 4;     // as written in template.yaml
   string pattern = 5;
   repeated string values = 6;
   string description = 7;
@@ -243,6 +243,10 @@ New forge-api flags, each with a `FORGE_` environment variable like the existing
 | `--templates-dir` | Serve templates from a local directory instead (development) |
 
 Without a template source, `TemplateService` returns `FAILED_PRECONDITION` ("templates are not configured"). Without GitHub App settings, `CreateService` does the same, except with `validate_only`, which works against `--templates-dir`.
+
+`TemplateService` requires an authenticated caller but no permission: templates are not sensitive.
+
+GitHub App authentication ships in milestone 2 (the App, `mino-forge`, exists): the API finds the App's installation from `--github-org` (`GET /orgs/{org}/installation`), so no installation ID is configured.
 
 ### GitHub App
 
@@ -368,8 +372,8 @@ The template's own CI renders `go-grpc` with sample values and runs the rendered
 Four milestones, each ending in something that works on its own:
 
 1. **Template format and lint.** `internal/template`, `forge template lint`, the `showmino/forge-templates` repo with `go-grpc` v1.0.0 and its lint CI. Works offline; no API changes.
-2. **Template service.** `TemplateService` with `DirSource` and `GitHubSource`, `forge template list / get`.
-3. **Create.** `internal/github`, the `CreateService` pipeline, `forge create`.
+2. **Template service.** GitHub App authentication, `TemplateService` with `DirSource` and `GitHubSource`, `forge template list / get`.
+3. **Create.** repo creation in `internal/github`, the `CreateService` pipeline, `forge create`.
 4. **k3s and the exit gate.** App key Secret, forge-api flags in the k3s manifests, the end-to-end run.
 
 ### Needs from the owner
