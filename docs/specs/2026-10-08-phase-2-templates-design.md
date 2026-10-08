@@ -48,11 +48,11 @@ title: Go gRPC service
 description: ConnectRPC service with CI, Dockerfile and forge.yaml
 tags: [go, grpc]
 owner: platform
-delimiters: ["[[", "]]"]         # optional; default ["{{", "}}"]
+delimiters: ["{%", "%}"]         # optional; default ["{{", "}}"]
 parameters:
   - name: goModule
     type: string                 # string | int | bool | enum
-    default: "github.com/[[ .Repo.Owner ]]/[[ .Repo.Name ]]"
+    default: "github.com/{% .Repo.Owner %}/{% .Repo.Name %}"
     pattern: '^[a-z0-9./-]+$'
     description: Go module path
   - name: port
@@ -72,7 +72,7 @@ parameters:
 | `title`, `description` | Required, single line |
 | `tags` | Optional, lowercase words, used by `template list --tag` |
 | `delimiters` | Optional pair of non-empty, distinct strings |
-| `parameters[].name` | Go identifier (`^[a-zA-Z][a-zA-Z0-9]*$`), unique, not a built-in name |
+| `parameters[].name` | Go identifier (`^[a-zA-Z][a-zA-Z0-9]*$`), unique |
 | `parameters[].type` | `string`, `int`, `bool` or `enum` (`enum` requires `values`) |
 | `parameters[].required` | A parameter with no `default` is required |
 | `parameters[].default` | Must satisfy the type, `pattern` and `values`; a string default may use built-in values (rendered before validation) |
@@ -90,6 +90,7 @@ parameters:
 - File modes are kept (executable scripts stay executable). Symlinks are rejected.
 - A path segment that renders to an empty string drops that file or directory, so templates can make files optional.
 - Limits: at most 2,000 files and 10 MiB of rendered output.
+- Files that are not valid UTF-8 are copied unchanged instead of rendered.
 - The render must produce a `forge.yaml` at the root that passes `manifest.Load` and whose `service.name` and `service.team` equal the requested service and team. The catalog entry is registered from it.
 
 ### Lint
@@ -100,7 +101,7 @@ parameters:
 2. `name` equals the directory name.
 3. `skeleton/` exists and is not empty.
 4. Every file and path segment parses as a template.
-5. A test render succeeds, using each parameter's default (or a type-appropriate sample for required parameters) and the sample service `example` with team `example`.
+5. A test render succeeds, using each parameter's default (or a type-appropriate sample for required parameters) and the sample service `sample-service` with team `sample-team` (a name with a dash, so templates are checked against one).
 6. Rendered paths are relative and clean (no `..`), do not collide, and stay within the size limits.
 7. The rendered `forge.yaml` is valid and names the sample service and team.
 
@@ -272,7 +273,7 @@ Prints the template's fields, then its parameters:
 
 ```
 NAME         TYPE     REQUIRED   DEFAULT                                     DESCRIPTION
-goModule     string   no         github.com/[[ .Repo.Owner ]]/[[ .Repo.Name ]]   Go module path
+goModule     string   no         github.com/{% .Repo.Owner %}/{% .Repo.Name %}   Go module path
 port         int      no         8080                                        Port the server listens on
 ```
 
@@ -285,6 +286,7 @@ port         int      no         8080                                        Por
 - Prints `go-grpc/template.yaml:12: parameter "port": default "x" is not an int`, one line per finding, to stdout.
 - Exit 0 when clean, 1 when there are findings (as `doctor` does for failed checks), 2 when `dir` has no template.
 - `-o json` prints `{"findings": [{"template", "file", "line", "message"}]}`.
+- A hidden `--render-dir DIR` flag also writes each clean template's sample render to `DIR/<template>` (used by the template repo's CI).
 
 ### `forge create <name> --template <t>[@version] --team <team>`
 
@@ -342,11 +344,11 @@ All new code is written test first.
 go-grpc/skeleton/
   forge.yaml
   README.md
-  go.mod                          # module [[ .Params.goModule ]], go 1.24
+  go.mod                          # module {% .Params.goModule %}, go 1.24
   buf.yaml  buf.gen.yaml
-  proto/[[ .Service.Name ]]/v1/greeter.proto
+  proto/{% .Service.Name | replace "-" "" %}/v1/greeter.proto  # Go and proto names cannot contain "-"
   .gitignore                      # gen/
-  cmd/[[ .Service.Name ]]/main.go # slog, graceful shutdown, /healthz, Connect handler
+  cmd/{% .Service.Name %}/main.go # slog, graceful shutdown, /healthz, Connect handler
   internal/server/greeter.go
   internal/server/greeter_test.go
   Dockerfile                      # distroless, USER 65532:65532
@@ -355,7 +357,7 @@ go-grpc/skeleton/
   .github/workflows/ci.yml
 ```
 
-CI (`ci.yml`) runs `buf lint`, `make generate`, `go test -race ./...` and golangci-lint on every push and pull request. On `main` it also builds the image and pushes `ghcr.io/showmino/[[ .Service.Name ]]:<short-sha>` with the repo's `GITHUB_TOKEN`.
+CI (`ci.yml`) runs `buf lint`, `make generate`, `go test -race ./...` and golangci-lint on every push and pull request. On `main` it also builds the image and pushes `ghcr.io/showmino/{% .Service.Name %}:<short-sha>` with the repo's `GITHUB_TOKEN`.
 
 Generated code is not part of the skeleton: `.pb.go` files embed the proto file path and Go package as length-prefixed descriptor bytes, so rendering a new name into them would corrupt them. Scaffolded services run `buf generate` (`make generate`, plugins pinned with `go install`) in CI, in the Dockerfile and locally, and keep `gen/` out of Git. This differs from Forge itself, which commits `gen/`.
 
@@ -375,7 +377,7 @@ Four milestones, each ending in something that works on its own:
 | When | What | Status |
 | --- | --- | --- |
 | Milestone 1 | Create `showmino/forge-templates` (private) | Approved |
-| Milestone 1 | How the template repo's CI gets the `forge` binary, since both repos are private. Proposal: a read-only fine-grained token for `showmino/forge` (Contents: read) as the org secret `FORGE_READ_TOKEN`, and a tagged `forge` release (`v0.2.0`) for CI to download. | Open |
+| Milestone 1 | How the template repo's CI gets the `forge` binary, since both repos are private. Proposal: a read-only fine-grained token for `showmino/forge` (Contents: read) as the org secret `FORGE_READ_TOKEN`; the template repo's CI checks out and builds `forge` with it. | Open |
 | Milestone 3 | Create the Forge GitHub App from the manifest; share the App ID and the path of the saved private key (never the key itself) | Open |
 | Milestone 4 | Create the k8s Secret from the key; run the end-to-end create, which creates and deletes a real repo | Open |
 
