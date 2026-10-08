@@ -1934,7 +1934,7 @@ Stop the API afterwards by its PID (`kill <pid>`), never with `pkill -f`.
   - **`SKILL.md` "Status and roadmap":** replace the Phase 2 "follow-up backlog" bullet's position by adding, after the Phase 2 bullet: `- **Phase 3 (in progress):** spec docs/specs/2026-10-08-phase-3-environments-design.md. Milestone 1: operations (OperationService, in-memory store, forge op list/watch/cancel) per docs/plans/2026-10-08-phase-3-m1-operations.md. Then milestone 2 (environments) and 3 (k3s and the 10-minute exit gate).`
   - **README:** after the paragraph that starts "`forge create <name> --template <template> --team <team>` asks forge-api to", add: "`forge op list`, `forge op watch <id>` and `forge op cancel <id>` show and stop long-running work on the API (operations). Phase 3's environments are the first to use them."
 
-- [ ] **Step 3: Gate, PR, merge**
+- [x] **Step 3: Gate, PR, merge**
 
 ```bash
 make build test lint
