@@ -45,16 +45,44 @@ func (t *Template) parse(name, text string) (*gotemplate.Template, error) {
 	return tp, nil
 }
 
+// errTooLarge is returned as soon as rendering would exceed its byte budget.
+var errTooLarge = fmt.Errorf("rendered output is larger than %d bytes", MaxBytes)
+
+// limitWriter fails once more than left bytes are written, so a looping
+// template is stopped while it renders instead of after.
+type limitWriter struct {
+	b    strings.Builder
+	left int
+}
+
+func (w *limitWriter) Write(p []byte) (int, error) {
+	if len(p) > w.left {
+		return 0, errTooLarge
+	}
+	w.left -= len(p)
+	return w.b.Write(p)
+}
+
 func (t *Template) renderString(name, text string, v Values) (string, error) {
+	out, _, err := t.renderLimited(name, text, v, MaxBytes)
+	return out, err
+}
+
+// renderLimited renders text with at most left bytes of output and returns
+// the bytes left over.
+func (t *Template) renderLimited(name, text string, v Values, left int) (string, int, error) {
 	tp, err := t.parse(name, text)
 	if err != nil {
-		return "", err
+		return "", left, err
 	}
-	var b strings.Builder
-	if err := tp.Execute(&b, v); err != nil {
-		return "", templateError(name, err)
+	w := &limitWriter{left: left}
+	if err := tp.Execute(w, v); err != nil {
+		if errors.Is(err, errTooLarge) {
+			return "", left, errTooLarge
+		}
+		return "", left, templateError(name, err)
 	}
-	return b.String(), nil
+	return w.b.String(), w.left, nil
 }
 
 // templateError turns `template: :1:10: executing "" at <.X>: msg` from an
@@ -91,7 +119,7 @@ func (t *Template) renderPath(src string, v Values) (string, error) {
 func (t *Template) Render(skeleton fs.FS, v Values) ([]File, error) {
 	var files []File
 	from := map[string]string{} // rendered path -> source path
-	total := 0
+	left := MaxBytes            // output budget shared by every file
 	err := fs.WalkDir(skeleton, ".", func(src string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -125,24 +153,28 @@ func (t *Template) Render(skeleton fs.FS, v Values) ([]File, error) {
 		if len(files) == MaxFiles {
 			return fmt.Errorf("the skeleton renders more than %d files", MaxFiles)
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() > int64(MaxBytes) {
+			return fmt.Errorf("%s: the file is larger than %d bytes", src, MaxBytes)
+		}
 		data, err := fs.ReadFile(skeleton, src)
 		if err != nil {
 			return err
 		}
 		if utf8.Valid(data) {
-			out, err := t.renderString(src, string(data), v)
+			out, rest, err := t.renderLimited(src, string(data), v, left)
 			if err != nil {
 				return err
 			}
-			data = []byte(out)
-		}
-		total += len(data)
-		if total > MaxBytes {
-			return fmt.Errorf("rendered output is larger than %d bytes", MaxBytes)
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
+			data, left = []byte(out), rest
+		} else {
+			if len(data) > left {
+				return errTooLarge
+			}
+			left -= len(data)
 		}
 		mode := fs.FileMode(0o644)
 		if info.Mode()&0o111 != 0 {

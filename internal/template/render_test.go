@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -114,6 +115,40 @@ func TestRenderTooManyFiles(t *testing.T) {
 		fsys[fmt.Sprintf("f%d", i)] = &fstest.MapFile{Data: []byte("x")}
 	}
 	if _, err := tp.Render(fsys, renderValues(t, tp)); err == nil || !strings.Contains(err.Error(), "more than 2000 files") {
+		t.Errorf("got %v", err)
+	}
+}
+
+// The size limit must bound memory while rendering, not only be checked after:
+// a template can loop, and forge-api renders templates from a repo.
+func TestRenderStopsAtTheSizeLimit(t *testing.T) {
+	tp := mustParse(t, validYAML)
+	v := renderValues(t, tp)
+	loop := "{% range 20000 %}{% range 1000 %}xxxxxxxxxx{% end %}{% end %}" // 200 MB if unbounded
+	for name, fsys := range map[string]fstest.MapFS{
+		"file content": {"a.txt": {Data: []byte(loop)}},
+		"path segment": {loop: {Data: []byte("x")}},
+	} {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		_, err := tp.Render(fsys, v)
+		runtime.ReadMemStats(&after)
+		if err == nil || !strings.Contains(err.Error(), "larger than") {
+			t.Errorf("%s: got %v, want a size error", name, err)
+		}
+		// Bounded work costs a few times the limit (builder growth, per-iteration
+		// allocations); unbounded rendering of this loop costs over 1 GiB.
+		if grew := after.TotalAlloc - before.TotalAlloc; grew > 8*MaxBytes {
+			t.Errorf("%s: rendering allocated %d MiB before failing; the limit is %d MiB", name, grew>>20, MaxBytes>>20)
+		}
+	}
+}
+
+func TestRenderRejectsOversizedSourceBeforeReading(t *testing.T) {
+	t.Parallel()
+	tp := mustParse(t, validYAML)
+	_, err := tp.Render(fstest.MapFS{"big.bin": {Data: make([]byte, MaxBytes+1)}}, renderValues(t, tp))
+	if err == nil || !strings.Contains(err.Error(), "big.bin: the file is larger than") {
 		t.Errorf("got %v", err)
 	}
 }
