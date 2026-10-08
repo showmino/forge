@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -90,5 +91,38 @@ func TestErrors(t *testing.T) {
 	failing := &Client{BaseURL: srv.URL, Token: func(context.Context) (string, error) { return "", errors.New("no key") }}
 	if _, err := failing.ListTags(context.Background(), "o", "r"); err == nil || !strings.Contains(err.Error(), "no key") {
 		t.Errorf("token error: %v", err)
+	}
+}
+
+func TestDoJSON(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /echo", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ A int }
+		if r.Header.Get("Content-Type") != "application/json" || json.NewDecoder(r.Body).Decode(&in) != nil || in.A != 1 {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"b":2}`)
+	})
+	mux.HandleFunc("POST /taken", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"name already exists on this account"}`, http.StatusUnprocessableEntity)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL}
+
+	var out struct{ B int }
+	if err := c.doJSON(context.Background(), http.MethodPost, "/echo", map[string]int{"a": 1}, &out); err != nil || out.B != 2 {
+		t.Errorf("doJSON: %v %+v", err, out)
+	}
+	err := c.doJSON(context.Background(), http.MethodPost, "/taken", nil, nil)
+	var se *StatusError
+	if !errors.As(err, &se) || se.Status != http.StatusUnprocessableEntity || !strings.Contains(se.Body, "already exists") {
+		t.Errorf("422: %v", err)
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Error("a 422 is not ErrNotFound")
 	}
 }
