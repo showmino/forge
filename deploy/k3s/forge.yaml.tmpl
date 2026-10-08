@@ -1,6 +1,7 @@
-# Forge Phase 1 on k3s: Dex + forge-api behind the bundled Traefik ingress.
+# Forge Phase 1 on k3s: Dex + forge-api. How they are reached comes from
+# ingress.yaml.tmpl (Traefik) or loadbalancer.yaml.tmpl (MetalLB and similar).
 # Render with deploy/k3s/render.sh; do not apply this file directly.
-#   ${FORGE_DOMAIN}     e.g. 192.168.1.50.nip.io (any name that resolves to the node, for you and for pods)
+#   ${DEX_HOST}         host name of Dex, the same for you and for pods
 #   ${FORGE_API_IMAGE}  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:0.1.0
 apiVersion: v1
 kind: Namespace
@@ -14,7 +15,7 @@ metadata:
   namespace: forge
 data:
   config.yaml: |
-    issuer: http://dex.${FORGE_DOMAIN}/dex
+    issuer: http://${DEX_HOST}/dex
     storage:
       type: memory # Phase 1: logins reset when Dex restarts
     web:
@@ -66,32 +67,6 @@ spec:
         - name: config
           configMap: {name: dex-config}
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: dex
-  namespace: forge
-spec:
-  selector: {app: dex}
-  ports:
-    - {name: http, port: 5556, targetPort: http}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: dex
-  namespace: forge
-spec:
-  ingressClassName: traefik
-  rules:
-    - host: dex.${FORGE_DOMAIN}
-      http:
-        paths:
-          - path: /dex
-            pathType: Prefix
-            backend:
-              service: {name: dex, port: {name: http}}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -107,13 +82,16 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # distroless "nonroot" by number: the kubelet cannot check a user name.
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: forge-api
           image: ${FORGE_API_IMAGE}
           imagePullPolicy: IfNotPresent
           env:
-            - {name: FORGE_OIDC_ISSUER, value: "http://dex.${FORGE_DOMAIN}/dex"}
+            - {name: FORGE_OIDC_ISSUER, value: "http://${DEX_HOST}/dex"}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
             - {name: FORGE_LOG_FORMAT, value: json}
           ports:
@@ -129,32 +107,3 @@ spec:
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 128Mi}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: forge-api
-  namespace: forge
-  annotations:
-    # Traefik talks HTTP/2 cleartext to the pod, so gRPC clients work too.
-    traefik.ingress.kubernetes.io/service.serversscheme: h2c
-spec:
-  selector: {app: forge-api}
-  ports:
-    - {name: http, port: 80, targetPort: http}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: forge-api
-  namespace: forge
-spec:
-  ingressClassName: traefik
-  rules:
-    - host: forge.${FORGE_DOMAIN}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service: {name: forge-api, port: {name: http}}

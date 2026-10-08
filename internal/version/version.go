@@ -4,6 +4,7 @@
 package version
 
 import (
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -33,8 +34,8 @@ func Get() Info {
 		return info
 	}
 	if bi, ok := debug.ReadBuildInfo(); ok {
-		if v := bi.Main.Version; v != "" && v != "(devel)" {
-			info.Version = strings.TrimPrefix(v, "v")
+		if v := moduleVersion(bi.Main.Version); v != "" {
+			info.Version = v
 		}
 		for _, s := range bi.Settings {
 			switch s.Key {
@@ -50,6 +51,20 @@ func Get() Info {
 		}
 	}
 	return info
+}
+
+// pseudoVersion matches the timestamp-and-commit suffix of a Go module
+// pseudo-version, such as v0.0.0-20261007221236-dc5438b5aeac(+dirty).
+var pseudoVersion = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+.*)?$`)
+
+// moduleVersion returns the release version from a module build version, or
+// "" when there is none: "(devel)", or the pseudo-version Go 1.24+ stamps on
+// 'go build' in a git checkout. Those stay "dev" so they are never blocked.
+func moduleVersion(v string) string {
+	if v == "" || v == "(devel)" || pseudoVersion.MatchString(v) {
+		return ""
+	}
+	return strings.TrimPrefix(v, "v")
 }
 
 // Compare compares two "MAJOR.MINOR.PATCH" versions (a leading "v" and any
