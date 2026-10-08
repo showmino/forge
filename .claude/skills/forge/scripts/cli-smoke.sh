@@ -76,6 +76,14 @@ t 2 "create bad parameter" -- f create smoke-dry --template go-grpc --team platf
 t 2 "create unknown parameter" -- f create smoke-dry --template go-grpc --team platform --set nope=1 --dry-run
 t 2 "create without --team (no tty)" -- f create smoke-dry --template go-grpc
 
+echo; echo "#### operations"
+t 0 "op list" -- f op list
+t 0 "op list json" -- f op list -o json
+t 3 "op watch missing" -- f op watch op_000000000000
+t 2 "op watch bad id" -- f op watch nope
+t 2 "op cancel without --yes (no tty)" -- f op cancel op_000000000000
+t 3 "op cancel missing" -- f op cancel op_000000000000 --yes
+
 echo; echo "#### output and global flags"
 t 2 "bad -o" -- f service list -o xml
 t 0 "quiet" -- f service list -q

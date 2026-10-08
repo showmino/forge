@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -124,6 +125,13 @@ func run() error {
 		return err
 	}
 	srv := server.HTTPServer(*addr, h)
+	// Open watch streams end only with their operation; cancel their request
+	// contexts when shutdown starts so Shutdown does not wait for them. The
+	// operations' own work is detached from request contexts and keeps going.
+	reqCtx, endRequests := context.WithCancel(context.Background())
+	defer endRequests()
+	srv.BaseContext = func(net.Listener) context.Context { return reqCtx }
+	srv.RegisterOnShutdown(endRequests)
 
 	errc := make(chan error, 1)
 	go func() {

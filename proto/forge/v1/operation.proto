@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// OperationService reports on long-running work, such as creating an
+// environment, that an RPC started and returned at once. Operations live in
+// forge-api's memory: a restart forgets them, not the work's results.
+// Resource names follow AIP style: "operations/{operation}".
+service OperationService {
+  // GetOperation returns one operation with all its events.
+  rpc GetOperation(GetOperationRequest) returns (GetOperationResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListOperations returns operations newest first, without their events.
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // WatchOperation sends every past event, then live events, then the final
+  // operation, and closes. A watcher that falls behind gets RESOURCE_EXHAUSTED
+  // and may watch again to replay from the start.
+  rpc WatchOperation(WatchOperationRequest) returns (stream WatchOperationResponse) {}
+
+  // CancelOperation asks a running operation to stop and returns it. It is a
+  // no-op for a finished operation.
+  rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+}
+
+// Operation is long-running work and its progress.
+message Operation {
+  // "operations/op_9f2c4a1b0c3d".
+  string name = 1;
+  // The resource the work is about, for example "environments/pr-142".
+  string target = 2;
+  // What the work does, for example "create_environment".
+  string kind = 3;
+  // Subject of the caller that started it.
+  string creator = 4;
+  google.protobuf.Timestamp create_time = 5;
+  // Unset while running.
+  google.protobuf.Timestamp end_time = 6;
+  bool done = 7;
+  // Set when done and the work failed or was cancelled.
+  OperationError error = 8;
+  // Empty in ListOperations.
+  repeated OperationEvent events = 9;
+}
+
+// OperationEvent is one progress message.
+message OperationEvent {
+  google.protobuf.Timestamp time = 1;
+  // The step that sent it, for example "resolve".
+  string step = 2;
+  string message = 3;
+}
+
+// OperationError says why an operation did not succeed.
+message OperationError {
+  // Stable reason, for example "cancelled", "internal", "image_timeout".
+  string code = 1;
+  string message = 2;
+}
+
+message GetOperationRequest {
+  // "operations/{operation}".
+  string name = 1;
+}
+
+message GetOperationResponse {
+  Operation operation = 1;
+}
+
+message ListOperationsRequest {
+  // Only operations on this resource, for example "environments/pr-142".
+  string target = 1;
+  // Only operations that are still running.
+  bool running = 2;
+}
+
+message ListOperationsResponse {
+  repeated Operation operations = 1;
+}
+
+message WatchOperationRequest {
+  // "operations/{operation}".
+  string name = 1;
+}
+
+message WatchOperationResponse {
+  oneof kind {
+    OperationEvent event = 1;
+    // The finished operation; always the last message.
+    Operation operation = 2;
+  }
+}
+
+message CancelOperationRequest {
+  // "operations/{operation}".
+  string name = 1;
+}
+
+message CancelOperationResponse {
+  Operation operation = 1;
+}

@@ -32,6 +32,7 @@ type harness struct {
 	authn     server.Authenticator
 	templates server.TemplateSource
 	repos     server.RepoHost
+	ops       *server.Operations
 }
 
 const (
@@ -41,7 +42,7 @@ const (
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{t: t, dir: t.TempDir(), store: &auth.MemoryStore{}}
+	h := &harness{t: t, dir: t.TempDir(), store: &auth.MemoryStore{}, ops: server.NewOperations(nil)}
 	h.startAPI(server.StaticAuthenticator{
 		writerToken: {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}},
 		readerToken: {Subject: "bo", Email: "bo@example.com", Groups: []string{"dev"}},
@@ -66,6 +67,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Authorizer:    server.Authorizer{WriterGroups: []string{"platform"}},
 		Templates:     h.templates,
 		Repos:         h.repos,
+		Operations:    h.ops,
 	})
 	if err != nil {
 		h.t.Fatal(err)

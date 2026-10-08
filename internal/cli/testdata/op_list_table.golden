@@ -1,0 +1,3 @@
+ID                KIND        TARGET           STATE       AGE
+op_running   test_kind   environments/b   running     <1m
+op_done   test_kind   environments/a   succeeded   <1m
