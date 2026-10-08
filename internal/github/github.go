@@ -90,7 +90,7 @@ func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]string, er
 			Name string `json:"name"`
 		}
 		err = json.NewDecoder(resp.Body).Decode(&tags)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("decode tags of %s/%s: %w", owner, repo, err)
 		}
