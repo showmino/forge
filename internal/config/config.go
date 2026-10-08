@@ -26,9 +26,9 @@ type Config struct {
 
 // Context is one Forge installation and its defaults.
 type Context struct {
-	Name      string `yaml:"name"`
-	API       string `yaml:"api"`
-	Namespace string `yaml:"namespace,omitempty"`
+	Name      string `yaml:"name" json:"name"`
+	API       string `yaml:"api" json:"api"`
+	Namespace string `yaml:"namespace,omitempty" json:"namespace,omitempty"`
 }
 
 // Preferences are presentation defaults.

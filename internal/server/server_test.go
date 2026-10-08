@@ -113,6 +113,44 @@ func TestUpdateEtagAndMask(t *testing.T) {
 	}
 }
 
+func TestDependenciesMustExist(t *testing.T) {
+	t.Parallel()
+	c := NewCatalog(nil)
+	reg := func(id string, validateOnly bool, deps ...string) error {
+		_, err := c.RegisterService(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{
+			ServiceId: id, Service: &forgev1.Service{OwnerTeam: "billing", Dependencies: deps}, ValidateOnly: validateOnly,
+		}))
+		return err
+	}
+	if err := reg("ledger", false, "services/missing"); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("register with unknown dependency: %v", err)
+	}
+	if err := reg("ledger", true, "services/missing"); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("validate-only register with unknown dependency: %v", err)
+	}
+	register(t, c, "payments")
+	if err := reg("ledger", false, "services/payments"); err != nil {
+		t.Fatalf("register with existing dependency: %v", err)
+	}
+
+	upd := func(deps ...string) error {
+		_, err := c.UpdateService(writerCtx(), connect.NewRequest(&forgev1.UpdateServiceRequest{
+			Service:    &forgev1.Service{Name: "services/ledger", Dependencies: deps},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"dependencies"}},
+		}))
+		return err
+	}
+	if err := upd("services/missing"); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("update to unknown dependency: %v", err)
+	}
+	if err := upd("services/ledger"); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("update to depend on itself: %v", err)
+	}
+	if err := upd("services/payments"); err != nil {
+		t.Errorf("update to existing dependency: %v", err)
+	}
+}
+
 func TestPermissions(t *testing.T) {
 	t.Parallel()
 	c := NewCatalog(nil)

@@ -85,7 +85,9 @@ type Factory struct {
 	resolved   config.Resolved
 	manifest   *manifest.Manifest
 	manifestAt string
-	err        error
+	// manifestErr is set when a forge.yaml exists but is invalid; err holds it too.
+	manifestErr error
+	err         error
 
 	skewOnce sync.Once
 }
@@ -125,7 +127,8 @@ func (f *Factory) load() error {
 			if p, err := manifest.Find(wd); err == nil && p != "" {
 				m, err := manifest.Load(p)
 				if err != nil {
-					f.err = exitcode.Usagef("%v", err)
+					f.manifestErr = exitcode.Usagef("%v", err)
+					f.err = f.manifestErr
 					return
 				}
 				f.manifest, f.manifestAt = m, p
@@ -142,9 +145,10 @@ func (f *Factory) load() error {
 	return f.err
 }
 
-// Config returns the user config and its path.
+// Config returns the user config and its path. It succeeds when the config
+// loaded, even if a later step (forge.yaml, resolving the context) failed.
 func (f *Factory) Config() (*config.Config, string, error) {
-	if err := f.load(); err != nil {
+	if err := f.load(); err != nil && f.cfg == nil {
 		return nil, "", err
 	}
 	return f.cfg, f.configPath, nil
@@ -156,10 +160,11 @@ func (f *Factory) Resolved() (config.Resolved, error) {
 	return f.resolved, err
 }
 
-// Manifest returns forge.yaml from the working directory or a parent, if any.
-func (f *Factory) Manifest() (*manifest.Manifest, string) {
+// Manifest returns forge.yaml from the working directory or a parent, if any,
+// and an error if one exists but is invalid.
+func (f *Factory) Manifest() (*manifest.Manifest, string, error) {
 	_ = f.load()
-	return f.manifest, f.manifestAt
+	return f.manifest, f.manifestAt, f.manifestErr
 }
 
 // Format returns the output format.
