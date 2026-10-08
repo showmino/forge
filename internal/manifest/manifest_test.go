@@ -76,3 +76,31 @@ func TestValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestRun(t *testing.T) {
+	t.Parallel()
+	base := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"
+	m, err := Parse([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.RunPort() != 8080 || m.RunHealth() != "/healthz" {
+		t.Errorf("defaults: %d %q", m.RunPort(), m.RunHealth())
+	}
+	m, err = Parse([]byte(base + "run:\n  port: 9090\n  health: /ready\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.RunPort() != 9090 || m.RunHealth() != "/ready" {
+		t.Errorf("set: %d %q", m.RunPort(), m.RunHealth())
+	}
+	for _, bad := range []string{"run:\n  port: 70000\n", "run:\n  port: -1\n", "run:\n  health: ready\n", "run:\n  nope: 1\n"} {
+		if _, err := Parse([]byte(base + bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	out, err := (&Manifest{APIVersion: APIVersion, Service: Service{Name: "a", Team: "b"}, Run: &Run{Port: 9090, Health: "/ready"}}).Marshal()
+	if err != nil || !strings.Contains(string(out), "run:\n  port: 9090\n  health: /ready\n") {
+		t.Errorf("marshal: %s %v", out, err)
+	}
+}
