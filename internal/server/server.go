@@ -1,5 +1,5 @@
-// Package server is the Forge API. Phase 1 serves the service catalog and
-// auth discovery over Connect, gRPC and gRPC-Web from the same handlers.
+// Package server is the Forge API: the service catalog, auth discovery,
+// templates and operations, over Connect, gRPC and gRPC-Web from the same handlers.
 package server
 
 import (
@@ -40,7 +40,9 @@ type Options struct {
 	Repos RepoHost
 	// GitHubOrg is the org new repos are created in (default "showmino").
 	GitHubOrg string
-	Logger    *slog.Logger
+	// Operations holds long-running work; nil creates an empty store.
+	Operations *Operations
+	Logger     *slog.Logger
 }
 
 // New returns the API's HTTP handler.
@@ -53,6 +55,9 @@ func New(o Options) (http.Handler, error) {
 	}
 	if o.GitHubOrg == "" {
 		o.GitHubOrg = "showmino"
+	}
+	if o.Operations == nil {
+		o.Operations = NewOperations(nil)
 	}
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
@@ -79,6 +84,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger}, opts))
+	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("ok\n"))
