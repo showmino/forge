@@ -48,7 +48,7 @@ func (KeyringStore) Get(key string) (*Credentials, error) {
 }
 
 func (KeyringStore) Set(key string, c *Credentials) error {
-	b, err := json.Marshal(c)
+	b, err := json.Marshal(c) //nolint:gosec // G117: storing credentials, refresh token included, is this store's job; the OS keychain protects them
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (f *FileStore) save(m map[string]*Credentials) error {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(m, "", "  ")
+	b, err := json.MarshalIndent(m, "", "  ") //nolint:gosec // G117: the 0600 file fallback holds credentials by design; encrypting it is a known follow-up
 	if err != nil {
 		return err
 	}
