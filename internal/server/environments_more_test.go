@@ -10,6 +10,9 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 )
@@ -169,6 +172,66 @@ func TestDestroyCancelsRunningCreate(t *testing.T) {
 	}
 }
 
+func TestCancelledDestroyReportsCancelled(t *testing.T) {
+	t.Parallel()
+	f := newEnvFixture(t, false, nil)
+	// Once stuck, the namespace never goes away: the destroy waits until
+	// cancelled. (Reactors must be added before the clientset is shared.)
+	var stuck atomic.Bool
+	f.cluster.Kube.(*fake.Clientset).PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return stuck.Load(), nil, nil
+	})
+	f.available(t, nil)
+	f.readyEnv(t, "a")
+	stuck.Store(true)
+	d, err := f.client.DestroyEnvironment(context.Background(), as("writer", &forgev1.DestroyEnvironmentRequest{Name: "environments/a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ops.Cancel(d.Msg.GetOperation().GetName())
+	if op := f.wait(t, d.Msg.GetOperation()); op.GetError().GetCode() != OpCodeCancelled {
+		t.Errorf("cancelled destroy: %v", op.GetError())
+	}
+}
+
+func TestDestroyCancelsCreateWaitingForImage(t *testing.T) {
+	t.Parallel()
+	f := newEnvFixture(t, true, nil) // no image: the create waits before making the namespace
+	resp, err := f.create(t, &forgev1.CreateEnvironmentRequest{EnvironmentId: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dry, err := f.client.DestroyEnvironment(ctx, as("writer", &forgev1.DestroyEnvironmentRequest{Name: "environments/a", ValidateOnly: true}))
+	if err != nil || dry.Msg.GetOperation() != nil || dry.Msg.GetEnvironment().GetState() != forgev1.Environment_STATE_DESTROYING {
+		t.Fatalf("validate_only: %v %v", dry, err)
+	}
+	if op, _ := f.ops.Get(resp.GetOperation().GetName()); op.GetDone() {
+		t.Fatalf("validate_only stopped the create: %v", op)
+	}
+	d, err := f.client.DestroyEnvironment(ctx, as("writer", &forgev1.DestroyEnvironmentRequest{Name: "environments/a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := d.Msg.GetEnvironment()
+	if env.GetName() != "environments/a" || env.GetNamespace() != "preview-a" || env.GetUrl() != "http://a.preview.example" ||
+		env.GetState() != forgev1.Environment_STATE_DESTROYING {
+		t.Errorf("environment: %v", env)
+	}
+	if op := f.wait(t, d.Msg.GetOperation()); op.GetError() != nil {
+		t.Errorf("destroy: %v", op.GetError())
+	}
+	if op := f.wait(t, resp.GetOperation()); op.GetError().GetCode() != OpCodeCancelled {
+		t.Errorf("create: %v", op.GetError())
+	}
+	if gone, _ := f.cluster.EnvGone(ctx, "a"); !gone {
+		t.Error("namespace exists")
+	}
+	if _, err := f.client.DestroyEnvironment(ctx, as("writer", &forgev1.DestroyEnvironmentRequest{Name: "environments/a"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("destroy again: %v", err)
+	}
+}
+
 func TestGuardOnRPCs(t *testing.T) {
 	t.Parallel()
 	f := newEnvFixture(t, false, nil)
@@ -221,6 +284,16 @@ func TestReaper(t *testing.T) {
 				t.Errorf("creator %q", op.GetCreator())
 			}
 			wait(t, f.ops, op.GetName())
+		}
+	}
+	// A pass that listed a before the destroy finished must not start another.
+	if op := f.envs.startDestroy(ctx, "a", "forge-reaper"); op != nil {
+		t.Errorf("destroy started for a gone environment: %v", op)
+	}
+	destroys = 0
+	for _, op := range f.ops.List("environments/a", false) {
+		if op.GetKind() == "destroy_environment" {
+			destroys++
 		}
 	}
 	if destroys != 1 {

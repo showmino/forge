@@ -293,11 +293,20 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 	if err != nil {
 		return nil, err
 	}
+	var env *forgev1.Environment
 	ns, err := e.o.Cluster.Env(ctx, id)
-	if err != nil {
+	switch {
+	case err == nil:
+		env = e.envFromNamespace(ns)
+	case errors.Is(err, errNoEnv) && e.creating(id):
+		// A create still waiting for its image: no namespace yet.
+		env = &forgev1.Environment{
+			Name: envNamePrefix + id, Namespace: envNamespace(id), Url: e.url(id),
+			State: forgev1.Environment_STATE_DESTROYING,
+		}
+	default:
 		return nil, envErr(id, err)
 	}
-	env := e.envFromNamespace(ns)
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Environment: env}), nil
 	}
@@ -306,5 +315,8 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 		creator = p.Subject
 	}
 	op := e.startDestroy(ctx, id, creator)
+	if op == nil {
+		return nil, envErr(id, errNoEnv)
+	}
 	return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Operation: op, Environment: env}), nil
 }

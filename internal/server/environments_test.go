@@ -13,6 +13,9 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
@@ -415,5 +418,30 @@ func TestCancelCreate(t *testing.T) {
 	}
 	if gone, _ := g.cluster.EnvGone(context.Background(), "b"); !gone {
 		t.Error("namespace left after cancel")
+	}
+
+	// Cancelled while the namespace create is in flight: the API server made
+	// it, but the client saw an error. It is removed.
+	h := newEnvFixture(t, false, nil)
+	kube := h.cluster.Kube.(*fake.Clientset)
+	cancel := make(chan func())
+	kube.PrependReactor("create", "namespaces", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		obj := a.(k8stesting.CreateAction).GetObject()
+		if err := kube.Tracker().Create(a.GetResource(), obj, ""); err != nil {
+			return true, nil, err
+		}
+		(<-cancel)()
+		return true, nil, context.Canceled
+	})
+	resp, err = h.create(t, &forgev1.CreateEnvironmentRequest{EnvironmentId: "c"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel <- func() { h.ops.Cancel(resp.GetOperation().GetName()) }
+	if op := h.wait(t, resp.GetOperation()); op.GetError().GetCode() != OpCodeCancelled {
+		t.Errorf("cancel during namespace create: %v", op.GetError())
+	}
+	if gone, _ := h.cluster.EnvGone(context.Background(), "c"); !gone {
+		t.Error("namespace left after cancel during create")
 	}
 }

@@ -163,6 +163,9 @@ func (e *Environments) createWork(p envPlan) Work {
 			if errors.Is(err, errEnvExists) {
 				return &OpError{Code: "already_exists", Message: envNamePrefix + p.id + " already exists"}
 			}
+			if ctx.Err() != nil { // the namespace may have been made anyway
+				return e.undo(ctx, p.id, emit)
+			}
 			return err
 		}
 		e.donePending(p.id) // the namespace counts from now on
