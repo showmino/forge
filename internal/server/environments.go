@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -115,8 +116,6 @@ func invalidArg(format string, args ...any) error {
 }
 
 // parseEnvName turns "environments/x" into "x".
-//
-//nolint:unused // used by the Get, Extend and Destroy RPCs in the next task
 func parseEnvName(name string) (string, error) {
 	id, ok := strings.CutPrefix(name, envNamePrefix)
 	if !ok || !envIDRE.MatchString(id) {
@@ -158,7 +157,6 @@ func repoOf(repoURL, org string) (string, string, bool) {
 	return owner, repo, true
 }
 
-//nolint:unused // used with envFromNamespace by the next task's RPCs
 var states = map[string]forgev1.Environment_State{
 	stateCreating:   forgev1.Environment_STATE_CREATING,
 	stateReady:      forgev1.Environment_STATE_READY,
@@ -167,8 +165,6 @@ var states = map[string]forgev1.Environment_State{
 }
 
 // envFromNamespace reads an environment from its namespace.
-//
-//nolint:unused // used by the Get and List RPCs in the next task
 func (e *Environments) envFromNamespace(ns *corev1.Namespace) *forgev1.Environment {
 	id := ns.Labels[labelEnvironment]
 	a := ns.Annotations
@@ -205,30 +201,110 @@ func (e *Environments) countEnvs(nss []corev1.Namespace) int {
 	return n
 }
 
-func (e *Environments) GetEnvironment(context.Context, *connect.Request[forgev1.GetEnvironmentRequest]) (*connect.Response[forgev1.GetEnvironmentResponse], error) {
+func (e *Environments) GetEnvironment(ctx context.Context, req *connect.Request[forgev1.GetEnvironmentRequest]) (*connect.Response[forgev1.GetEnvironmentResponse], error) {
 	if err := e.ready(); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("GetEnvironment is not implemented yet"))
+	if err := require(ctx, PermServicesRead); err != nil {
+		return nil, err
+	}
+	id, err := parseEnvName(req.Msg.GetName())
+	if err != nil {
+		return nil, err
+	}
+	ns, err := e.o.Cluster.Env(ctx, id)
+	if err != nil {
+		return nil, envErr(id, err)
+	}
+	env := e.envFromNamespace(ns)
+	if env.GetState() == forgev1.Environment_STATE_READY {
+		if ready, problem, err := e.o.Cluster.Status(ctx, id, ns.Labels[labelService]); err == nil && !ready {
+			env.StateMessage = problem
+		}
+	}
+	return connect.NewResponse(&forgev1.GetEnvironmentResponse{Environment: env}), nil
 }
 
-func (e *Environments) ListEnvironments(context.Context, *connect.Request[forgev1.ListEnvironmentsRequest]) (*connect.Response[forgev1.ListEnvironmentsResponse], error) {
+func (e *Environments) ListEnvironments(ctx context.Context, req *connect.Request[forgev1.ListEnvironmentsRequest]) (*connect.Response[forgev1.ListEnvironmentsResponse], error) {
 	if err := e.ready(); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ListEnvironments is not implemented yet"))
+	if err := require(ctx, PermServicesRead); err != nil {
+		return nil, err
+	}
+	nss, err := e.o.Cluster.Envs(ctx)
+	if err != nil {
+		return nil, envErr("", err)
+	}
+	var out []*forgev1.Environment
+	for i := range nss {
+		env := e.envFromNamespace(&nss[i])
+		if s := req.Msg.GetService(); s != "" && env.GetService() != s {
+			continue
+		}
+		out = append(out, env)
+	}
+	slices.SortFunc(out, func(a, b *forgev1.Environment) int { return strings.Compare(a.GetName(), b.GetName()) })
+	return connect.NewResponse(&forgev1.ListEnvironmentsResponse{Environments: out}), nil
 }
 
-func (e *Environments) ExtendEnvironment(context.Context, *connect.Request[forgev1.ExtendEnvironmentRequest]) (*connect.Response[forgev1.ExtendEnvironmentResponse], error) {
+func (e *Environments) ExtendEnvironment(ctx context.Context, req *connect.Request[forgev1.ExtendEnvironmentRequest]) (*connect.Response[forgev1.ExtendEnvironmentResponse], error) {
 	if err := e.ready(); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ExtendEnvironment is not implemented yet"))
+	if err := require(ctx, PermServicesWrite); err != nil {
+		return nil, err
+	}
+	id, err := parseEnvName(req.Msg.GetName())
+	if err != nil {
+		return nil, err
+	}
+	if req.Msg.GetTtl() == nil {
+		return nil, invalidArg("ttl is required")
+	}
+	ttl, err := ttlOf(req.Msg.GetTtl())
+	if err != nil {
+		return nil, err
+	}
+	ns, err := e.o.Cluster.Env(ctx, id)
+	if err != nil {
+		return nil, envErr(id, err)
+	}
+	if ns.Annotations[annState] == stateDestroying {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s is being destroyed", envNamePrefix, id))
+	}
+	if err := e.o.Cluster.Annotate(ctx, id, map[string]string{annExpire: e.o.Now().Add(ttl).UTC().Format(time.RFC3339)}); err != nil {
+		return nil, envErr(id, err)
+	}
+	if ns, err = e.o.Cluster.Env(ctx, id); err != nil {
+		return nil, envErr(id, err)
+	}
+	return connect.NewResponse(&forgev1.ExtendEnvironmentResponse{Environment: e.envFromNamespace(ns)}), nil
 }
 
-func (e *Environments) DestroyEnvironment(context.Context, *connect.Request[forgev1.DestroyEnvironmentRequest]) (*connect.Response[forgev1.DestroyEnvironmentResponse], error) {
+func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Request[forgev1.DestroyEnvironmentRequest]) (*connect.Response[forgev1.DestroyEnvironmentResponse], error) {
 	if err := e.ready(); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("DestroyEnvironment is not implemented yet"))
+	if err := require(ctx, PermServicesWrite); err != nil {
+		return nil, err
+	}
+	id, err := parseEnvName(req.Msg.GetName())
+	if err != nil {
+		return nil, err
+	}
+	ns, err := e.o.Cluster.Env(ctx, id)
+	if err != nil {
+		return nil, envErr(id, err)
+	}
+	env := e.envFromNamespace(ns)
+	if req.Msg.GetValidateOnly() {
+		return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Environment: env}), nil
+	}
+	creator := ""
+	if p, ok := PrincipalFrom(ctx); ok {
+		creator = p.Subject
+	}
+	op := e.startDestroy(ctx, id, creator)
+	return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Operation: op, Environment: env}), nil
 }
