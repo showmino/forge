@@ -5,7 +5,9 @@
 #
 # Needs a logged-in context whose Dex has the password connector: it logs out
 # and back in with approve-device-login.py. It registers and deletes the
-# services payments, ledger, billing-db and billing-api in that catalog.
+# services payments, ledger, billing-db and billing-api in that catalog, and
+# runs 'forge template' and 'forge create --dry-run' (needs templates and the
+# GitHub App configured on the API; nothing is created).
 # Each case: t <expected-exit> <description> -- <command...>. Exits 1 on any FAIL.
 set -u
 [ $# -eq 2 ] || { echo "usage: $0 <forge-binary> <context>" >&2; exit 2; }
@@ -60,6 +62,19 @@ t 6 "delete service others depend on" -- f service delete payments --yes
 t 0 "delete" -- f service delete ledger --yes
 t 3 "deleted" -- f service get ledger
 t 3 "delete again" -- f service delete ledger --yes
+
+echo; echo "#### templates and create (no side effects)"
+t 0 "template list" -- f template list
+t 0 "template list json" -- f template list -o json
+t 0 "template get go-grpc" -- f template get go-grpc
+t 3 "template get missing" -- f template get nope
+t 3 "template get unknown version" -- f template get go-grpc@v0.0.1
+t 0 "create dry run" -- f create smoke-dry --template go-grpc --team platform --dry-run
+t 6 "create name taken on GitHub" -- f create forge-templates --template go-grpc --team platform --dry-run
+t 6 "create name taken in catalog" -- f create payments --template go-grpc --team platform --dry-run
+t 2 "create bad parameter" -- f create smoke-dry --template go-grpc --team platform --set port=http --dry-run
+t 2 "create unknown parameter" -- f create smoke-dry --template go-grpc --team platform --set nope=1 --dry-run
+t 2 "create without --team (no tty)" -- f create smoke-dry --template go-grpc
 
 echo; echo "#### output and global flags"
 t 2 "bad -o" -- f service list -o xml

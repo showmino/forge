@@ -52,7 +52,12 @@ only the `forge` namespace. Facts that shape the deploy:
 ```sh
 IMG=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD)
 docker build --build-arg COMMIT=$(git rev-parse HEAD) -t $IMG . && docker push $IMG
-FORGE_API_IMAGE=$IMG sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
+# GitHub App mino-forge (templates, forge create); the 1Password operator syncs its
+# key from vault Kube, item forge-github-app, field github_app_private_key
+FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_API_IMAGE=$IMG \
+  sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
+# key names only, never the values: must list github_app_private_key
+kubectl -n forge get secret forge-github-app -o jsonpath='{.data}' | python3 -I -c 'import json,sys; print(sorted(json.load(sys.stdin)))'
 # once: pull secret (copy without printing it)
 kubectl -n docs get secret mino-ghcr -o json | python3 -I -c 'import json,sys;s=json.load(sys.stdin);print(json.dumps({"apiVersion":"v1","kind":"Secret","type":s["type"],"metadata":{"name":"mino-ghcr","namespace":"forge"},"data":s["data"]}))' | kubectl apply -f -
 kubectl -n forge patch serviceaccount default -p '{"imagePullSecrets":[{"name":"mino-ghcr"}]}'
@@ -64,13 +69,17 @@ bin/forge doctor
 ```
 
 forge-api logs `forge-api listening ... issuer=http://dex.10.150.1.220.nip.io/dex`
-only after OIDC discovery from inside the pod succeeded.
+only after OIDC discovery from inside the pod succeeded. With the App, `bin/forge
+template list` must show `go-grpc`, and `bash .claude/skills/forge/scripts/cli-smoke.sh
+bin/forge k3s` must report `0 failed`. Every rollout empties the in-memory catalog.
 
 | Symptom | Cause |
 | --- | --- |
 | `ErrImagePull ... 401 Unauthorized` | Pod predates the pull-secret patch; restart the deployment |
 | `CreateContainerConfigError: image has non-numeric user (nonroot)` | `runAsUser: 65532` missing from the pod securityContext |
 | Service got a random pool IP | Wrong MetalLB annotation, or an existing allocation: delete the Service and re-apply |
+| forge-api logs "templates are not configured" | Rendered without `FORGE_GITHUB_APP_ID` |
+| forge-api pod stuck in `ContainerCreating` (secret not found) | The 1Password item or its field is missing; check `kubectl -n forge describe onepassworditem forge-github-app` |
 | Every command warns "older than ... 0.1.0" | Go pseudo-version not treated as dev (fixed in `internal/version`) |
 
 Tear down: `kubectl delete ns forge`.

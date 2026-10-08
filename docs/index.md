@@ -225,12 +225,12 @@ forge/
 
 ## Phased delivery plan
 
-Build in five phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phase 1 is done; Phase 2 is next.
+Build in five phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 and 2 are done; Phase 3 is next.
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |
 | 1 · Foundations (done) | auth, context, service list / get / register; doctor, version, completion, init; API skeleton, protos, CI, signed releases | Log in with SSO and register a service from a Homebrew install |
-| 2 · Templates and scaffolding | template list / get / lint; `forge create` from a Git template repo; first golden path: Go gRPC service | A scaffolded service passes its own CI and appears in the catalog |
+| 2 · Templates and scaffolding (done) | template list / get / lint; `forge create` from a Git template repo; first golden path: Go gRPC service | A scaffolded service passes its own CI and appears in the catalog |
 | 3 · Environments | env create / list / destroy / extend with a TTL; operations: op watch, streamed progress; one Kubernetes namespace per preview | `forge create` to a running preview environment in under 10 minutes |
 | 4 · Deployments | deploy start / status / history; rollback and promote through Argo CD; deploys from CI with workload identity | A team ships to staging from CI without kubectl or Argo access |
 | 5 · Resources and audit | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
@@ -258,4 +258,4 @@ Each has a working default in this draft; an answer changes the plan only where 
 - [x] **Telemetry:** Decided: off for now. Anonymous CLI usage metrics stay opt-in with `forge config set telemetry on`.
 - [x] **Distribution:** Decided: a Homebrew tap and GitHub Releases for now. apt, yum and Scoop packages can come later.
 - [x] **Local development:** Decided: Phase 1 targets the existing k3s cluster, so no `kind`-based local Forge stack is needed for demos.
-- [ ] **Template format (blocks Phase 2):** not yet defined. Either stay compatible with the existing Backstage-style `template-*` repos, or adopt a new Forge format (`template.yaml` with typed parameters plus a `skeleton/` folder rendered with Go `text/template`), optionally with a `forge template import` that converts Backstage templates. Recommendation: the Forge format, with an importer only if the `template-*` repos are still in use.
+- [x] **Template format:** Decided: the Forge format, `template.yaml` with typed parameters plus a `skeleton/` folder rendered with Go `text/template`, versioned by repo-wide tags in one templates repo. No Backstage importer (see `docs/specs/2026-10-08-phase-2-templates-design.md`).
