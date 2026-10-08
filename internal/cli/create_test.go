@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"errors"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/showmino/forge/internal/github"
 )
@@ -17,6 +19,7 @@ type memRepos struct {
 	repos     map[string]int // name -> files pushed
 	pushErr   error
 	deleteErr error
+	onPush    func() // runs once, before the first push
 }
 
 func (m *memRepos) RepoExists(_ context.Context, _, name string) (bool, error) {
@@ -44,6 +47,13 @@ func (m *memRepos) DeleteRepo(_ context.Context, _, name string) error {
 }
 
 func (m *memRepos) PushFiles(_ context.Context, _, repo, _, _ string, files []github.File) (string, error) {
+	m.mu.Lock()
+	hook := m.onPush
+	m.onPush = nil
+	m.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.pushErr != nil {
@@ -169,4 +179,32 @@ func TestCreateFailures(t *testing.T) {
 		t.Errorf("no GitHub App:\n%s", r.err)
 	}
 	noGitHub.ok("create", "payments", "--template", "web", "--team", "platform", "--dry-run")
+}
+
+// A stream that drops mid-create is retried with the same request_id; the
+// retry waits for the server's still-running create and reports its outcome.
+func TestCreateRetryAfterDrop(t *testing.T) {
+	t.Parallel()
+	h, repos := createHarness(t)
+	repos.mu.Lock()
+	repos.onPush = func() { h.api.CloseClientConnections() }
+	repos.mu.Unlock()
+	r := h.ok("create", "payments", "--template", "svc", "--team", "platform", "--set", "tier=gold")
+	if r.out != "services/payments created\n" || !strings.Contains(r.err, "connection dropped") {
+		t.Errorf("retry after a drop:\nstdout %q\nstderr %s", r.out, r.err)
+	}
+	if repos.count() != 1 {
+		t.Errorf("%d repos, want exactly 1", repos.count())
+	}
+}
+
+// A create can take longer than the API client's overall timeout; the
+// stream must only be bounded by --timeout.
+func TestStreamingHTTPClient(t *testing.T) {
+	t.Parallel()
+	base := &http.Client{Timeout: time.Minute, Transport: http.DefaultTransport}
+	c := withoutTimeout(base)
+	if c.Timeout != 0 || c.Transport != base.Transport || base.Timeout != time.Minute {
+		t.Errorf("got timeout %v transport %v; base timeout %v", c.Timeout, c.Transport, base.Timeout)
+	}
 }

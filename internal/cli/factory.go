@@ -243,12 +243,29 @@ func (f *Factory) APIURL() (string, error) {
 
 // Client returns an API client. withAuth=false sends no credentials.
 func (f *Factory) Client(ctx context.Context, withAuth bool) (*client.Client, error) {
+	return f.clientWith(ctx, withAuth, f.HTTPClient)
+}
+
+// StreamClient is Client for long server streams: the HTTP client's overall
+// timeout would cut them off, so only ctx (--timeout) bounds them.
+func (f *Factory) StreamClient(ctx context.Context) (*client.Client, error) {
+	return f.clientWith(ctx, true, withoutTimeout(f.HTTPClient))
+}
+
+// withoutTimeout copies hc with no overall timeout.
+func withoutTimeout(hc *http.Client) *http.Client {
+	c := *hc
+	c.Timeout = 0
+	return &c
+}
+
+func (f *Factory) clientWith(ctx context.Context, withAuth bool, hc *http.Client) (*client.Client, error) {
 	url, err := f.APIURL()
 	if err != nil {
 		return nil, err
 	}
 	o := client.Options{
-		HTTPClient:    f.HTTPClient,
+		HTTPClient:    hc,
 		ClientVersion: f.Version,
 		OnResponse:    f.onResponse,
 	}

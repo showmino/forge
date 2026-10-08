@@ -80,7 +80,11 @@ for missing required ones. See 'forge template get <template>'.`,
 			if err := f.completeParams(t, raw); err != nil {
 				return err
 			}
-			final, err := f.streamCreate(ctx, c, &forgev1.CreateServiceRequest{
+			sc, err := f.StreamClient(ctx)
+			if err != nil {
+				return err
+			}
+			final, err := f.streamCreate(ctx, sc, &forgev1.CreateServiceRequest{
 				ServiceId:       id,
 				Template:        t.GetName(),
 				TemplateVersion: t.GetVersion(), // pinned: what was validated is what is rendered
@@ -90,6 +94,9 @@ for missing required ones. See 'forge template get <template>'.`,
 				RequestId:       client.NewRequestID(),
 				ValidateOnly:    dryRun,
 			})
+			if errors.Is(err, errMayStillFinish) {
+				return exitcode.From(errors.Unwrap(err)).WithHint(fmt.Sprintf("the create may still finish on the Forge API; check 'forge service get %s'", id))
+			}
 			if err != nil {
 				return err
 			}
@@ -189,9 +196,20 @@ var stepVerbs = map[string]string{
 	"push": "pushed initial commit", "register": "registered",
 }
 
+// errMayStillFinish wraps a stream error after the server may have started
+// creating the repo.
+var errMayStillFinish = errors.New("the create may still finish")
+
+type mayStillFinish struct{ err error }
+
+func (e mayStillFinish) Error() string        { return e.err.Error() }
+func (e mayStillFinish) Unwrap() error        { return e.err }
+func (e mayStillFinish) Is(target error) bool { return target == errMayStillFinish }
+
 // streamCreate runs CreateService, printing finished steps on stderr, and
 // returns its last message. If the stream drops before that message, it
-// retries once with the same request_id, which replays the outcome.
+// retries once with the same request_id: the server waits for the running
+// create and replays its outcome.
 func (f *Factory) streamCreate(ctx context.Context, c *client.Client, req *forgev1.CreateServiceRequest) (*forgev1.CreateServiceResponse, error) {
 	for attempt := 0; ; attempt++ {
 		stream, err := c.Catalog.CreateService(ctx, connect.NewRequest(req))
@@ -218,13 +236,18 @@ func (f *Factory) streamCreate(ctx context.Context, c *client.Client, req *forge
 		if final != nil {
 			return final, nil
 		}
-		dropped := err == nil || connect.CodeOf(err) == connect.CodeUnavailable || connect.CodeOf(err) == connect.CodeUnknown
+		// An error the server did not send (a reset, a truncated stream) means
+		// the connection dropped; the server may still be working.
+		dropped := err == nil || !connect.IsWireError(err)
 		if attempt == 0 && dropped && ctx.Err() == nil {
 			f.infof("The connection dropped; asking the Forge API for the outcome...")
 			continue
 		}
 		if err == nil {
 			err = errors.New("the Forge API ended the create without a result")
+		}
+		if !req.GetValidateOnly() && (dropped || connect.CodeOf(err) == connect.CodeDeadlineExceeded || ctx.Err() != nil) {
+			return nil, mayStillFinish{err}
 		}
 		return nil, err
 	}

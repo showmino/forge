@@ -352,16 +352,36 @@ func TestCreateFailuresRollBack(t *testing.T) {
 		t.Error("rolled_back must be false when the delete failed")
 	}
 
+	// Someone registers the name while the repo is being made: register
+	// fails after the push, and the repo is rolled back.
 	registerFails := newFakeRepos()
 	e = newCreateEnv(t, createRelease, registerFails)
-	r := validRequest()
-	r.Template, r.Parameters = "templates/dep", nil
-	msgs, err = e.create(ctx, "writer", r)
+	registerFails.onCreate = func() {
+		_, _ = e.catalog.RegisterService(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{
+			ServiceId: "payments", Service: &forgev1.Service{OwnerTeam: "other"},
+		}))
+	}
+	msgs, err = e.create(ctx, "writer", validRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, last := steps(msgs); last.GetFailure().GetStep() != "register" || !last.GetFailure().GetRolledBack() {
 		t.Errorf("register failure: %v", last)
+	}
+
+	// What registration would refuse is found before anything is created,
+	// and --dry-run reports it too.
+	depRepos := newFakeRepos()
+	e = newCreateEnv(t, createRelease, depRepos)
+	for _, validateOnly := range []bool{false, true} {
+		r := validRequest()
+		r.Template, r.Parameters, r.ValidateOnly, r.RequestId = "templates/dep", nil, validateOnly, ""
+		if _, err := e.create(ctx, "writer", r); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "missing") {
+			t.Errorf("unregistered dependency (validate_only=%v): %v", validateOnly, err)
+		}
+	}
+	if depRepos.createCount() != 0 {
+		t.Error("a create that registration would refuse must not create a repo")
 	}
 
 	raced := newFakeRepos()
@@ -392,24 +412,62 @@ func TestCreateIdempotency(t *testing.T) {
 		t.Errorf("%d repos created, want 1", n)
 	}
 
-	// A retry while the first attempt still runs is refused.
+	// A retry while the first attempt still runs waits for it and replays
+	// its outcome: that is what a CLI retry after a dropped stream needs.
 	slow := newFakeRepos()
 	slow.pushGate = make(chan struct{})
 	e = newCreateEnv(t, createRelease, slow)
-	done := make(chan error, 1)
+	var openGate sync.Once // the server cannot shut down while a push waits
+	release := func() { openGate.Do(func() { close(slow.pushGate) }) }
+	t.Cleanup(release) // registered after the server's Close, so it runs first
+	first := make(chan error, 1)
 	go func() {
 		_, err := e.create(ctx, "writer", validRequest())
-		done <- err
+		first <- err
 	}()
 	for slow.createCount() != 1 {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if _, err := e.create(ctx, "writer", validRequest()); connect.CodeOf(err) != connect.CodeAborted {
-		t.Errorf("retry while running: %v", err)
+	type result struct {
+		msgs []*forgev1.CreateServiceResponse
+		err  error
 	}
-	close(slow.pushGate)
-	if err := <-done; err != nil {
+	retry := make(chan result, 1)
+	go func() {
+		msgs, err := e.create(ctx, "writer", validRequest())
+		retry <- result{msgs, err}
+	}()
+	select {
+	case r := <-retry:
+		release()
+		t.Fatalf("the retry returned while the first attempt was still running: %v %v", r.msgs, r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	if err := <-first; err != nil {
 		t.Fatal(err)
+	}
+	r := <-retry
+	if r.err != nil || len(r.msgs) != 1 || r.msgs[0].GetService().GetName() != "services/payments" {
+		t.Errorf("retry while running: %v %v", r.msgs, r.err)
+	}
+	if n := slow.createCount(); n != 1 {
+		t.Errorf("%d repos created, want 1", n)
+	}
+
+	// A retry that gives up waiting gets its own context's error.
+	slower := newFakeRepos()
+	slower.pushGate = make(chan struct{})
+	e = newCreateEnv(t, createRelease, slower)
+	t.Cleanup(func() { close(slower.pushGate) }) // runs before the server's Close
+	go func() { _, _ = e.create(ctx, "writer", validRequest()) }()
+	for slower.createCount() != 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if _, err := e.create(short, "writer", validRequest()); err == nil {
+		t.Error("a retry that runs out of time must fail")
 	}
 }
 

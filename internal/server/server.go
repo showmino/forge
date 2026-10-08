@@ -74,7 +74,7 @@ func New(o Options) (http.Handler, error) {
 	mux := http.NewServeMux()
 	create := &creator{
 		catalog: o.Catalog, templates: o.Templates, repos: o.Repos, org: o.GitHubOrg, log: o.Logger,
-		results: map[string]*forgev1.CreateServiceResponse{},
+		results: map[string]*outcome{},
 	}
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))

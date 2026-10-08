@@ -60,8 +60,15 @@ type creator struct {
 	log       *slog.Logger
 
 	mu sync.Mutex
-	// results holds the last message of each create by request_id; nil while it runs.
-	results map[string]*forgev1.CreateServiceResponse
+	// results tracks each create by request_id.
+	results map[string]*outcome
+}
+
+// outcome is one create's result: done closes when it ends, and final is
+// its last message (nil if it ended before any side effect).
+type outcome struct {
+	done  chan struct{}
+	final *forgev1.CreateServiceResponse
 }
 
 func validateCreate(req *forgev1.CreateServiceRequest) error {
@@ -106,30 +113,45 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 		return connect.NewError(connect.CodeFailedPrecondition, errors.New("creating repos is not configured on this Forge API (no GitHub App)"))
 	}
 	key := req.GetRequestId()
-	if key != "" && !req.GetValidateOnly() {
+	if key == "" || req.GetValidateOnly() {
+		_, err := c.create(ctx, req, stream)
+		return err
+	}
+	// A retry of a create that is still running waits for it and replays its
+	// outcome; one that ended before any side effect is started over.
+	var o *outcome
+	for o == nil {
 		c.mu.Lock()
-		final, seen := c.results[key]
+		running, seen := c.results[key]
 		if !seen {
-			c.results[key] = nil
+			o = &outcome{done: make(chan struct{})}
+			c.results[key] = o
 		}
 		c.mu.Unlock()
-		if seen {
-			if final == nil {
-				return connect.NewError(connect.CodeAborted, errors.New("a create with this request_id is still running"))
-			}
-			return stream.Send(final)
+		if !seen {
+			break
+		}
+		select {
+		case <-running.done:
+		case <-ctx.Done():
+			return connect.NewError(connect.CodeDeadlineExceeded, fmt.Errorf("waiting for the create with this request_id: %w", ctx.Err()))
+		}
+		if running.final != nil {
+			return stream.Send(running.final)
 		}
 	}
-	final, err := c.create(ctx, req, stream)
-	if key != "" && !req.GetValidateOnly() {
+	var final *forgev1.CreateServiceResponse
+	defer func() { // also when create panics: never leave the key stuck
 		c.mu.Lock()
 		if final != nil {
-			c.results[key] = final
+			o.final = final
 		} else {
 			delete(c.results, key) // nothing happened yet: a retry starts over
 		}
 		c.mu.Unlock()
-	}
+		close(o.done)
+	}()
+	final, err := c.create(ctx, req, stream)
 	return err
 }
 
@@ -223,6 +245,13 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 			m, _ = manifest.Parse(f.Data) // CheckManifest parsed it already
 		}
 	}
+	// What registration would refuse (an unknown dependency, an invalid
+	// field) is found now, before anything is created.
+	svc := serviceFromManifest(m)
+	svc.RepoUrl = repoURL
+	if _, err := c.catalog.RegisterService(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true})); err != nil {
+		return nil, err
+	}
 	done("render", fmt.Sprintf("%d files", len(files)))
 
 	if req.GetValidateOnly() {
@@ -270,8 +299,6 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	done("push", shortSHA(sha)+" (CI started)")
 
 	started("register")
-	svc := serviceFromManifest(m)
-	svc.RepoUrl = repoURL
 	resp, err := c.catalog.RegisterService(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}))
 	if err != nil {
 		return fail("register", err)
