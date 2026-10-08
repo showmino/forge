@@ -143,6 +143,9 @@ func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forg
 	if _, exists := c.services[name]; exists {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s already exists", name))
 	}
+	if err := c.checkDependencies(name, in); err != nil {
+		return nil, err
+	}
 	s := cloneSvc(in)
 	s.Name = name
 	now := timestamppb.New(c.now())
@@ -215,6 +218,9 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 	if err := validateService(next); err != nil {
 		return nil, err
 	}
+	if err := c.checkDependencies(name, next); err != nil {
+		return nil, err
+	}
 	rev := c.revision[name] + 1
 	next.UpdateTime = timestamppb.New(c.now())
 	next.Etag = etag(rev)
@@ -253,6 +259,21 @@ func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev
 		delete(c.revision, name)
 	}
 	return connect.NewResponse(&forgev1.DeleteServiceResponse{}), nil
+}
+
+// checkDependencies requires every dependency of the service called name to be
+// another registered service, so DeleteService's check is never undermined by
+// dangling references. The caller holds c.mu.
+func (c *Catalog) checkDependencies(name string, s *forgev1.Service) error {
+	for _, d := range s.GetDependencies() {
+		if d == name {
+			return invalid(fmt.Sprintf("%s cannot depend on itself", name))
+		}
+		if _, ok := c.services[d]; !ok {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("dependency %s is not registered", d))
+		}
+	}
+	return nil
 }
 
 func validateService(s *forgev1.Service) error {

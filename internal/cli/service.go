@@ -43,7 +43,10 @@ func (f *Factory) serviceName(args []string) (string, error) {
 	case len(args) == 1:
 		id = strings.TrimPrefix(args[0], "services/")
 	default:
-		m, _ := f.Manifest()
+		m, _, err := f.Manifest()
+		if err != nil {
+			return "", err
+		}
 		if m == nil {
 			return "", exitcode.Usagef("no service name given and no forge.yaml found").
 				WithHint("pass a name, for example 'payments', or run inside a repo with a forge.yaml")
@@ -311,7 +314,7 @@ supplies the name and fields; flags override them.`,
 				return err
 			}
 			svc := &forgev1.Service{}
-			if m, _ := f.Manifest(); m != nil && (len(args) == 0 || shortName(name) == m.Service.Name) {
+			if m, _, _ := f.Manifest(); m != nil && (len(args) == 0 || shortName(name) == m.Service.Name) {
 				svc = fromManifest(m)
 			}
 			fl := cmd.Flags()

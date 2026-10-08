@@ -260,6 +260,13 @@ func TestContexts(t *testing.T) {
 	}
 	h.ok("service", "list") // reaches the API through the context
 
+	r = h.ok("context", "list", "-o", "json")
+	for _, key := range []string{`"currentContext": "local"`, `"name": "prod"`, `"api": "https://forge.example.com"`, `"namespace": "billing"`} {
+		if !strings.Contains(r.out, key) {
+			t.Errorf("context list -o json lacks %s:\n%s", key, r.out)
+		}
+	}
+
 	h.ok("context", "use", "prod")
 	r = h.ok("context", "current", "-o", "name")
 	if r.out != "prod\n" {
@@ -292,6 +299,22 @@ func TestInitAndManifestDefaults(t *testing.T) {
 		t.Errorf("owners from manifest: %q", r.out)
 	}
 	h.fails(2, "service", "delete") // delete never defaults from the manifest
+
+	// A broken forge.yaml is reported, not mistaken for a missing one.
+	bad := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  tem: billing\n"
+	if err := os.WriteFile(filepath.Join(h.dir, "forge.yaml"), []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r = h.fails(2, "service", "get")
+	if !strings.Contains(r.err, "forge.yaml") || !strings.Contains(r.err, "tem") {
+		t.Errorf("invalid manifest error should name the file and the field:\n%s", r.err)
+	}
+	r = h.fails(1, "doctor", "-o", "json")
+	if !strings.Contains(r.out, `"name": "config",
+      "status": "ok"`) || !strings.Contains(r.out, `"name": "manifest",
+      "status": "fail"`) {
+		t.Errorf("doctor should report config ok and the manifest as failed:\n%s", r.out)
+	}
 }
 
 func TestVersionAndDoctor(t *testing.T) {

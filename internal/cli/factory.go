@@ -85,7 +85,9 @@ type Factory struct {
 	resolved   config.Resolved
 	manifest   *manifest.Manifest
 	manifestAt string
-	err        error
+	// manifestErr is set when a forge.yaml exists but is invalid; err holds it too.
+	manifestErr error
+	err         error
 
 	skewOnce sync.Once
 }
@@ -123,13 +125,13 @@ func (f *Factory) load() error {
 		d.Output = string(output.Table)
 		if wd, err := f.Getwd(); err == nil {
 			if p, err := manifest.Find(wd); err == nil && p != "" {
-				m, err := manifest.Load(p)
-				if err != nil {
-					f.err = exitcode.Usagef("%v", err)
-					return
+				// Resolve the rest even if forge.yaml is invalid, so doctor can report it.
+				if m, err := manifest.Load(p); err != nil {
+					f.manifestErr = exitcode.Usagef("%v", err)
+				} else {
+					f.manifest, f.manifestAt = m, p
+					d.Namespace = m.Namespace
 				}
-				f.manifest, f.manifestAt = m, p
-				d.Namespace = m.Namespace
 			}
 		}
 		f.resolved, f.err = config.Resolve(f.cfg, f.Env, config.Overrides{
@@ -137,14 +139,17 @@ func (f *Factory) load() error {
 		}, d)
 		if f.err != nil {
 			f.err = exitcode.Usagef("%v", f.err)
+		} else if f.manifestErr != nil {
+			f.err = f.manifestErr
 		}
 	})
 	return f.err
 }
 
-// Config returns the user config and its path.
+// Config returns the user config and its path. It succeeds when the config
+// loaded, even if a later step (forge.yaml, resolving the context) failed.
 func (f *Factory) Config() (*config.Config, string, error) {
-	if err := f.load(); err != nil {
+	if err := f.load(); err != nil && f.cfg == nil {
 		return nil, "", err
 	}
 	return f.cfg, f.configPath, nil
@@ -156,10 +161,11 @@ func (f *Factory) Resolved() (config.Resolved, error) {
 	return f.resolved, err
 }
 
-// Manifest returns forge.yaml from the working directory or a parent, if any.
-func (f *Factory) Manifest() (*manifest.Manifest, string) {
+// Manifest returns forge.yaml from the working directory or a parent, if any,
+// and an error if one exists but is invalid.
+func (f *Factory) Manifest() (*manifest.Manifest, string, error) {
 	_ = f.load()
-	return f.manifest, f.manifestAt
+	return f.manifest, f.manifestAt, f.manifestErr
 }
 
 // Format returns the output format.
@@ -168,6 +174,10 @@ func (f *Factory) Format() (output.Format, error) {
 	if err != nil {
 		return "", err
 	}
+	return parseFormat(r)
+}
+
+func parseFormat(r config.Resolved) (output.Format, error) {
 	fm, err := output.Parse(r.Output)
 	if err != nil {
 		return "", exitcode.Usagef("%v", err)
