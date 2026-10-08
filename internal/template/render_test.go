@@ -96,8 +96,8 @@ func TestRenderErrors(t *testing.T) {
 		"slash segment": {fstest.MapFS{"{% printf \"a%cb\" 47 %}": {Data: []byte("a")}}, `renders to "a/b"`},
 		// Skeleton paths contain the delimiters; errors must quote them intact.
 		"error in a templated path": {fstest.MapFS{"{% .Service.Name %}/a.txt": {Data: []byte("{% .Params.nope %}")}}, `{% .Service.Name %}/a.txt:1:10: <.Params.nope>: map has no entry for key "nope"`},
-		"symlink":       {fstest.MapFS{"link": {Data: []byte("x"), Mode: fs.ModeSymlink}}, "symlinks are not allowed"},
-		"too large":     {fstest.MapFS{"big": {Data: []byte(strings.Repeat("a", MaxBytes+1))}}, "larger than"},
+		"symlink":                   {fstest.MapFS{"link": {Data: []byte("x"), Mode: fs.ModeSymlink}}, "symlinks are not allowed"},
+		"too large":                 {fstest.MapFS{"big": {Data: []byte(strings.Repeat("a", MaxBytes+1))}}, "larger than"},
 	}
 	for name, tt := range tests {
 		if _, err := tp.Render(tt.fsys, v); err == nil || !strings.Contains(err.Error(), tt.want) {

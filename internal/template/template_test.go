@@ -61,7 +61,7 @@ func TestParseRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 	for name, doc := range map[string]string{
 		"top level":       strings.Replace(validYAML, "owner: platform", "ownr: platform", 1),
-		"inside a param":  strings.Replace(validYAML, "    default: 8080", "    defualt: 8080", 1),
+		"inside a param":  strings.Replace(validYAML, "    default: 8080", "    defaults: 8080", 1),
 		"param not a map": strings.Replace(validYAML, "  - name: port\n    type: int\n    default: 8080\n", "  - port\n", 1),
 	} {
 		if _, err := Parse([]byte(doc)); err == nil {
