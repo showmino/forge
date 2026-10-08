@@ -97,6 +97,8 @@ func kubeClients() (kubernetes.Interface, dynamic.Interface, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// A hung API server must not stall creates and destroys for long.
+	cfg.Timeout = 30 * time.Second
 	kube, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, nil, err
