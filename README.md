@@ -57,6 +57,8 @@ CLI's client ID as audience.
 
 ## On k3s
 
+On a single-node k3s with the bundled Traefik ingress, import a local image:
+
 ```sh
 make image
 docker save forge-api:dev | sudo k3s ctr images import -
@@ -66,11 +68,27 @@ forge context set k3s --api http://forge.<node-ip>.nip.io --use
 forge auth login
 ```
 
+On a cluster without Traefik, or when you are not on the node, push the image
+to a registry and give Dex and forge-api their own LoadBalancer IPs (MetalLB):
+
+```sh
+docker build -t ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD) .
+docker push ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD)
+FORGE_API_IMAGE=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD) \
+  deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+# private image: copy a dockerconfigjson pull secret into 'forge', then
+kubectl -n forge patch serviceaccount default -p '{"imagePullSecrets":[{"name":"<secret>"}]}'
+kubectl -n forge rollout restart deploy/forge-api
+
+forge context set k3s --api http://forge.<api-ip>.nip.io --use
+forge auth login
+```
+
 Both the CLI and the forge-api pod must reach Dex at the same issuer URL
-(`http://dex.<node-ip>.nip.io/dex`), which is why the manifests route Dex
-through the Traefik ingress. Change the static password in the ConfigMap
-before sharing the cluster. Phase 1 serves plain HTTP; add TLS (cert-manager)
-before real use.
+(`http://dex.<node-ip or dex-ip>.nip.io/dex`), which is why Dex is exposed
+outside the cluster rather than called by its Service name. Change the static
+password in the ConfigMap before sharing the cluster. Phase 1 serves plain
+HTTP; add TLS (cert-manager) before real use.
 
 ## Using the CLI
 
