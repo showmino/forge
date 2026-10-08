@@ -1,0 +1,10 @@
+{
+  "findings": [
+    {
+      "template": "bad",
+      "file": "bad/template.yaml",
+      "line": 7,
+      "message": "parameter \"port\": \"eighty\" is not an int"
+    }
+  ]
+}
