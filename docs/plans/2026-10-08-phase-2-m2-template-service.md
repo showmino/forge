@@ -4,9 +4,9 @@
 
 **Goal:** Serve templates from the API (`TemplateService.ListTemplates` / `GetTemplate`), read from a local directory or from release tags of `showmino/forge-templates` on GitHub, and add `forge template list` and `forge template get`.
 
-**Architecture:** A `TemplateSource` interface hands the API a repo tree (`fs.FS`) per version. `DirSource` serves a local checkout as version `dev`; `GitHubSource` lists semver tags and downloads, extracts (in memory, safely) and caches each tag's tarball through a small `internal/github` client. The `TemplateService` handlers parse templates with milestone 1's `internal/template` package and return them as protos; the CLI renders them like `service list/get`.
+**Architecture:** A `TemplateSource` interface hands the API a repo tree (`fs.FS`) per version. `DirSource` serves a local checkout as version `dev`; `GitHubSource` lists semver tags and downloads, extracts (in memory, safely) and caches each tag's tarball through a small `internal/github` client authenticated as the `mino-forge` GitHub App (App ID 5239131, installed on `showmino`). The `TemplateService` handlers parse templates with milestone 1's `internal/template` package and return them as protos; the CLI renders them like `service list/get`.
 
-**Tech Stack:** Go 1.24 (`archive/tar`, `compress/gzip`, `io/fs`, `testing/fstest.MapFS` as the in-memory tree), ConnectRPC, buf v1.47.2, GitHub REST API (`/repos/{o}/{r}/tags`, `/repos/{o}/{r}/tarball/{ref}`), Cobra.
+**Tech Stack:** Go 1.24 (`archive/tar`, `compress/gzip`, `io/fs`, `testing/fstest.MapFS` as the in-memory tree, `crypto/rsa` for the App JWT), ConnectRPC, buf v1.47.2, GitHub REST API (`/repos/{o}/{r}/tags`, `/repos/{o}/{r}/tarball/{ref}`, `/orgs/{org}/installation`, `/app/installations/{id}/access_tokens`), Cobra.
 
 **Spec:** `docs/specs/2026-10-08-phase-2-templates-design.md` (section 2 "Protos" for `TemplateService`, "Components" rows for `internal/server/templates.go` and `internal/github`, "Configuration"; section 3 `template list` / `template get`; section 4 errors and security; section 6 milestone 2). Design doc: `docs/index.md`.
 
@@ -19,24 +19,24 @@
 - Errors (spec section 4): template or version not found → `NOT_FOUND` (exit 3); templates not configured, or no release tags → `FAILED_PRECONDITION` (exit 6); GitHub unreachable or rate-limited → `UNAVAILABLE` (exit 1); bad name → `INVALID_ARGUMENT` (exit 2).
 - Tarball extraction rejects symlinks, hard links, other special files, path traversal and entries over `template.MaxBytes` (10 MiB); the whole extracted tree is capped at 100 MiB and 20,000 files.
 - "Newest" means the highest semver tag `vMAJOR.MINOR.PATCH`; other tags (pre-releases, `latest`) are ignored.
-- The GitHub token is never logged or returned in errors.
+- The App private key and installation tokens are never logged or returned in errors. The key file `mino-forge.2026-10-08.private-key.pem` sits in the repo root, ignored by `.gitignore` and `.dockerignore`; never print it, never commit it.
 - Commit after every task with the trailer `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 
 **Refinements of the spec made while planning** (Task 0 records them in the spec):
 
 - `TemplateParameter.default` is named `default_value` in the proto, so it cannot collide with the `default` keyword of proto options and generated code reads clearly (`GetDefaultValue`).
 - Template RPCs require an authenticated caller but no permission: templates are not sensitive, and a new permission would change every caller's `auth status`.
-- Until the GitHub App exists (milestone 3), forge-api reads the template repo with a read-only token: new flag `--github-token-file` (`FORGE_GITHUB_TOKEN_FILE`). Milestone 3's App settings will take precedence.
+- GitHub App authentication (spec: milestone 3) moves into this milestone, because the App now exists: forge-api reads the template repo as the App, configured with the spec's `--github-app-id`, `--github-app-key-file` and `--github-org`. The installation is looked up from the org (`GET /orgs/{org}/installation`), so no installation-ID setting is needed. Milestone 3 reuses `github.App` for repo creation.
 - Fetched tags are kept in a `testing/fstest.MapFS`: the standard library's in-memory `fs.FS`, which needs no writable disk (the API's root filesystem is read-only on k3s).
 - `cli-smoke.sh` gets template cases in milestone 4, when the k3s API is configured with a template source; until then the k3s API answers `FAILED_PRECONDITION`.
 
 ## Review Focus
 
-1. **Real GitHub tarballs** start with a `pax_global_header` entry and wrap every file in an `owner-repo-sha/` directory: both must be handled, or no real release ever loads. Pinned in Task 2's tests.
-2. **Hostile or odd tarball entries** (symlinks, hard links, `../` names, a 50 MiB file): rejected with an error naming the entry, never written anywhere or silently skipped. Pinned in Task 2.
-3. **Tag ordering and filtering:** `v1.10.0` is newer than `v1.9.0`; `latest`, `v2.0.0-rc.1` and `release-2` are not versions. Pinned in Task 3.
-4. **One broken template in a release** (bad `template.yaml`): `ListTemplates` still lists the others and logs a warning; `GetTemplate` of the broken one fails clearly. Pinned in Task 4.
-5. **Repeated requests:** a tag's tarball is downloaded once; the tag list refreshes after a minute so a new release shows up without a restart. Pinned in Task 3.
+1. **Real GitHub tarballs** start with a `pax_global_header` entry and wrap every file in an `owner-repo-sha/` directory: both must be handled, or no real release ever loads. Pinned in Task 3's tests.
+2. **Hostile or odd tarball entries** (symlinks, hard links, `../` names, a 50 MiB file): rejected with an error naming the entry, never written anywhere or silently skipped. Pinned in Task 3.
+3. **Tag ordering and filtering:** `v1.10.0` is newer than `v1.9.0`; `latest`, `v2.0.0-rc.1` and `release-2` are not versions. Pinned in Task 4.
+4. **One broken template in a release** (bad `template.yaml`): `ListTemplates` still lists the others and logs a warning; `GetTemplate` of the broken one fails clearly. Pinned in Task 5.
+5. **Repeated requests:** a tag's tarball is downloaded once; the tag list refreshes after a minute so a new release shows up without a restart. Pinned in Task 4.
 
 ---
 
@@ -46,6 +46,7 @@
 | --- | --- |
 | `docs/specs/2026-10-08-phase-2-templates-design.md` (modify) | Record the refinements above |
 | `internal/github/github.go` (create) | Minimal GitHub REST client: auth header, `ListTags`, `Tarball`, `ErrNotFound` |
+| `internal/github/app.go` (create) | GitHub App auth: private key parsing, RS256 JWT, installation lookup by org, cached installation tokens |
 | `internal/server/untar.go` (create) | Safe in-memory extraction of a GitHub tarball into an `fs.FS` |
 | `internal/server/template_source.go` (create) | `TemplateSource`, `ErrVersionNotFound`, `DirSource`, `GitHubSource` |
 | `proto/forge/v1/template.proto` (create), `gen/forge/v1/...` (generated) | `TemplateService` contract |
@@ -67,34 +68,31 @@
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Branch from up-to-date main**
+- [ ] **Step 1: Be on the plan's branch**
 
-```bash
-git switch main && git pull --ff-only && git switch -c phase-2-m2 && git branch --show-current
-```
-
-Expected: `phase-2-m2`.
+The branch `phase-2-m2` already exists (cut from `main` at `1902858`, holding this plan). Run `git branch --show-current`.
+Expected: `phase-2-m2`. If not, `git switch phase-2-m2`.
 
 - [ ] **Step 2: Edit the spec**
 
 In section 2's `TemplateParameter` proto block change `string default = 4;           // as written in template.yaml` to `string default_value = 4;     // as written in template.yaml`.
 
-In "Configuration", add a row after `--github-app-key-file`:
-
-```markdown
-| `--github-token-file` | Path to a read-only GitHub token for the template repo (milestone 2, before the App exists; App settings take precedence) |
-```
-
 After the Configuration table's paragraph, add:
 
 ```markdown
 `TemplateService` requires an authenticated caller but no permission: templates are not sensitive.
+
+GitHub App authentication ships in milestone 2 (the App, `mino-forge`, exists): the API finds the App's installation from `--github-org` (`GET /orgs/{org}/installation`), so no installation ID is configured.
 ```
+
+In section 6, milestone 3's line, change "`internal/github`, the `CreateService` pipeline, `forge create`" to "repo creation in `internal/github`, the `CreateService` pipeline, `forge create`", and milestone 2's line to "**Template service.** GitHub App authentication, `TemplateService` with `DirSource` and `GitHubSource`, `forge template list / get`."
 
 - [ ] **Step 3: Commit**
 
+Also commit the owner's pending `.gitignore` change (`*.pem`) and the matching `.dockerignore` line, which keep the App key out of Git and out of Docker build contexts.
+
 ```bash
-git add docs/specs && git commit -m "spec: default_value, template auth and --github-token-file for milestone 2
+git add docs/specs .gitignore .dockerignore && git commit -m "spec: default_value, template auth and App auth in milestone 2; ignore *.pem
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
@@ -224,7 +222,7 @@ Expected: FAIL to compile (`undefined: Client`).
 
 ```go
 // Package github is a small client for the GitHub REST API: what Forge needs
-// and nothing more. Milestone 3 adds GitHub App authentication and repo creation.
+// and nothing more. App authentication is in app.go; milestone 3 adds repo creation.
 package github
 
 import (
@@ -265,13 +263,13 @@ func StaticToken(token string) func(context.Context) (string, error) {
 	return func(context.Context) (string, error) { return token, nil }
 }
 
-// get returns the response of a GET that answered 200; the caller closes its body.
-func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
+// do sends a request and returns the response if it answered 2xx; the caller closes its body.
+func (c *Client) do(ctx context.Context, method, path string) (*http.Response, error) {
 	base := c.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(base, "/")+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -292,22 +290,22 @@ func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode == http.StatusOK {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return resp, nil
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("GET %s: %w", path, ErrNotFound)
+		return nil, fmt.Errorf("%s %s: %w", method, path, ErrNotFound)
 	}
-	return nil, fmt.Errorf("GET %s: %s: %s", path, resp.Status, strings.TrimSpace(string(body)))
+	return nil, fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(body)))
 }
 
 // ListTags returns every tag name of owner/repo.
 func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]string, error) {
 	var names []string
 	for page := 1; page <= maxPages; page++ {
-		resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/tags?per_page=%d&page=%d", url.PathEscape(owner), url.PathEscape(repo), pageSize, page))
+		resp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/tags?per_page=%d&page=%d", url.PathEscape(owner), url.PathEscape(repo), pageSize, page))
 		if err != nil {
 			return nil, err
 		}
@@ -333,7 +331,7 @@ func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]string, er
 // with a redirect to a signed download URL, which the HTTP client follows
 // without forwarding the Authorization header to the other host.
 func (c *Client) Tarball(ctx context.Context, owner, repo, ref string) (io.ReadCloser, error) {
-	resp, err := c.get(ctx, fmt.Sprintf("/repos/%s/%s/tarball/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(ref)))
+	resp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/tarball/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(ref)))
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +354,351 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 2: Safe tarball extraction
+### Task 2: GitHub App authentication
+
+**Files:**
+- Create: `internal/github/app.go`
+- Test: `internal/github/app_test.go`
+
+**Interfaces:**
+- Consumes: `Client.do`, `StaticToken`, `ErrNotFound` (Task 1).
+- Produces:
+  - `func ParsePrivateKey(data []byte) (*rsa.PrivateKey, error)` — PEM, PKCS#1 (what GitHub issues) or PKCS#8
+  - `type App struct { ID int64; Key *rsa.PrivateKey; Org string; BaseURL string; HTTP *http.Client; Now func() time.Time; ... }`
+  - `func (a *App) JWT() (string, error)` — RS256, `iss` = App ID, `iat` = now − 1 min, `exp` = now + 9 min
+  - `func (a *App) Token(ctx context.Context) (string, error)` — installation token for `Org`, cached until a minute before it expires; fits `Client.Token`
+
+- [ ] **Step 1: Write the failing tests** — `internal/github/app_test.go`:
+
+```go
+package github
+
+import (
+	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func testKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
+// fakeAppAPI checks App JWTs the way GitHub does (signature, issuer, a
+// lifetime of at most ten minutes around now) and hands out numbered tokens
+// that expire an hour after they are minted.
+func fakeAppAPI(t *testing.T, pub *rsa.PublicKey, now func() time.Time) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var exchanges atomic.Int32
+	validJWT := func(r *http.Request) bool {
+		jwt, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		parts := strings.Split(jwt, ".")
+		if !ok || len(parts) != 3 {
+			return false
+		}
+		sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+		sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+		if err != nil || rsa.VerifyPKCS1v15(pub, crypto.SHA256, sum[:], sig) != nil {
+			return false
+		}
+		var c struct {
+			Iat, Exp int64
+			Iss      string
+		}
+		payload, _ := base64.RawURLEncoding.DecodeString(parts[1])
+		if json.Unmarshal(payload, &c) != nil {
+			return false
+		}
+		n := now().Unix()
+		return c.Iss == "5239131" && c.Iat <= n && c.Exp > n && c.Exp-c.Iat <= 600
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /orgs/showmino/installation", func(w http.ResponseWriter, r *http.Request) {
+		if !validJWT(r) {
+			http.Error(w, `{"message":"A JSON web token could not be decoded"}`, http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `{"id":169296924}`)
+	})
+	mux.HandleFunc("GET /orgs/elsewhere/installation", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	mux.HandleFunc("POST /app/installations/169296924/access_tokens", func(w http.ResponseWriter, r *http.Request) {
+		if !validJWT(r) {
+			http.Error(w, `{"message":"bad JWT"}`, http.StatusUnauthorized)
+			return
+		}
+		n := exchanges.Add(1)
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprintf(w, `{"token":"inst-%d","expires_at":%q}`, n, now().Add(time.Hour).Format(time.RFC3339))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, &exchanges
+}
+
+func TestAppToken(t *testing.T) {
+	t.Parallel()
+	key := testKey(t)
+	var clock atomic.Int64 // read by the fake server's goroutines
+	clock.Store(time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC).Unix())
+	now := func() time.Time { return time.Unix(clock.Load(), 0).UTC() }
+	srv, exchanges := fakeAppAPI(t, &key.PublicKey, now)
+	a := &App{ID: 5239131, Key: key, Org: "showmino", BaseURL: srv.URL, Now: now}
+	ctx := context.Background()
+
+	for range 3 {
+		tok, err := a.Token(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tok != "inst-1" {
+			t.Errorf("token %q, want the cached inst-1", tok)
+		}
+	}
+	if n := exchanges.Load(); n != 1 {
+		t.Errorf("%d token exchanges, want 1", n)
+	}
+
+	clock.Add(int64((59*time.Minute + 30*time.Second) / time.Second)) // within a minute of expiry
+	if tok, err := a.Token(ctx); err != nil || tok != "inst-2" {
+		t.Errorf("near expiry: %q %v, want a fresh inst-2", tok, err)
+	}
+}
+
+func TestAppErrors(t *testing.T) {
+	t.Parallel()
+	key := testKey(t)
+	srv, _ := fakeAppAPI(t, &key.PublicKey, time.Now)
+
+	notInstalled := &App{ID: 5239131, Key: key, Org: "elsewhere", BaseURL: srv.URL}
+	if _, err := notInstalled.Token(context.Background()); err == nil || !strings.Contains(err.Error(), "not installed on elsewhere") {
+		t.Errorf("not installed: %v", err)
+	}
+	wrongKey := &App{ID: 5239131, Key: testKey(t), Org: "showmino", BaseURL: srv.URL}
+	if _, err := wrongKey.Token(context.Background()); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Errorf("wrong key: %v", err)
+	}
+}
+
+func TestParsePrivateKey(t *testing.T) {
+	t.Parallel()
+	key := testKey(t)
+	pkcs1 := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs8 := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	for name, data := range map[string][]byte{"pkcs1": pkcs1, "pkcs8": pkcs8} {
+		got, err := ParsePrivateKey(data)
+		if err != nil || !got.Equal(key) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	ec, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ecDER, _ := x509.MarshalPKCS8PrivateKey(ec)
+	for name, data := range map[string][]byte{
+		"not pem": []byte("hello"),
+		"not rsa": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: ecDER}),
+		"garbage": pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: []byte("x")}),
+	} {
+		if _, err := ParsePrivateKey(data); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `go test ./internal/github -run 'App|PrivateKey'`
+Expected: FAIL to compile (`undefined: App`).
+
+- [ ] **Step 3: Implement** — `internal/github/app.go`:
+
+```go
+package github
+
+import (
+	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"sync"
+	"time"
+)
+
+// ParsePrivateKey reads a GitHub App private key: PEM-encoded PKCS#1 (what
+// GitHub issues) or PKCS#8.
+func ParsePrivateKey(data []byte) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, errors.New("the App private key is not PEM")
+	}
+	if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return k, nil
+	}
+	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, errors.New("the App private key is neither PKCS#1 nor PKCS#8")
+	}
+	rk, ok := k.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("the App private key is not an RSA key")
+	}
+	return rk, nil
+}
+
+// App authenticates as a GitHub App's installation on one org. Token fits
+// Client.Token.
+type App struct {
+	ID  int64
+	Key *rsa.PrivateKey
+	// Org is the account the App is installed on, for example "showmino".
+	Org string
+	// BaseURL and HTTP as for Client.
+	BaseURL string
+	HTTP    *http.Client
+	// Now defaults to time.Now; tests replace it.
+	Now func() time.Time
+
+	mu           sync.Mutex
+	installation int64
+	token        string
+	expires      time.Time
+}
+
+// tokenMargin renews an installation token this long before it expires.
+const tokenMargin = time.Minute
+
+func (a *App) now() time.Time {
+	if a.Now != nil {
+		return a.Now()
+	}
+	return time.Now()
+}
+
+// JWT returns a token that authenticates as the App itself: valid for nine
+// minutes (GitHub allows ten) and back-dated a minute for clock drift.
+func (a *App) JWT() (string, error) {
+	now := a.now()
+	enc := base64.RawURLEncoding
+	claims, err := json.Marshal(map[string]any{
+		"iat": now.Add(-time.Minute).Unix(),
+		"exp": now.Add(9 * time.Minute).Unix(),
+		"iss": strconv.FormatInt(a.ID, 10),
+	})
+	if err != nil {
+		return "", err
+	}
+	signed := enc.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`)) + "." + enc.EncodeToString(claims)
+	sum := sha256.Sum256([]byte(signed))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, a.Key, crypto.SHA256, sum[:])
+	if err != nil {
+		return "", fmt.Errorf("sign the App JWT: %w", err)
+	}
+	return signed + "." + enc.EncodeToString(sig), nil
+}
+
+// Token returns an installation token for Org, reusing it until a minute
+// before it expires.
+func (a *App) Token(ctx context.Context) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.token != "" && a.now().Add(tokenMargin).Before(a.expires) {
+		return a.token, nil
+	}
+	if a.installation == 0 {
+		var inst struct {
+			ID int64 `json:"id"`
+		}
+		if err := a.call(ctx, http.MethodGet, "/orgs/"+url.PathEscape(a.Org)+"/installation", &inst); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return "", fmt.Errorf("the GitHub App %d is not installed on %s: %w", a.ID, a.Org, err)
+			}
+			return "", err
+		}
+		a.installation = inst.ID
+	}
+	var tok struct {
+		Token     string    `json:"token"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	if err := a.call(ctx, http.MethodPost, fmt.Sprintf("/app/installations/%d/access_tokens", a.installation), &tok); err != nil {
+		return "", err
+	}
+	if tok.Token == "" {
+		return "", errors.New("GitHub returned an empty installation token")
+	}
+	a.token, a.expires = tok.Token, tok.ExpiresAt
+	return a.token, nil
+}
+
+// call sends an App-authenticated (JWT) request and decodes its JSON reply into out.
+func (a *App) call(ctx context.Context, method, path string, out any) error {
+	jwt, err := a.JWT()
+	if err != nil {
+		return err
+	}
+	c := &Client{BaseURL: a.BaseURL, HTTP: a.HTTP, Token: StaticToken(jwt)}
+	resp, err := c.do(ctx, method, path)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("decode %s %s: %w", method, path, err)
+	}
+	return nil
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `go test -count=1 -race ./internal/github -v`
+Expected: PASS (all of Task 1's tests too).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/github && git commit -m "github: authenticate as a GitHub App installation
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: Safe tarball extraction
 
 **Files:**
 - Create: `internal/server/untar.go`
@@ -598,14 +940,14 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 3: Template sources
+### Task 4: Template sources
 
 **Files:**
 - Create: `internal/server/template_source.go`
 - Test: `internal/server/template_source_test.go`
 
 **Interfaces:**
-- Consumes: `github.Client` (Task 1), `untar` (Task 2), `version.Compare` (`internal/version`).
+- Consumes: `github.Client` (Task 1), `untar` (Task 3), `version.Compare` (`internal/version`).
 - Produces:
   - `type TemplateSource interface { Versions(ctx context.Context) ([]string, error); Fetch(ctx context.Context, version string) (fs.FS, error) }` — `Versions` newest first; `Fetch` wraps `ErrVersionNotFound` for an unknown version
   - `var ErrVersionNotFound error`
@@ -906,7 +1248,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 4: `TemplateService`
+### Task 5: `TemplateService`
 
 **Files:**
 - Create: `proto/forge/v1/template.proto`; generated `gen/forge/v1/template.pb.go`, `gen/forge/v1/forgev1connect/template.connect.go`
@@ -916,7 +1258,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Test: `internal/server/templates_test.go`
 
 **Interfaces:**
-- Consumes: `TemplateSource`, `ErrVersionNotFound` (Task 3); `template.Parse`, `Template.Validate`, `template.Discover`, `template.FileName` (milestone 1); `manifest.ValidID`.
+- Consumes: `TemplateSource`, `ErrVersionNotFound` (Task 4); `template.Parse`, `Template.Validate`, `template.Discover`, `template.FileName` (milestone 1); `manifest.ValidID`.
 - Produces:
   - proto `forge.v1.TemplateService` with `ListTemplates`, `GetTemplate`; messages `Template`, `TemplateParameter` (nested enum `Type`), request/response messages as below
   - `server.Options.Templates TemplateSource` (nil = not configured)
@@ -1373,15 +1715,17 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 5: forge-api configuration
+### Task 6: forge-api configuration
 
 **Files:**
 - Create: `cmd/forge-api/templates.go`, `cmd/forge-api/templates_test.go`
 - Modify: `cmd/forge-api/main.go` (flags in `run`, `server.Options`)
 
 **Interfaces:**
-- Consumes: `server.DirSource`, `server.NewGitHubSource`, `server.TemplateSource` (Tasks 3–4); `github.Client`, `github.StaticToken` (Task 1).
-- Produces: `func templateSource(dir, repo, tokenFile string) (server.TemplateSource, error)` — dir wins, then token file, else nil.
+- Consumes: `server.DirSource`, `server.NewGitHubSource`, `server.TemplateSource` (Tasks 4–5); `github.Client` (Task 1); `github.App`, `github.ParsePrivateKey` (Task 2).
+- Produces:
+  - `func githubApp(id, keyFile, org string) (*github.App, error)` — nil when neither ID nor key is set; milestone 3 reuses the App for repo creation
+  - `func templateSource(dir, repo string, app *github.App) (server.TemplateSource, error)` — dir wins, then the App, else nil
 
 - [ ] **Step 1: Write the failing test** — `cmd/forge-api/templates_test.go`:
 
@@ -1389,6 +1733,10 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 package main
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1397,46 +1745,83 @@ import (
 	"github.com/showmino/forge/internal/server"
 )
 
-func TestTemplateSource(t *testing.T) {
+func TestGitHubApp(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	token := filepath.Join(dir, "token")
-	if err := os.WriteFile(token, []byte("  ghp_secret\n"), 0o600); err != nil {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
 		t.Fatal(err)
 	}
-	empty := filepath.Join(dir, "empty")
-	if err := os.WriteFile(empty, []byte("\n"), 0o600); err != nil {
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	keyFile := filepath.Join(dir, "app.pem")
+	if err := os.WriteFile(keyFile, keyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notKey := filepath.Join(dir, "not.pem")
+	if err := os.WriteFile(notKey, []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	if src, err := templateSource(dir, "showmino/forge-templates", token); err != nil {
-		t.Fatal(err)
-	} else if _, ok := src.(server.DirSource); !ok {
-		t.Errorf("a directory wins over a token: %T", src)
+	app, err := githubApp("5239131", keyFile, "showmino")
+	if err != nil || app == nil || app.ID != 5239131 || app.Org != "showmino" || !app.Key.Equal(key) {
+		t.Fatalf("app: %+v %v", app, err)
 	}
-	if src, err := templateSource("", "showmino/forge-templates", token); err != nil {
-		t.Fatal(err)
-	} else if _, ok := src.(*server.GitHubSource); !ok {
-		t.Errorf("token file: %T", src)
-	}
-	if src, err := templateSource("", "showmino/forge-templates", ""); err != nil || src != nil {
-		t.Errorf("nothing configured: %v %v", src, err)
+	if app, err := githubApp("", "", "showmino"); app != nil || err != nil {
+		t.Errorf("no App configured: %v %v", app, err)
 	}
 	for name, args := range map[string][3]string{
-		"missing dir":   {filepath.Join(dir, "nope"), "", ""},
-		"missing token": {"", "showmino/forge-templates", filepath.Join(dir, "nope")},
-		"empty token":   {"", "showmino/forge-templates", empty},
-		"bad repo":      {"", "forge-templates", token},
+		"id only":     {"5239131", "", "showmino"},
+		"key only":    {"", keyFile, "showmino"},
+		"bad id":      {"forge", keyFile, "showmino"},
+		"missing key": {"5239131", filepath.Join(dir, "nope.pem"), "showmino"},
+		"not a key":   {"5239131", notKey, "showmino"},
+		"no org":      {"5239131", keyFile, ""},
 	} {
-		_, err := templateSource(args[0], args[1], args[2])
+		_, err := githubApp(args[0], args[1], args[2])
 		if err == nil {
 			t.Errorf("%s: accepted", name)
-		} else if strings.Contains(err.Error(), "ghp_secret") {
-			t.Errorf("%s: error leaks the token: %v", name, err)
+		} else if strings.Contains(err.Error(), "PRIVATE KEY") {
+			t.Errorf("%s: error leaks key material: %v", name, err)
 		}
 	}
 }
+
+func TestTemplateSource(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	app, err := githubApp("", "", "showmino") // nil App
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src, err := templateSource(dir, "showmino/forge-templates", app); err != nil {
+		t.Fatal(err)
+	} else if _, ok := src.(server.DirSource); !ok {
+		t.Errorf("directory: %T", src)
+	}
+	if src, err := templateSource("", "showmino/forge-templates", nil); err != nil || src != nil {
+		t.Errorf("nothing configured: %v %v", src, err)
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withApp, err := templateSource("", "showmino/forge-templates", &github.App{ID: 1, Key: key, Org: "showmino"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := withApp.(*server.GitHubSource); !ok {
+		t.Errorf("App: %T", withApp)
+	}
+	if _, err := templateSource(filepath.Join(dir, "nope"), "showmino/forge-templates", nil); err == nil {
+		t.Error("missing directory accepted")
+	}
+	if _, err := templateSource("", "forge-templates", &github.App{ID: 1, Key: key, Org: "showmino"}); err == nil {
+		t.Error("repo without owner accepted")
+	}
+}
 ```
+
+The test file's imports also need `"github.com/showmino/forge/internal/github"`.
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -1452,32 +1837,50 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
+	"strconv"
 
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/server"
 )
 
+// githubApp returns the GitHub App forge-api acts as, or nil when none is
+// configured. Errors never include the key file's content.
+func githubApp(id, keyFile, org string) (*github.App, error) {
+	switch {
+	case id == "" && keyFile == "":
+		return nil, nil
+	case id == "" || keyFile == "":
+		return nil, errors.New("set both --github-app-id and --github-app-key-file")
+	case org == "":
+		return nil, errors.New("--github-org is required with a GitHub App")
+	}
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || n <= 0 {
+		return nil, fmt.Errorf("--github-app-id %q is not an App ID", id)
+	}
+	data, err := os.ReadFile(keyFile)
+	if err != nil {
+		return nil, fmt.Errorf("read --github-app-key-file: %w", err)
+	}
+	key, err := github.ParsePrivateKey(data)
+	if err != nil {
+		return nil, fmt.Errorf("--github-app-key-file %s: %w", keyFile, err)
+	}
+	return &github.App{ID: n, Key: key, Org: org}, nil
+}
+
 // templateSource picks where the API reads templates from: a local checkout
-// (development) or the GitHub repo with a read-only token. It returns nil when
-// neither is configured; TemplateService then answers FAILED_PRECONDITION.
-func templateSource(dir, repo, tokenFile string) (server.TemplateSource, error) {
+// (development) or the GitHub repo as the App. It returns nil when neither is
+// configured; TemplateService then answers FAILED_PRECONDITION.
+func templateSource(dir, repo string, app *github.App) (server.TemplateSource, error) {
 	switch {
 	case dir != "":
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			return nil, fmt.Errorf("--templates-dir %s is not a directory", dir)
 		}
 		return server.DirSource{Dir: dir}, nil
-	case tokenFile != "":
-		data, err := os.ReadFile(tokenFile)
-		if err != nil {
-			return nil, fmt.Errorf("read --github-token-file: %w", err)
-		}
-		token := strings.TrimSpace(string(data))
-		if token == "" {
-			return nil, errors.New("--github-token-file is empty")
-		}
-		return server.NewGitHubSource(&github.Client{Token: github.StaticToken(token)}, repo)
+	case app != nil:
+		return server.NewGitHubSource(&github.Client{Token: app.Token}, repo)
 	default:
 		return nil, nil
 	}
@@ -1489,18 +1892,24 @@ In `cmd/forge-api/main.go`, add to the `var (...)` flag block:
 ```go
 		templatesDir  = flag.String("templates-dir", env("FORGE_TEMPLATES_DIR", ""), "serve templates from this local checkout as version 'dev' (development)")
 		templatesRepo = flag.String("templates-repo", env("FORGE_TEMPLATES_REPO", "showmino/forge-templates"), "GitHub repo (owner/name) whose semver tags are template releases")
-		tokenFile     = flag.String("github-token-file", env("FORGE_GITHUB_TOKEN_FILE", ""), "file with a read-only GitHub token for --templates-repo")
+		appID         = flag.String("github-app-id", env("FORGE_GITHUB_APP_ID", ""), "GitHub App ID forge-api acts as")
+		appKey        = flag.String("github-app-key-file", env("FORGE_GITHUB_APP_KEY_FILE", ""), "file with the GitHub App's private key (PEM)")
+		githubOrg     = flag.String("github-org", env("FORGE_GITHUB_ORG", "showmino"), "GitHub org the App is installed on")
 ```
 
 After the writer-groups loop and before `server.New`:
 
 ```go
-	templates, err := templateSource(*templatesDir, *templatesRepo, *tokenFile)
+	app, err := githubApp(*appID, *appKey, *githubOrg)
+	if err != nil {
+		return err
+	}
+	templates, err := templateSource(*templatesDir, *templatesRepo, app)
 	if err != nil {
 		return err
 	}
 	if templates == nil {
-		log.Info("templates are not configured; set --templates-dir or --github-token-file")
+		log.Info("templates are not configured; set --templates-dir, or --github-app-id and --github-app-key-file")
 	}
 ```
 
@@ -1514,14 +1923,14 @@ Expected: test PASS; the server exits with `forge-api: --templates-dir /nope is 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/forge-api && git commit -m "forge-api: --templates-dir, --templates-repo and --github-token-file
+git add cmd/forge-api && git commit -m "forge-api: template source flags and GitHub App settings
 
 Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 6: `forge template list` and `forge template get`
+### Task 7: `forge template list` and `forge template get`
 
 **Files:**
 - Modify: `internal/cli/template.go` (`newTemplateCmd`, new verbs)
@@ -1530,7 +1939,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 - Modify: `README.md`, `.claude/skills/forge/SKILL.md`
 
 **Interfaces:**
-- Consumes: `client.Client.Templates` (Task 4), `server.DirSource` (Task 3), `writeTree` and `lintManifest` (milestone 1, `internal/cli/template_test.go`).
+- Consumes: `client.Client.Templates` (Task 5), `server.DirSource` (Task 4), `writeTree` and `lintManifest` (milestone 1, `internal/cli/template_test.go`).
 - Produces: `forge template list [--tag T] [--version V]`, `forge template get <name>[@version]`.
 
 - [ ] **Step 1: Let the harness serve templates** — in `internal/cli/cli_test.go` add two fields to `harness`:
@@ -1762,13 +2171,14 @@ and replace the sentence in the "Templates" section that starts "`forge template
 ```markdown
 `forge template list` and `forge template get <name>[@version]` show the
 templates of a release (the newest by default). forge-api reads them from
-GitHub with `--github-token-file` (a read-only token for the template repo),
-or from a local checkout with `--templates-dir` (served as version `dev`).
+GitHub as the Forge GitHub App (`--github-app-id`, `--github-app-key-file`,
+`--github-org`), or from a local checkout with `--templates-dir` (served as
+version `dev`).
 `forge template lint [dir]` checks templates locally, with no API or login;
 see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
 ```
 
-In `.claude/skills/forge/SKILL.md`, in the Phase 2 status line, replace "then `forge template list/get` and `forge create`;" with "milestone 2 (`TemplateService`, `forge template list/get`, forge-api `--templates-dir` / `--github-token-file`) per `docs/plans/2026-10-08-phase-2-m2-template-service.md`; then `forge create`;".
+In `.claude/skills/forge/SKILL.md`, in the Phase 2 status line, replace "then `forge template list/get` and `forge create`;" with "milestone 2 (GitHub App auth, `TemplateService`, `forge template list/get`, forge-api `--templates-dir` / `--github-app-id` / `--github-app-key-file`) per `docs/plans/2026-10-08-phase-2-m2-template-service.md`; then `forge create`;".
 
 - [ ] **Step 8: Run the gate and commit**
 
@@ -1784,12 +2194,12 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Check it against the real template repo
+### Task 8: Check it against the real template repo
 
 **Files:** none (verification only; nothing to commit unless a defect is found, which then gets a failing test first).
 
 **Interfaces:**
-- Consumes: everything above; `showmino/forge-templates` tag `v1.0.0`; the owner's `gh` login (repo scope), used only for this local check.
+- Consumes: everything above; `showmino/forge-templates` tag `v1.0.0`; the `mino-forge` App (ID 5239131, installed on `showmino`) and its key `mino-forge.2026-10-08.private-key.pem` in the repo root.
 
 - [ ] **Step 1: Local checkout as version `dev`**
 
@@ -1807,16 +2217,17 @@ Expected: `go-grpc  dev  go, grpc  ConnectRPC service in Go with CI, Dockerfile 
 - [ ] **Step 2: GitHub release tags**
 
 ```bash
-T=$(mktemp) && chmod 600 "$T" && gh auth token > "$T"
-bin/forge-api --insecure-dev-token --addr :18081 --github-token-file "$T" &
+bin/forge-api --insecure-dev-token --addr :18081 --github-app-id 5239131 \
+  --github-app-key-file mino-forge.2026-10-08.private-key.pem --github-org showmino 2> /tmp/forge-api-m2.log &
 sleep 1
 FORGE_TOKEN=dev bin/forge --api-url http://localhost:18081 template list
 FORGE_TOKEN=dev bin/forge --api-url http://localhost:18081 template get go-grpc@v1.0.0 -o json | head -5
 FORGE_TOKEN=dev bin/forge --api-url http://localhost:18081 template get go-grpc@v0.9.0; echo "exit $?"
-kill %1; rm -f "$T"
+kill %1
+grep -c -e 'ghs_' -e 'PRIVATE KEY' /tmp/forge-api-m2.log; rm -f /tmp/forge-api-m2.log
 ```
 
-Expected: `go-grpc  v1.0.0  go, grpc  ...` (the newest tag), the JSON shows `"version": "v1.0.0"`, and `v0.9.0` exits 3. The token file is deleted afterwards; the token never appears in output or logs.
+Expected: `go-grpc  v1.0.0  go, grpc  ...` (the newest tag), the JSON shows `"version": "v1.0.0"`, `v0.9.0` exits 3, and the `grep -c` prints `0`: no installation token (`ghs_…`) or key material in the API's log.
 
 - [ ] **Step 3: Record the result**
 
@@ -1826,4 +2237,4 @@ Note in the ledger that both sources served `go-grpc` from the real repo. If any
 
 ## After Milestone 2
 
-Milestone 3 (`internal/github` App auth and repo creation, the streamed `CreateService`, `forge create`) and milestone 4 (k3s and the exit gate) follow, with their own plans. Milestone 3 extends `github.Client` (App JWT and installation tokens as its `Token` func, `CreateRepo`, Git Data API pushes) and reuses `TemplateSource` and `templateProto`.
+Milestone 3 (repo creation, the streamed `CreateService`, `forge create`) and milestone 4 (k3s and the exit gate) follow, with their own plans. Milestone 3 extends `github.Client` (`CreateRepo`, `DeleteRepo`, Git Data API pushes, with `github.App.Token` as its `Token`), reuses the App from `githubApp` in forge-api, and reuses `TemplateSource` and `templateProto`.
