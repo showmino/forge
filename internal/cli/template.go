@@ -6,9 +6,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"connectrpc.com/connect"
 	"github.com/spf13/cobra"
 
+	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/exitcode"
 	"github.com/showmino/forge/internal/output"
 	"github.com/showmino/forge/internal/template"
@@ -19,8 +22,127 @@ func newTemplateCmd(f *Factory) *cobra.Command {
 	cmd.Long = `Templates scaffold new services with 'forge create'. A template is a directory
 with a template.yaml (typed parameters) and a skeleton/ rendered with Go
 text/template. The platform team releases them by tagging the template repo.`
-	cmd.AddCommand(newTemplateLintCmd(f))
+	cmd.AddCommand(newTemplateListCmd(f), newTemplateGetCmd(f), newTemplateLintCmd(f))
 	return cmd
+}
+
+func newTemplateListCmd(f *Factory) *cobra.Command {
+	var tag, version string
+	cmd := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List the templates of a release",
+		Long:    "List the templates of a release of the template repo, the newest by default.",
+		Example: `  forge template list
+  forge template list --tag go
+  forge template list --version v1.0.0 -o json | jq -r '.templates[].name'`,
+		Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Templates.ListTemplates(ctx, connect.NewRequest(&forgev1.ListTemplatesRequest{Version: version, Tag: tag}))
+			if err != nil {
+				return err
+			}
+			ts := resp.Msg.GetTemplates()
+			if len(ts) == 0 && format == output.Table {
+				f.infof("No templates found.")
+				return nil
+			}
+			v := output.View{Headers: []string{"name", "version", "tags", "description"}, Data: resp.Msg}
+			if len(ts) == 0 {
+				// protojson omits empty lists; keep '.templates[]' working in jq.
+				v.Data = map[string]any{"templates": []any{}}
+			}
+			for _, t := range ts {
+				v.Rows = append(v.Rows, []string{strings.TrimPrefix(t.GetName(), "templates/"), t.GetVersion(), strings.Join(t.GetTags(), ", "), t.GetDescription()})
+				v.Names = append(v.Names, t.GetName())
+			}
+			return output.Print(f.IO.Out, format, v)
+		},
+	}
+	cmd.Flags().StringVar(&tag, "tag", "", "only templates with this tag")
+	cmd.Flags().StringVar(&version, "version", "", "release tag (default: the newest)")
+	return cmd
+}
+
+func newTemplateGetCmd(f *Factory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "get <name>[@version]",
+		Short: "Show a template and its parameters",
+		Example: `  forge template get go-grpc
+  forge template get go-grpc@v1.0.0 -o json | jq '.parameters'`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			name, version, _ := strings.Cut(args[0], "@")
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Templates.GetTemplate(ctx, connect.NewRequest(&forgev1.GetTemplateRequest{
+				Name:    "templates/" + strings.TrimPrefix(name, "templates/"),
+				Version: version,
+			}))
+			if err != nil {
+				return err
+			}
+			t := resp.Msg.GetTemplate()
+			if format != output.Table {
+				return output.Print(f.IO.Out, format, output.View{Names: []string{t.GetName()}, Data: t})
+			}
+			if err := output.Print(f.IO.Out, format, output.View{
+				Headers: []string{"field", "value"},
+				Rows: [][]string{
+					{"name", t.GetName()},
+					{"version", t.GetVersion()},
+					{"title", t.GetTitle()},
+					{"description", t.GetDescription()},
+					{"tags", strings.Join(t.GetTags(), ", ")},
+					{"owner", t.GetOwner()},
+				},
+			}); err != nil {
+				return err
+			}
+			if len(t.GetParameters()) == 0 {
+				return nil
+			}
+			params := output.View{Headers: []string{"parameter", "type", "required", "default", "description"}}
+			for _, p := range t.GetParameters() {
+				required := "no"
+				if p.GetRequired() {
+					required = "yes"
+				}
+				params.Rows = append(params.Rows, []string{p.GetName(), paramType(p), required, p.GetDefaultValue(), p.GetDescription()})
+			}
+			if _, err := fmt.Fprintln(f.IO.Out); err != nil {
+				return err
+			}
+			return output.Print(f.IO.Out, format, params)
+		},
+	}
+}
+
+// paramType reads "int", "string", or "enum (gold, silver)".
+func paramType(p *forgev1.TemplateParameter) string {
+	s := strings.ToLower(strings.TrimPrefix(p.GetType().String(), "TYPE_"))
+	if p.GetType() == forgev1.TemplateParameter_TYPE_ENUM {
+		s += " (" + strings.Join(p.GetValues(), ", ") + ")"
+	}
+	return s
 }
 
 func newTemplateLintCmd(f *Factory) *cobra.Command {

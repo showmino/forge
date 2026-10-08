@@ -113,3 +113,56 @@ func TestTemplateLintRenderDir(t *testing.T) {
 	}
 	h.fails(6, "template", "lint", "repo", "--render-dir", "out") // never overwrites
 }
+
+var templateRepo = map[string]string{
+	"svc/template.yaml": "apiVersion: forge.dev/v1\nkind: Template\nname: svc\ntitle: Go service\ndescription: Go service fixture\ntags: [go, grpc]\nowner: platform\nparameters:\n" +
+		"  - name: port\n    type: int\n    default: 8080\n    description: Port the server listens on\n" +
+		"  - name: tier\n    type: enum\n    values: [gold, silver]\n    description: Support tier\n",
+	"svc/skeleton/forge.yaml": lintManifest,
+	"web/template.yaml":       "apiVersion: forge.dev/v1\nkind: Template\nname: web\ntitle: Web app\ndescription: Web fixture\ntags: [node]\n",
+	"web/skeleton/forge.yaml": lintManifest,
+}
+
+func TestTemplateListAndGet(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	writeTree(t, filepath.Join(h.dir, "repo"), templateRepo)
+	h.serveTemplates(filepath.Join(h.dir, "repo"))
+
+	golden(t, "template_list_table", h.ok("template", "list").out)
+	golden(t, "template_list_json", h.ok("template", "list", "-o", "json").out)
+	if r := h.ok("template", "list", "-o", "name"); r.out != "templates/svc\ntemplates/web\n" {
+		t.Errorf("names: %q", r.out)
+	}
+	if r := h.ok("template", "list", "--tag", "node", "-o", "name"); r.out != "templates/web\n" {
+		t.Errorf("--tag: %q", r.out)
+	}
+	r := h.ok("template", "list", "--tag", "rust")
+	if r.out != "" || !strings.Contains(r.err, "No templates found.") {
+		t.Errorf("no match, table: %+v", r)
+	}
+	if r := h.ok("template", "list", "--tag", "rust", "-o", "json"); !strings.Contains(r.out, `"templates": []`) {
+		t.Errorf("no match, json: %q", r.out)
+	}
+
+	golden(t, "template_get_table", h.ok("template", "get", "svc").out)
+	golden(t, "template_get_json", h.ok("template", "get", "templates/svc@dev", "-o", "json").out)
+	if r := h.ok("template", "get", "web"); strings.Contains(r.out, "REQUIRED") {
+		t.Errorf("a template without parameters prints no parameter table:\n%s", r.out)
+	}
+}
+
+func TestTemplateGetErrors(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.fails(6, "template", "list") // the API has no template source
+	writeTree(t, filepath.Join(h.dir, "repo"), templateRepo)
+	h.serveTemplates(filepath.Join(h.dir, "repo"))
+	h.fails(3, "template", "get", "nope")
+	h.fails(3, "template", "get", "svc@v1.0.0") // a directory serves only "dev"
+	h.fails(3, "template", "list", "--version", "v1.0.0")
+	h.fails(2, "template", "get", "Bad_Name")
+	h.fails(2, "template", "get")
+	delete(h.env, "FORGE_TOKEN")
+	h.fails(4, "template", "list")
+}

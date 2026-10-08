@@ -1,0 +1,11 @@
+FIELD         VALUE
+name          templates/svc
+version       dev
+title         Go service
+description   Go service fixture
+tags          go, grpc
+owner         platform
+
+PARAMETER   TYPE                  REQUIRED   DEFAULT   DESCRIPTION
+port        int                   no         8080      Port the server listens on
+tier        enum (gold, silver)   yes        -         Support tier
