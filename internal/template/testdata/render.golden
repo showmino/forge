@@ -1,0 +1,17 @@
+== .github/workflows/ci.yml 0644
+image: ghcr.io/showmino/x:${{ github.sha }} # {{ not.ours }}
+== cmd/billing-api/main.go 0644
+package main // port 8080
+var _ connect.Request[billingapiv1.Req]
+== forge.yaml 0644
+apiVersion: forge.dev/v1
+service:
+  name: billing-api
+  team: billing
+== go.mod 0644
+module github.com/showmino/billing-api
+== logo.bin 0644
+"\xff\xfe{% \x00"
+== run.sh 0755
+#!/bin/sh
+echo billing-api

@@ -17,7 +17,7 @@ generate: ## Regenerate gen/ from proto/
 	buf generate
 
 update-golden: ## Rewrite golden files after an intended output change
-	go test ./internal/output -update
+	go test ./internal/output ./internal/template ./internal/cli -update
 
 tools: ## Install buf and the protoc plugins at the versions CI uses
 	go install github.com/bufbuild/buf/cmd/buf@v1.47.2
