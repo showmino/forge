@@ -44,7 +44,7 @@
 
 ### Task 0: Branch
 
-- [ ] **Step 1:** The spec is committed on `phase-3`. Branch from it:
+- [x] **Step 1:** The spec is committed on `phase-3`. Branch from it:
 
 ```bash
 cd /home/mino/code/forge && git checkout phase-3 && git checkout -b phase-3-m1 && git branch --show-current
@@ -69,7 +69,7 @@ Expected: `phase-3-m1`.
   - `forgev1connect.OperationServiceHandler` and `forgev1connect.NewOperationServiceHandler`.
   - `client.Client.Operations forgev1connect.OperationServiceClient`.
 
-- [ ] **Step 1: Write the proto**
+- [x] **Step 1: Write the proto**
 
 ```protobuf
 syntax = "proto3";
@@ -183,12 +183,12 @@ message CancelOperationResponse {
 }
 ```
 
-- [ ] **Step 2: Generate and lint**
+- [x] **Step 2: Generate and lint**
 
 Run: `export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH && make generate && buf lint && go build ./...`
 Expected: no output from `buf lint`; `gen/forge/v1/operation.pb.go` and `gen/forge/v1/forgev1connect/operation.connect.go` exist.
 
-- [ ] **Step 3: Add the client**
+- [x] **Step 3: Add the client**
 
 In `pkg/client/client.go`, add the field to `Client` after `Templates`:
 
@@ -202,12 +202,12 @@ and in `New`'s return, after `Templates: ...`:
 		Operations: forgev1connect.NewOperationServiceClient(hc, baseURL, opts...),
 ```
 
-- [ ] **Step 4: Build**
+- [x] **Step 4: Build**
 
 Run: `go build ./... && go vet ./pkg/client`
 Expected: success.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add proto/forge/v1/operation.proto gen pkg/client/client.go
@@ -238,7 +238,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - `func (s *Operations) Wait(ctx context.Context, name string) (*forgev1.Operation, error)`
   - Error codes: `OpCodeCancelled = "cancelled"`, `OpCodeInternal = "internal"`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `internal/server/operations_test.go`:
 
@@ -609,12 +609,12 @@ func TestListAndPrune(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run them to see them fail**
+- [x] **Step 2: Run them to see them fail**
 
 Run: `go test ./internal/server -run 'TestOperation|TestWatch|TestManyWatchers|TestSlowWatcher|TestCancel|TestWorkOutlives|TestListAndPrune'`
 Expected: build failure, `undefined: NewOperations`.
 
-- [ ] **Step 3: Implement the store**
+- [x] **Step 3: Implement the store**
 
 `internal/server/operations.go`:
 
@@ -944,12 +944,12 @@ func (s *Operations) Wait(ctx context.Context, name string) (*forgev1.Operation,
 - **Snapshot and subscribe happen under one lock.** In `Watch`, copying `past` and adding `w` to `o.subs` must happen under the same `s.mu` hold. Then every event is either in `past` or delivered on `w.ch`, never both and never neither.
 - **Only the publisher closes `w.ch`.** `emit` and `finish` close a watcher's channel only while removing it from `o.subs` under `s.mu`, and `unsubscribe` only removes it. So a channel is never closed twice.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `go test -race -count=3 ./internal/server -run 'TestOperation|TestWatch|TestManyWatchers|TestSlowWatcher|TestCancel|TestWorkOutlives|TestListAndPrune'`
 Expected: PASS three times, no race reports.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 make build test lint
@@ -974,7 +974,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   - `Options.Operations *Operations`. Nil means `New` creates one with `NewOperations(nil)`. Milestone 2 passes the same store to the environment service, and CLI tests pass their own to start operations.
   - `func validOpName(name string) error`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `internal/server/operation_service_test.go`:
 
@@ -1095,12 +1095,12 @@ func TestOperationServiceRPCs(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run it to see it fail**
+- [x] **Step 2: Run it to see it fail**
 
 Run: `go test ./internal/server -run TestOperationServiceRPCs`
 Expected: build failure, `unknown field Operations in struct literal of type Options`.
 
-- [ ] **Step 3: Implement the handler**
+- [x] **Step 3: Implement the handler**
 
 `internal/server/operation_service.go`:
 
@@ -1213,12 +1213,12 @@ In `internal/server/server.go`:
 
 - Update the package comment's first sentence to: `Package server is the Forge API: the service catalog, auth discovery, templates and operations, over Connect, gRPC and gRPC-Web from the same handlers.`
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `go test -race ./internal/server`
 Expected: PASS (the new test and every existing one).
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 make build test lint
@@ -1248,14 +1248,14 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 Event lines on stderr are `  <step padded to 10> <message>`, for example `  resolve    main is 1a2b3c4`. Unlike the spec's "✓ step" wording, events are progress messages, not finished steps. A check mark on "waiting for image" would be wrong, so the renderer prints step and message.
 
-- [ ] **Step 1: Give the harness an operations store**
+- [x] **Step 1: Give the harness an operations store**
 
 In `internal/cli/cli_test.go`:
 - Add the field `ops *server.Operations` to `harness`, next to `repos`.
 - In `newHarness`, set `h := &harness{t: t, dir: t.TempDir(), store: &auth.MemoryStore{}, ops: server.NewOperations(nil)}`.
 - In `startAPI`'s `server.Options`, add `Operations: h.ops,`.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `internal/cli/operation_test.go`:
 
@@ -1424,12 +1424,12 @@ Add the imports this test needs to `operation_test.go`: `errors`, `io`, `net/htt
 
 A real HTTP connection can't force a server-side watcher to fall behind, because socket buffers absorb the events. The store's side of that is covered by `TestSlowWatcherDoesNotBlockWork` (Task 2). This test covers the CLI's side with a fake service: two watches, and every line printed once.
 
-- [ ] **Step 3: Run them to see them fail**
+- [x] **Step 3: Run them to see them fail**
 
 Run: `go test ./internal/cli -run 'TestOpWatch'`
 Expected: build failure, `undefined: opName`.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `internal/cli/operation.go`:
 
@@ -1614,12 +1614,12 @@ In `internal/cli/root.go`, add `newOpCmd(f)` to the core group list after `newCr
 	for _, c := range []*cobra.Command{newServiceCmd(f), newTemplateCmd(f), newCreateCmd(f), newOpCmd(f)} {
 ```
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `go test -race -count=3 ./internal/cli -run 'TestOpWatch'`
 Expected: PASS three times.
 
-- [ ] **Step 6: Lint and commit**
+- [x] **Step 6: Lint and commit**
 
 ```bash
 make build test lint
@@ -1643,7 +1643,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 
 `op list` table columns: `ID KIND TARGET STATE AGE`. JSON prints the `ListOperationsResponse`; when there are none, `{"operations": []}`, as `template list` does.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `internal/cli/operation_test.go`:
 
@@ -1737,12 +1737,12 @@ op_done      test_kind   environments/a   succeeded   <1m
 
 The column widths come from `output.Print`'s table writer. If the golden differs only in spacing, check it with `go test ./internal/cli -run TestOpList -update` and review the diff before keeping it.
 
-- [ ] **Step 2: Run them to see them fail**
+- [x] **Step 2: Run them to see them fail**
 
 Run: `go test ./internal/cli -run 'TestOpList|TestOpCancel|TestAge'`
 Expected: FAIL. `op list` and `op cancel` are unknown commands (exit 2), and `age` is undefined.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `internal/cli/operation.go`, change `cmd.AddCommand(newOpWatchCmd(f))` to:
 
@@ -1882,12 +1882,12 @@ func age(d time.Duration) string {
 
 `confirmDestructive`'s prompt reads "This will cancel operations/op_x. Type its name to confirm:" and accepts `op_x`, because `shortName` keeps what follows the last `/`.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `go test -race ./internal/cli`
 Expected: PASS, every existing CLI test included.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 make build test lint
@@ -1906,7 +1906,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `.claude/skills/forge/scripts/cli-smoke.sh`, `.claude/skills/forge/SKILL.md`, `README.md`, `docs/plans/2026-10-08-phase-3-m1-operations.md` (tick the boxes)
 
-- [ ] **Step 1: Smoke cases.** In `cli-smoke.sh`, before `echo; echo "#### output and global flags"`, add:
+- [x] **Step 1: Smoke cases.** In `cli-smoke.sh`, before `echo; echo "#### output and global flags"`, add:
 
 ```bash
 echo; echo "#### operations"
@@ -1930,7 +1930,7 @@ bin/forge --api-url http://localhost:8080 op cancel op_000000000000 --yes; echo 
 
 Stop the API afterwards by its PID (`kill <pid>`), never with `pkill -f`.
 
-- [ ] **Step 2: Docs.**
+- [x] **Step 2: Docs.**
   - **`SKILL.md` "Status and roadmap":** replace the Phase 2 "follow-up backlog" bullet's position by adding, after the Phase 2 bullet: `- **Phase 3 (in progress):** spec docs/specs/2026-10-08-phase-3-environments-design.md. Milestone 1: operations (OperationService, in-memory store, forge op list/watch/cancel) per docs/plans/2026-10-08-phase-3-m1-operations.md. Then milestone 2 (environments) and 3 (k3s and the 10-minute exit gate).`
   - **README:** after the paragraph that starts "`forge create <name> --template <template> --team <team>` asks forge-api to", add: "`forge op list`, `forge op watch <id>` and `forge op cancel <id>` show and stop long-running work on the API (operations). Phase 3's environments are the first to use them."
 

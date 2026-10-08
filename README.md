@@ -142,6 +142,7 @@ render the template, create the private repo `github.com/<org>/<name>` as the
 Forge GitHub App, push the first commit (which starts its CI) and register the
 service. `--set name=value` sets parameters, `--dry-run` lists the files
 without creating anything, and a failure after the repo exists deletes it again.
+`forge op list`, `forge op watch <id>` and `forge op cancel <id>` show and stop long-running work on the API (operations). Phase 3's environments are the first to use them.
 `forge template lint [dir]` checks templates locally, with no API or login;
 see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
 
