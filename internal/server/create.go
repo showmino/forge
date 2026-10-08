@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"path"
 	"strings"
 	"sync"
 
@@ -151,10 +153,164 @@ func (c *creator) create(ctx context.Context, req *forgev1.CreateServiceRequest,
 	return c.scaffold(ctx, req, stream)
 }
 
-func (c *creator) scaffold(_ context.Context, req *forgev1.CreateServiceRequest, stream createStream) (*forgev1.CreateServiceResponse, error) {
-	if !req.GetValidateOnly() {
-		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("create is not implemented yet"))
+// sender sends stream messages and remembers the first send error: once
+// side effects began, the pipeline continues even if the client is gone.
+type sender struct {
+	s   createStream
+	err error
+}
+
+func (w *sender) send(m *forgev1.CreateServiceResponse) {
+	if w.err == nil {
+		w.err = w.s.Send(m)
 	}
-	final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Plan{Plan: &forgev1.CreatePlan{}}}
-	return final, stream.Send(final)
+}
+
+func stepMsg(name string, state forgev1.CreateStep_State, detail string) *forgev1.CreateServiceResponse {
+	return &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Step{Step: &forgev1.CreateStep{Name: name, State: state, Detail: detail}}}
+}
+
+// scaffold runs fetch, render and (unless validate_only) create_repo, push
+// and register.
+func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) (*forgev1.CreateServiceResponse, error) {
+	w := &sender{s: stream}
+	started := func(step string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_STARTED, "")) }
+	done := func(step, detail string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_DONE, detail)) }
+	id := req.GetServiceId()
+	tname := strings.TrimPrefix(req.GetTemplate(), templatePrefix)
+	repoURL := "https://github.com/" + c.org + "/" + id
+
+	started("fetch")
+	version, tree, err := resolveRelease(ctx, c.templates, req.GetTemplateVersion())
+	if err != nil {
+		return nil, err
+	}
+	t, err := templateFromRelease(tree, tname, version)
+	if err != nil {
+		return nil, err
+	}
+	skeleton, err := fs.Sub(tree, path.Join(tname, template.SkeletonDir))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	done("fetch", tname+"@"+version)
+
+	started("render")
+	v := template.Values{
+		Service:  template.ServiceValues{Name: id, Team: req.GetOwnerTeam(), Owners: req.GetOwners()},
+		Repo:     template.RepoValues{Owner: c.org, Name: id, URL: repoURL},
+		Template: template.TemplateValues{Name: tname, Version: version},
+	}
+	params, err := t.ResolveParams(v, req.GetParameters())
+	var pe *template.ParamError
+	if errors.As(err, &pe) {
+		return nil, invalid(pe.Error())
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	v.Params = params
+	files, err := t.Render(skeleton, v)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s does not render: %w", tname, version, err))
+	}
+	if err := template.CheckManifest(files, id, req.GetOwnerTeam()); err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", tname, version, err))
+	}
+	var m *manifest.Manifest
+	for _, f := range files {
+		if f.Path == manifest.FileName {
+			m, _ = manifest.Parse(f.Data) // CheckManifest parsed it already
+		}
+	}
+	done("render", fmt.Sprintf("%d files", len(files)))
+
+	if req.GetValidateOnly() {
+		plan := &forgev1.CreatePlan{TemplateVersion: version, RepoUrl: repoURL}
+		for _, f := range files {
+			plan.Files = append(plan.Files, f.Path)
+		}
+		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Plan{Plan: plan}}
+		w.send(final)
+		return final, w.err
+	}
+
+	// From here on the work outlives the client: the outcome is stored for
+	// its retry. The HTTP client's timeout bounds every GitHub call.
+	work := context.WithoutCancel(ctx)
+	started("create_repo")
+	repo, err := c.repos.CreateOrgRepo(work, c.org, id, fmt.Sprintf("%s, created by forge create from %s@%s", t.Title, tname, version))
+	if errors.Is(err, github.ErrRepoExists) {
+		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("github.com/%s/%s already exists", c.org, id))
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("create github.com/%s/%s: %w", c.org, id, err))
+	}
+	done("create_repo", "github.com/"+c.org+"/"+id)
+
+	fail := func(step string, cause error) (*forgev1.CreateServiceResponse, error) {
+		delErr := c.repos.DeleteRepo(work, c.org, id)
+		c.log.WarnContext(ctx, "create failed", "service", id, "step", step, "error", cause, "rolled_back", delErr == nil, "rollback_error", delErr)
+		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Failure{Failure: &forgev1.CreateFailure{
+			Step: step, Message: cause.Error(), RolledBack: delErr == nil,
+		}}}
+		w.send(final)
+		return final, nil
+	}
+
+	started("push")
+	pushFiles := make([]github.File, 0, len(files))
+	for _, f := range files {
+		pushFiles = append(pushFiles, github.File{Path: f.Path, Executable: f.Mode&0o111 != 0, Content: f.Data})
+	}
+	sha, err := c.repos.PushFiles(work, c.org, id, repo.DefaultBranch, fmt.Sprintf("Scaffold %s from %s@%s\n\nCreated with forge create.", id, tname, version), pushFiles)
+	if err != nil {
+		return fail("push", err)
+	}
+	done("push", shortSHA(sha)+" (CI started)")
+
+	started("register")
+	svc := serviceFromManifest(m)
+	svc.RepoUrl = repoURL
+	resp, err := c.catalog.RegisterService(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}))
+	if err != nil {
+		return fail("register", err)
+	}
+	done("register", servicePrefix+id)
+
+	p, _ := PrincipalFrom(ctx)
+	c.log.InfoContext(ctx, "service created", "service", id, "template", tname, "version", version, "repo", repoURL, "by", p.Subject)
+	final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Service{Service: resp.Msg.GetService()}}
+	w.send(final)
+	return final, nil
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+// serviceFromManifest is the catalog entry a rendered forge.yaml describes.
+func serviceFromManifest(m *manifest.Manifest) *forgev1.Service {
+	s := &forgev1.Service{
+		DisplayName: m.Service.DisplayName,
+		OwnerTeam:   m.Service.Team,
+		Owners:      m.Service.Owners,
+		RepoUrl:     m.Service.Repo,
+		Labels:      m.Service.Labels,
+	}
+	switch m.Service.Lifecycle {
+	case "experimental":
+		s.Lifecycle = forgev1.Lifecycle_LIFECYCLE_EXPERIMENTAL
+	case "production":
+		s.Lifecycle = forgev1.Lifecycle_LIFECYCLE_PRODUCTION
+	case "deprecated":
+		s.Lifecycle = forgev1.Lifecycle_LIFECYCLE_DEPRECATED
+	}
+	for _, d := range m.Service.Dependencies {
+		s.Dependencies = append(s.Dependencies, servicePrefix+strings.TrimPrefix(d, servicePrefix))
+	}
+	return s
 }

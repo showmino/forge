@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -70,9 +72,12 @@ func (f *fakeRepos) DeleteRepo(_ context.Context, _, name string) error {
 	return nil
 }
 
-func (f *fakeRepos) PushFiles(_ context.Context, _, repo, _, _ string, files []github.File) (string, error) {
+func (f *fakeRepos) PushFiles(ctx context.Context, _, repo, _, _ string, files []github.File) (string, error) {
 	if f.pushGate != nil {
 		<-f.pushGate
+	}
+	if err := ctx.Err(); err != nil { // like a real HTTP call
+		return "", err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -217,5 +222,217 @@ func TestCreateWithoutGitHubCanStillValidate(t *testing.T) {
 	}
 	if last := msgs[len(msgs)-1]; last.GetPlan() == nil {
 		t.Errorf("validate_only without GitHub must still plan: %v", last)
+	}
+}
+
+var errBoom = errors.New("boom")
+
+func (f *fakeRepos) files(name string) ([]github.File, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	files, ok := f.repos[name]
+	return files, ok
+}
+
+// steps returns "name:state:detail" for each step message and the last message.
+func steps(msgs []*forgev1.CreateServiceResponse) ([]string, *forgev1.CreateServiceResponse) {
+	var out []string
+	for _, m := range msgs {
+		if s := m.GetStep(); s != nil {
+			out = append(out, s.GetName()+":"+strings.TrimPrefix(s.GetState().String(), "STATE_")+":"+s.GetDetail())
+		}
+	}
+	if len(msgs) == 0 {
+		return out, nil
+	}
+	return out, msgs[len(msgs)-1]
+}
+
+func TestCreateService(t *testing.T) {
+	t.Parallel()
+	e := newCreateEnv(t, createRelease, newFakeRepos())
+	msgs, err := e.create(context.Background(), "writer", validRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, last := steps(msgs)
+	want := []string{
+		"fetch:STARTED:", "fetch:DONE:svc@v1.0.0",
+		"render:STARTED:", "render:DONE:3 files",
+		"create_repo:STARTED:", "create_repo:DONE:github.com/showmino/payments",
+		"push:STARTED:", "push:DONE:abc1234 (CI started)",
+		"register:STARTED:", "register:DONE:services/payments",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("steps:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	svc := last.GetService()
+	if svc.GetName() != "services/payments" || svc.GetOwnerTeam() != "billing" || svc.GetRepoUrl() != "https://github.com/showmino/payments" ||
+		svc.GetLifecycle() != forgev1.Lifecycle_LIFECYCLE_EXPERIMENTAL || strings.Join(svc.GetOwners(), ",") != "ana@example.com" {
+		t.Errorf("service: %v", svc)
+	}
+	files, _ := e.repos.files("payments")
+	byPath := map[string]github.File{}
+	for _, f := range files {
+		byPath[f.Path] = f
+	}
+	if string(byPath["main.go"].Content) != "package main // 8080 gold\n" || !byPath["run.sh"].Executable || byPath["main.go"].Executable {
+		t.Errorf("pushed files: %+v", files)
+	}
+	if !e.catalog.has("services/payments") {
+		t.Error("service not registered")
+	}
+}
+
+func TestCreateValidateOnly(t *testing.T) {
+	t.Parallel()
+	e := newCreateEnv(t, createRelease, newFakeRepos())
+	r := validRequest()
+	r.ValidateOnly = true
+	msgs, err := e.create(context.Background(), "writer", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, last := steps(msgs)
+	if strings.Join(got, ",") != "fetch:STARTED:,fetch:DONE:svc@v1.0.0,render:STARTED:,render:DONE:3 files" {
+		t.Errorf("steps: %v", got)
+	}
+	p := last.GetPlan()
+	if p.GetTemplateVersion() != "v1.0.0" || p.GetRepoUrl() != "https://github.com/showmino/payments" || strings.Join(p.GetFiles(), ",") != "forge.yaml,main.go,run.sh" {
+		t.Errorf("plan: %v", p)
+	}
+	if _, ok := e.repos.files("payments"); ok || e.catalog.has("services/payments") {
+		t.Error("validate_only must not create anything")
+	}
+}
+
+func TestCreateBadParameters(t *testing.T) {
+	t.Parallel()
+	e := newCreateEnv(t, createRelease, newFakeRepos())
+	for name, params := range map[string]map[string]string{
+		"missing required": {},
+		"wrong type":       {"tier": "gold", "port": "http"},
+		"unknown":          {"tier": "gold", "nope": "x"},
+	} {
+		r := validRequest()
+		r.Parameters = params
+		_, err := e.create(context.Background(), "writer", r)
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if e.repos.createCount() != 0 {
+		t.Error("bad parameters must not create a repo")
+	}
+}
+
+func TestCreateFailuresRollBack(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	pushFails := newFakeRepos()
+	pushFails.pushErr = errBoom
+	e := newCreateEnv(t, createRelease, pushFails)
+	msgs, err := e.create(ctx, "writer", validRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, last := steps(msgs)
+	if f := last.GetFailure(); f.GetStep() != "push" || !f.GetRolledBack() || !strings.Contains(f.GetMessage(), "boom") {
+		t.Errorf("push failure: %v", last)
+	}
+	if _, ok := pushFails.files("payments"); ok {
+		t.Error("the repo must be deleted again")
+	}
+
+	cannotDelete := newFakeRepos()
+	cannotDelete.pushErr, cannotDelete.deleteErr = errBoom, errBoom
+	msgs, _ = newCreateEnv(t, createRelease, cannotDelete).create(ctx, "writer", validRequest())
+	if _, last := steps(msgs); last.GetFailure().GetRolledBack() {
+		t.Error("rolled_back must be false when the delete failed")
+	}
+
+	registerFails := newFakeRepos()
+	e = newCreateEnv(t, createRelease, registerFails)
+	r := validRequest()
+	r.Template, r.Parameters = "templates/dep", nil
+	msgs, err = e.create(ctx, "writer", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, last := steps(msgs); last.GetFailure().GetStep() != "register" || !last.GetFailure().GetRolledBack() {
+		t.Errorf("register failure: %v", last)
+	}
+
+	raced := newFakeRepos()
+	raced.createErr = github.ErrRepoExists
+	if _, err := newCreateEnv(t, createRelease, raced).create(ctx, "writer", validRequest()); connect.CodeOf(err) != connect.CodeAlreadyExists {
+		t.Errorf("repo created by someone else meanwhile: %v", err)
+	}
+	down := newFakeRepos()
+	down.createErr = errBoom
+	if _, err := newCreateEnv(t, createRelease, down).create(ctx, "writer", validRequest()); connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Errorf("GitHub down at create_repo: %v", err)
+	}
+}
+
+func TestCreateIdempotency(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repos := newFakeRepos()
+	e := newCreateEnv(t, createRelease, repos)
+	if _, err := e.create(ctx, "writer", validRequest()); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := e.create(ctx, "writer", validRequest()) // same request_id
+	if err != nil || len(msgs) != 1 || msgs[0].GetService().GetName() != "services/payments" {
+		t.Errorf("replay: %v %v", msgs, err)
+	}
+	if n := repos.createCount(); n != 1 {
+		t.Errorf("%d repos created, want 1", n)
+	}
+
+	// A retry while the first attempt still runs is refused.
+	slow := newFakeRepos()
+	slow.pushGate = make(chan struct{})
+	e = newCreateEnv(t, createRelease, slow)
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.create(ctx, "writer", validRequest())
+		done <- err
+	}()
+	for slow.createCount() != 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, err := e.create(ctx, "writer", validRequest()); connect.CodeOf(err) != connect.CodeAborted {
+		t.Errorf("retry while running: %v", err)
+	}
+	close(slow.pushGate)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A client that disconnects after create_repo does not leave a half-made service.
+func TestCreateSurvivesDisconnect(t *testing.T) {
+	t.Parallel()
+	repos := newFakeRepos()
+	e := newCreateEnv(t, createRelease, repos)
+	ctx, cancel := context.WithCancel(context.Background())
+	repos.onCreate = func() { // the client goes away while the repo is being created
+		cancel()
+		time.Sleep(200 * time.Millisecond) // until the server has noticed
+	}
+	_, _ = e.create(ctx, "writer", validRequest())
+	// The server finishes in the background; wait for the registration.
+	for i := 0; !e.catalog.has("services/payments"); i++ {
+		if i > 200 {
+			t.Fatal("the create did not finish after the client left")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	msgs, err := e.create(context.Background(), "writer", validRequest()) // the CLI's retry
+	if err != nil || len(msgs) != 1 || msgs[0].GetService() == nil {
+		t.Errorf("retry after disconnect: %v %v", msgs, err)
 	}
 }
