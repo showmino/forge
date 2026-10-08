@@ -102,7 +102,7 @@ spec:
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
             - {name: FORGE_LOG_FORMAT, value: json}
             - {name: FORGE_GITHUB_APP_ID, value: "${FORGE_GITHUB_APP_ID}"} #app
-            - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/private-key.pem} #app
+            - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key} #app
             - {name: FORGE_GITHUB_ORG, value: ${FORGE_GITHUB_ORG}} #app
             - {name: FORGE_TEMPLATES_REPO, value: ${FORGE_TEMPLATES_REPO}} #app
           volumeMounts: #app

@@ -215,20 +215,19 @@ IMG=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD)
 docker build --build-arg COMMIT=$(git rev-parse HEAD) -t $IMG . && docker push $IMG
 ```
 
-- [ ] **Step 2: Ask the owner**, then create the Secret (once) without printing the key:
+- [ ] **Step 2: The Secret comes from 1Password** (owner decision): the owner creates the item `forge-github-app` in the vault `Kube` with a field `github_app_private_key` holding the PEM. Rendering with `FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app` adds a `OnePasswordItem`, and the cluster's 1Password operator creates the Secret `forge-github-app`. After applying (Step 3), check without printing the key:
 
 ```bash
-kubectl -n forge create secret generic forge-github-app \
-  --from-file=private-key.pem=mino-forge.2026-10-08.private-key.pem
 kubectl -n forge get secret forge-github-app -o jsonpath='{.data}' | python3 -I -c 'import json,sys; print(sorted(json.load(sys.stdin)))'
 ```
 
-Expected: `['private-key.pem']`.
+Expected: a list containing `github_app_private_key`.
 
 - [ ] **Step 3: Deploy**
 
 ```bash
-FORGE_GITHUB_APP_ID=5239131 FORGE_API_IMAGE=$IMG sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
+FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_API_IMAGE=$IMG \
+  sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
 kubectl -n forge rollout status deploy/forge-api --timeout=180s
 kubectl -n forge logs deploy/forge-api | tail -3
 ```

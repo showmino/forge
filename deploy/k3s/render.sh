@@ -14,8 +14,11 @@
 # With the Forge GitHub App (templates and 'forge create'), create the Secret
 # first, then render with the App's ID (FORGE_GITHUB_ORG defaults to showmino,
 # FORGE_TEMPLATES_REPO to showmino/forge-templates):
-#   kubectl -n forge create secret generic forge-github-app --from-file=private-key.pem=<key.pem>
+#   kubectl -n forge create secret generic forge-github-app --from-file=github_app_private_key=<key.pem>
 #   FORGE_GITHUB_APP_ID=5239131 FORGE_API_IMAGE=... deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+# or let the 1Password operator create that Secret from an item with a
+# github_app_private_key field:
+#   FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 set -eu
 
 usage() {
@@ -64,6 +67,13 @@ esac
 case $org$templates_repo in
   *[!A-Za-z0-9./_-]*) echo "invalid FORGE_GITHUB_ORG or FORGE_TEMPLATES_REPO" >&2; exit 2 ;;
 esac
+onepassword_item=${FORGE_ONEPASSWORD_ITEM:-}
+case $onepassword_item in
+  *[!A-Za-z0-9./_-]*) echo "invalid FORGE_ONEPASSWORD_ITEM: $onepassword_item" >&2; exit 2 ;;
+esac
+if [ -n "$onepassword_item" ] && [ -z "$app_id" ]; then
+  echo "FORGE_ONEPASSWORD_ITEM needs FORGE_GITHUB_APP_ID" >&2; exit 2
+fi
 if [ -n "$app_id" ]; then
   app='s/ *#app$//' # keep the App lines, drop their marker
 else
@@ -74,7 +84,11 @@ fi
   cat "$dir/forge.yaml.tmpl"
   echo "---"
   cat "$exposure"
+  if [ -n "$onepassword_item" ]; then
+    echo "---"
+    cat "$dir/onepassword.yaml.tmpl"
+  fi
 } | sed -e "$app" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
-        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
+        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g"
