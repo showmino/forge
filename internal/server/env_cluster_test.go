@@ -62,6 +62,8 @@ func TestClusterLifecycle(t *testing.T) {
 		t.Errorf("env: %+v", ctr.Env)
 	case pod.SecurityContext == nil || !*pod.SecurityContext.RunAsNonRoot:
 		t.Error("runAsNonRoot")
+	case pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken:
+		t.Error("service account token mounted")
 	case ctr.SecurityContext == nil || !*ctr.SecurityContext.ReadOnlyRootFilesystem || *ctr.SecurityContext.AllowPrivilegeEscalation || ctr.SecurityContext.Capabilities.Drop[0] != "ALL":
 		t.Errorf("container security: %+v", ctr.SecurityContext)
 	case len(pod.ImagePullSecrets) != 1 || pod.ImagePullSecrets[0].Name != "forge-pull":

@@ -266,7 +266,8 @@ func deployment(w Workload) *appsv1.Deployment {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					ImagePullSecrets: []corev1.LocalObjectReference{{Name: pullSecretName}},
+					ImagePullSecrets:             []corev1.LocalObjectReference{{Name: pullSecretName}},
+					AutomountServiceAccountToken: &no,
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot:   &yes,
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
