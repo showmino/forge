@@ -228,7 +228,7 @@ Requires `services.write`. Step 1 runs before any event is sent; steps 2, 3, 5, 
 
 If step 6 or 7 fails, delete the repo (best effort) and send a `CreateFailure` with `rolled_back` set to whether the delete worked.
 
-**Idempotency:** the outcome of each `request_id` (success, failure or in progress) is kept in memory, like the Phase 1 catalog. A retry with the same key gets the stored outcome replayed as a short stream instead of a second repo. A retry while the first attempt is still running gets `ABORTED` ("in progress").
+**Idempotency:** the outcome of each `request_id` (success, failure or in progress) is kept in memory, like the Phase 1 catalog. A retry with the same key gets the stored outcome replayed as a short stream instead of a second repo. A retry while the first attempt is still running waits for it (as long as the caller's deadline allows) and gets its outcome replayed.
 
 Once `create_repo` starts, the pipeline runs to its end even if the client disconnects, so the stored outcome is complete when the client retries. `forge create` pins `template_version` to the version `GetTemplate` resolved.
 
@@ -321,7 +321,7 @@ port         int      no         8080                                        Por
 | Template or version not found | `NOT_FOUND` | 3 |
 | `services/{id}` or `showmino/{id}` exists | `ALREADY_EXISTS` | 6 |
 | Templates or GitHub not configured | `FAILED_PRECONDITION` | 6 |
-| Same `request_id` still running | `ABORTED` | 6 |
+| A retry with the same `request_id` runs out of time waiting for the first | `DEADLINE_EXCEEDED` | 8 |
 | GitHub unavailable or rate-limited before any side effect | `UNAVAILABLE` | 1 |
 | A step fails after the repo exists | `CreateFailure` event | 7 |
 | `--timeout` reached | client deadline | 8 |
