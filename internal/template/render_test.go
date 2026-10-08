@@ -190,7 +190,7 @@ func TestPathsMustWorkOnWindows(t *testing.T) {
 	tp := mustParse(t, validYAML)
 	got := tp.CheckSyntax(fstest.MapFS{
 		`proto/{% .Service.Name | replace "-" "" %}/v1/a.proto`: {Data: []byte("x")},
-		"ok/{% replace `-` `` .Service.Name %}.txt":            {Data: []byte("x")},
+		"ok/{% replace `-` `` .Service.Name %}.txt":             {Data: []byte("x")},
 	})
 	if len(got) != 1 || !strings.Contains(got[0].String(), `proto/{% .Service.Name | replace "-" "" %}: `) || !strings.Contains(got[0].Message, "Windows") {
 		t.Errorf("want one finding for the directory with \" and |, got %v", got)
