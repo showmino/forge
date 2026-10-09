@@ -100,4 +100,11 @@ The Phase 3 exit gate (2026-10-09, 4m37s): `time (bin/forge create gate-<x> --te
 | An env is READY but its URL answers 404 | The HTTPRoute was not accepted: check `kubectl -n preview-<x> describe httproute` and the Gateway's `allowedRoutes` |
 | Every command warns "older than ... 0.1.0" | Go pseudo-version not treated as dev (fixed in `internal/version`) |
 
-Tear down: `kubectl delete ns forge`.
+Tear down, previews first (the reaper dies with forge-api, and the ClusterRole is
+cluster-scoped, so deleting namespace `forge` leaves both behind):
+
+```sh
+kubectl delete ns -l app.kubernetes.io/managed-by=forge
+kubectl delete ns forge
+kubectl delete clusterrole,clusterrolebinding forge-api-previews
+```

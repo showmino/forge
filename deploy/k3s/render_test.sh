@@ -30,8 +30,8 @@ gateway_ip() {
 }
 gateway_routes() { section Gateway | grep -qF 'from: Selector' && section Gateway | grep -qF 'app.kubernetes.io/managed-by: forge'; }
 rbac_no_wildcard() { ! { section ClusterRole; section Role; } | grep -qF '*'; }
-clusterrole_no_secret_read() { section ClusterRole | grep -A1 -F 'secrets' | grep -qxF '    verbs: [create]'; }
-role_pull_secret_only() { section Role | grep -qF 'resourceNames: [mino-ghcr]'; }
+# The RBAC is pinned exactly: any added verb, resource or rule is a review.
+rbac_exact() { { section ClusterRole; section Role; } | cmp -s - "$dir/testdata/previews-rbac.golden"; }
 
 check "no App: no App settings"       sh -c "! printf '%s' \"\$1\" | grep -q -e FORGE_GITHUB_APP -e forge-github-app" _ "$without"
 check "no App: no #app markers"       sh -c "! printf '%s' \"\$1\" | grep -q '#app'" _ "$without"
@@ -56,8 +56,7 @@ check "previews: SA has the pull secret"    sa_pull_secret
 check "previews: gateway on the IP"         gateway_ip
 check "previews: routes only from forge namespaces" gateway_routes
 check "previews: no wildcard in RBAC"       rbac_no_wildcard
-check "previews: no secret read in the ClusterRole" clusterrole_no_secret_read
-check "previews: Role limited to the pull secret" role_pull_secret_only
+check "previews: RBAC exactly as reviewed (no secret read cluster-wide; Role only gets the pull secret)" rbac_exact
 check "previews: no #previews markers"      sh -c "! printf '%s' \"\$1\" | grep -qF '#previews'" _ "$prev"
 check "previews: valid YAML for kubectl"    sh -c "printf '%s' \"\$1\" | kubectl apply --dry-run=client -f - >/dev/null" _ "$prev"
 check "previews need an App"                sh -c "! FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
