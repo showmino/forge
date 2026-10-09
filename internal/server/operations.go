@@ -24,6 +24,9 @@ const (
 	OpCodeInternal  = "internal"
 )
 
+// opNameKey carries an operation's own name in its work's context.
+type opNameKey struct{}
+
 // watchBuffer is how many messages a watcher may fall behind before it is dropped.
 const watchBuffer = 64
 
@@ -82,6 +85,7 @@ func (s *Operations) Start(ctx context.Context, kind, target, creator string, w 
 		done:   make(chan struct{}),
 		subs:   map[*watcher]struct{}{},
 	}
+	ctx = context.WithValue(ctx, opNameKey{}, o.pb.Name)
 	s.mu.Lock()
 	s.ops[o.pb.Name] = o
 	s.prune()
