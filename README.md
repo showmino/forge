@@ -98,6 +98,17 @@ FORGE_GITHUB_APP_ID=<app-id> FORGE_API_IMAGE=<image> deploy/k3s/render.sh --lb <
 `FORGE_GITHUB_ORG` (default `showmino`) and `FORGE_TEMPLATES_REPO` (default
 `showmino/forge-templates`) pick the org for new repos and the templates repo.
 
+Preview environments (`forge env`) need the App too, plus a free LoadBalancer IP
+for their Gateway (Gateway API with Istio's `istio` class) and a dockerconfigjson
+pull secret in namespace `forge` that can read the services' images:
+
+```sh
+FORGE_PREVIEW_IP=<gateway-ip> FORGE_PREVIEW_PULL_SECRET=<secret> FORGE_GITHUB_APP_ID=<app-id> ... \
+  deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+```
+
+Previews are then reached at `http://<env>.preview.<gateway-ip>.nip.io`.
+
 Both the CLI and the forge-api pod must reach Dex at the same issuer URL
 (`http://dex.<node-ip or dex-ip>.nip.io/dex`), which is why Dex is exposed
 outside the cluster rather than called by its Service name. Change the static

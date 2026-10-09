@@ -82,6 +82,7 @@ spec:
     metadata:
       labels: {app: forge-api}
     spec:
+      serviceAccountName: forge-api #previews
       securityContext:
         runAsNonRoot: true
         # distroless "nonroot" by number: the kubelet cannot check a user name.
@@ -105,6 +106,9 @@ spec:
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key} #app
             - {name: FORGE_GITHUB_ORG, value: ${FORGE_GITHUB_ORG}} #app
             - {name: FORGE_TEMPLATES_REPO, value: ${FORGE_TEMPLATES_REPO}} #app
+            - {name: FORGE_PREVIEWS, value: "1"} #previews
+            - {name: FORGE_PREVIEW_DOMAIN, value: preview.${PREVIEW_IP}.nip.io} #previews
+            - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/${PULL_SECRET}} #previews
           volumeMounts: #app
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true} #app
           ports:

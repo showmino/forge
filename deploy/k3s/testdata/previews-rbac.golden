@@ -1,0 +1,28 @@
+kind: ClusterRole
+metadata:
+  name: forge-api-previews
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [""]
+    resources: [secrets, services, resourcequotas, limitranges]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, create]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [create]
+kind: Role
+metadata:
+  name: forge-api-pull-secret
+  namespace: forge
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [mino-ghcr]
+    verbs: [get]

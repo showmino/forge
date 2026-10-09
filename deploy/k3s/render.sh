@@ -19,6 +19,11 @@
 # or let the 1Password operator create that Secret from an item with a
 # github_app_private_key field:
 #   FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
+#
+# Preview environments (forge env) need the App too, plus the IP of their
+# Gateway and the pull secret in namespace forge (default mino-ghcr); lines in
+# forge.yaml.tmpl with a trailing "previews" marker exist only then:
+#   FORGE_PREVIEW_IP=10.150.1.222 FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 set -eu
 
 usage() {
@@ -74,6 +79,22 @@ esac
 if [ -n "$onepassword_item" ] && [ -z "$app_id" ]; then
   echo "FORGE_ONEPASSWORD_ITEM needs FORGE_GITHUB_APP_ID" >&2; exit 2
 fi
+preview_ip=${FORGE_PREVIEW_IP:-}
+pull_secret=${FORGE_PREVIEW_PULL_SECRET:-mino-ghcr}
+case $preview_ip in
+  *[!0-9.]*) echo "invalid FORGE_PREVIEW_IP: $preview_ip" >&2; exit 2 ;;
+esac
+case $pull_secret in
+  ''|*[!a-z0-9.-]*) echo "invalid FORGE_PREVIEW_PULL_SECRET: $pull_secret" >&2; exit 2 ;;
+esac
+if [ -n "$preview_ip" ] && [ -z "$app_id" ]; then
+  echo "FORGE_PREVIEW_IP needs FORGE_GITHUB_APP_ID" >&2; exit 2
+fi
+if [ -n "$preview_ip" ]; then
+  previews='s/ *#previews$//' # keep the preview lines, drop their marker
+else
+  previews='/#previews$/d' # no previews: drop the preview lines
+fi
 if [ -n "$app_id" ]; then
   app='s/ *#app$//' # keep the App lines, drop their marker
 else
@@ -88,7 +109,11 @@ fi
     echo "---"
     cat "$dir/onepassword.yaml.tmpl"
   fi
-} | sed -e "$app" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+  if [ -n "$preview_ip" ]; then
+    echo "---"
+    cat "$dir/previews.yaml.tmpl"
+  fi
+} | sed -e "$app" -e "$previews" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g"
