@@ -104,7 +104,7 @@ Tear down, previews first (the reaper dies with forge-api, and the ClusterRole i
 cluster-scoped, so deleting namespace `forge` leaves both behind):
 
 ```sh
-kubectl delete ns -l app.kubernetes.io/managed-by=forge
+kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/environment
 kubectl delete ns forge
 kubectl delete clusterrole,clusterrolebinding forge-api-previews
 ```
@@ -128,9 +128,15 @@ Tear down a service: delete the `services/<svc>` directory in `forge-deploys`,
 wait for the Applications to disappear, then delete the `<svc>-staging` and
 `<svc>-production` namespaces.
 
-Remove the Argo objects and forge-api's access:
+Remove the Argo objects and forge-api's access. This deletes every deployed
+service: the ApplicationSet cascades to its Applications, and their finalizer
+deletes the workloads. Delete the ApplicationSet, wait until
+`kubectl -n argocd get app -l app.kubernetes.io/managed-by=forge` is empty, then
+the rest:
 
 ```sh
-kubectl -n argocd delete applicationset,appproject forge-services
+kubectl -n argocd delete applicationset forge-services
+kubectl -n argocd get app -l app.kubernetes.io/managed-by=forge   # repeat until empty
+kubectl -n argocd delete appproject forge-services
 kubectl -n argocd delete role,rolebinding forge-api-applications
 ```

@@ -114,6 +114,7 @@ if [ -n "$deploys" ]; then
   deploys_marks='s/ *#deploys$//'
 else
   deploys_marks='/#deploys$/d'
+  chart_rev= # unvalidated without deploys; keep it out of the sed
 fi
 if [ -n "$app_id" ]; then
   app='s/ *#app$//' # keep the App lines, drop their marker

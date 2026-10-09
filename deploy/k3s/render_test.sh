@@ -72,13 +72,16 @@ gateway_listeners() {
     printf '%s\n' "$dep" | grep -qF 'hostname: "*.production.10.150.1.222.nip.io"'
 }
 deploys_exact() { deploys_section | cmp -s - "$dir/testdata/deploys.golden"; }
-prev_unchanged() { [ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)" = "$prev" ]; }
+# previews.golden is the render at 9bcbeff, before deploys existed.
+prev_unchanged() { printf '%s\n' "$prev" | cmp -s - "$dir/testdata/previews.golden"; }
+deny_destination() { printf '%s\n' "$dep" | grep -qF 'namespace: "!docs-dev-staging"}'; }
 
 check "deploys: forge-api setting"          sh -c "printf '%s' \"\$1\" | grep -qF 'FORGE_DEPLOYS, value: \"1\"'" _ "$dep"
 check "deploys: no FORGE_DEPLOYS without it" sh -c "! printf '%s' \"\$1\" | grep -qF FORGE_DEPLOYS" _ "$prev"
 check "deploys: gateway listeners"          gateway_listeners
 check "deploys: no listeners without it"    sh -c "! printf '%s' \"\$1\" | grep -qF '.staging.'" _ "$prev"
 check "deploys: Argo objects and RBAC exactly as reviewed" deploys_exact
+check "deploys: deny destination for docs-dev-staging" deny_destination
 check "deploys: chart pinned to the revision" sh -c "printf '%s' \"\$1\" | grep -qF 'targetRevision: $rev'" _ "$dep"
 check "deploys: no #deploys markers"        sh -c "! printf '%s' \"\$1\" | grep -qF '#deploys'" _ "$dep"
 check "deploys: valid YAML for kubectl"     sh -c "printf '%s' \"\$1\" | kubectl apply --dry-run=client -f - >/dev/null" _ "$dep"

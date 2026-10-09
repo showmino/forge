@@ -3,6 +3,9 @@
 #   ${DEPLOY_CHART_REVISION}  forge commit the chart is taken from (pinned)
 # Applications are named <service>-<env> and deploy into the namespace of that
 # name; forge-api refuses a namespace that exists and isn't Forge's.
+# Existing namespaces named like *-staging or *-production that are not Forge's
+# must be listed in the AppProject as "!<name>" deny destinations (forge-api
+# refuses them too, but this stops Argo even if a directory is committed by hand).
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -14,6 +17,7 @@ spec:
     - https://github.com/showmino/forge.git
     - https://github.com/showmino/forge-deploys.git
   destinations:
+    - {server: https://kubernetes.default.svc, namespace: "!docs-dev-staging"}
     - {server: https://kubernetes.default.svc, namespace: "*-staging"}
     - {server: https://kubernetes.default.svc, namespace: "*-production"}
   clusterResourceWhitelist:

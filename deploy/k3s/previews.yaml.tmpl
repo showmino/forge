@@ -103,6 +103,7 @@ spec:
           selector: #deploys
             matchLabels: #deploys
               app.kubernetes.io/managed-by: forge #deploys
+              forge.dev/deploy-env: staging #deploys
     - name: production #deploys
       protocol: HTTP #deploys
       port: 80 #deploys
@@ -113,3 +114,4 @@ spec:
           selector: #deploys
             matchLabels: #deploys
               app.kubernetes.io/managed-by: forge #deploys
+              forge.dev/deploy-env: production #deploys
