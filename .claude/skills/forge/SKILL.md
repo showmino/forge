@@ -88,6 +88,6 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
 
 - Running lint with an older golangci-lint than CI's v2.14.0 (it cannot read Go 1.27 export data), or "fixing" the two `G117` nolints in `internal/auth/store.go`: storing the refresh token is intended; encrypting the file fallback is the real follow-up.
 - Following the README's `k3s ctr images import` path on the demo cluster: the dev machine is not a node.
-- Exposing Dex through Istio `*.showmino.com`: it is public, and Dex still has the demo password.
+- Exposing Dex through Istio `*.showmino.com`: it is public, and its GitHub OAuth App callback must match that host.
 - Adding a package-level variable or calling `os.Exit` outside `main`.
 - Giving a CI workload a new RPC by adding a permission: workloads pass the interceptor only for the procedures in `workloadProcedures` (`authn.go`), and each of those handlers must call its `ci_scope.go` check.
