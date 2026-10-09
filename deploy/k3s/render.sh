@@ -20,6 +20,13 @@
 # github_app_private_key field:
 #   FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 #
+# Login is through GitHub (Dex's GitHub connector): only members of
+# FORGE_DEX_GITHUB_ORG (default FORGE_GITHUB_ORG) log in, and only the teams
+# in FORGE_WRITER_GROUPS (default <org>:platform-engineering; never empty) may
+# change anything. Dex reads the OAuth App's client_id and client_secret from
+# the Secret dex-github, which the 1Password operator can create:
+#   FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github ... | kubectl apply -f -
+#
 # Preview environments (forge env) need the App too, plus the IP of their
 # Gateway and the pull secret in namespace forge (default mino-ghcr); lines in
 # forge.yaml.tmpl with a trailing "previews" marker exist only then:
@@ -89,6 +96,20 @@ esac
 if [ -n "$onepassword_item" ] && [ -z "$app_id" ]; then
   echo "FORGE_ONEPASSWORD_ITEM needs FORGE_GITHUB_APP_ID" >&2; exit 2
 fi
+dex_org=${FORGE_DEX_GITHUB_ORG:-$org}
+case $dex_org in
+  ''|*[!A-Za-z0-9-]*) echo "invalid FORGE_DEX_GITHUB_ORG: $dex_org" >&2; exit 2 ;;
+esac
+# No colon: an explicitly empty FORGE_WRITER_GROUPS is refused, not defaulted.
+writer_groups=${FORGE_WRITER_GROUPS-$dex_org:platform-engineering}
+case $writer_groups in
+  '') echo "FORGE_WRITER_GROUPS must not be empty: every login could deploy to production" >&2; exit 2 ;;
+  *[!A-Za-z0-9:,_.-]*) echo "invalid FORGE_WRITER_GROUPS: $writer_groups" >&2; exit 2 ;;
+esac
+dex_onepassword_item=${FORGE_DEX_ONEPASSWORD_ITEM:-}
+case $dex_onepassword_item in
+  *[!A-Za-z0-9./_-]*) echo "invalid FORGE_DEX_ONEPASSWORD_ITEM: $dex_onepassword_item" >&2; exit 2 ;;
+esac
 preview_ip=${FORGE_PREVIEW_IP:-}
 pull_secret=${FORGE_PREVIEW_PULL_SECRET:-mino-ghcr}
 case $preview_ip in
@@ -136,6 +157,10 @@ fi
     echo "---"
     cat "$dir/onepassword.yaml.tmpl"
   fi
+  if [ -n "$dex_onepassword_item" ]; then
+    echo "---"
+    cat "$dir/dex-onepassword.yaml.tmpl"
+  fi
   if [ -n "$preview_ip" ]; then
     echo "---"
     cat "$dir/previews.yaml.tmpl"
@@ -145,6 +170,6 @@ fi
     cat "$dir/deploys.yaml.tmpl"
   fi
 } | sed -e "$app" -e "$previews" -e "$deploys_marks" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
-        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
+        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g"
