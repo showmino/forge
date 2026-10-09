@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +29,7 @@ const (
 	labelManagedBy   = "app.kubernetes.io/managed-by"
 	labelEnvironment = "forge.dev/environment"
 	labelService     = "forge.dev/service"
+	labelDeployEnv   = "forge.dev/deploy-env"
 	annRef           = "forge.dev/ref"
 	annCommit        = "forge.dev/commit"
 	annImage         = "forge.dev/image"
@@ -337,4 +339,101 @@ func clip(s string) string {
 		return s[:200] + "…"
 	}
 	return s
+}
+
+var applications = schema.GroupVersionResource{Group: "argoproj.io", Version: "v1alpha1", Resource: "applications"}
+
+// AppStatus is what Argo CD reports for one Application.
+type AppStatus struct {
+	Sync, Health, Message string
+	// Revisions are the synced revisions, one per source.
+	Revisions []string
+}
+
+// Application reads Argo CD's status for name in argoNamespace. A missing
+// Application (the ApplicationSet has not generated it yet) is Missing.
+func (c *Cluster) Application(ctx context.Context, argoNamespace, name string) (AppStatus, error) {
+	u, err := c.Dynamic.Resource(applications).Namespace(argoNamespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return AppStatus{Sync: "Unknown", Health: "Missing"}, nil
+	}
+	if err != nil {
+		return AppStatus{}, err
+	}
+	st := AppStatus{}
+	st.Sync, _, _ = unstructured.NestedString(u.Object, "status", "sync", "status")
+	st.Health, _, _ = unstructured.NestedString(u.Object, "status", "health", "status")
+	st.Revisions, _, _ = unstructured.NestedStringSlice(u.Object, "status", "sync", "revisions")
+	if rev, _, _ := unstructured.NestedString(u.Object, "status", "sync", "revision"); rev != "" {
+		st.Revisions = append(st.Revisions, rev)
+	}
+	var msgs []string
+	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+	for _, cond := range conds {
+		if m, ok := cond.(map[string]any)["message"].(string); ok && m != "" {
+			msgs = append(msgs, m)
+		}
+	}
+	if m, _, _ := unstructured.NestedString(u.Object, "status", "health", "message"); m != "" {
+		msgs = append(msgs, m)
+	}
+	st.Message = clip(strings.Join(msgs, "; "))
+	if st.Sync == "" {
+		st.Sync = "Unknown"
+	}
+	if st.Health == "" {
+		st.Health = "Unknown"
+	}
+	return st, nil
+}
+
+// checkServiceNamespace returns errNoEnv unless Argo CD made <service>-<env> for Forge.
+func (c *Cluster) checkServiceNamespace(ctx context.Context, service, env string) error {
+	ns, err := c.Kube.CoreV1().Namespaces().Get(ctx, service+"-"+env, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return errNoEnv
+	}
+	if err != nil {
+		return err
+	}
+	l := ns.Labels
+	if l[labelManagedBy] != "forge" || l[labelService] != service || l[labelDeployEnv] != env {
+		return errNoEnv
+	}
+	return nil
+}
+
+// WaitServiceNamespace waits until Argo CD has created <service>-<env>.
+func (c *Cluster) WaitServiceNamespace(ctx context.Context, service, env string, poll time.Duration) error {
+	for {
+		err := c.checkServiceNamespace(ctx, service, env)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("namespace %s-%s: %w", service, env, ctx.Err())
+		case <-time.After(poll):
+		}
+	}
+}
+
+// WriteServicePullSecret copies the pull secret into <service>-<env>.
+func (c *Cluster) WriteServicePullSecret(ctx context.Context, service, env string) error {
+	if err := c.checkServiceNamespace(ctx, service, env); err != nil {
+		return err
+	}
+	pull, err := c.PullSecretData(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.Kube.CoreV1().Secrets(service+"-"+env).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: pullSecretName},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{corev1.DockerConfigJsonKey: pull},
+	}, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		return nil
+	}
+	return err
 }
