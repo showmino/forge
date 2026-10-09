@@ -81,6 +81,21 @@ func (c *Catalog) get(name string) (*forgev1.Service, bool) {
 	return cloneSvc(s), true
 }
 
+// servicesForRepo returns the ids, sorted, of the services whose repo_url is
+// https://github.com/<org>/<repo>, both compared case-insensitively.
+func (c *Catalog) servicesForRepo(org, repo string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var ids []string
+	for name, s := range c.services {
+		if _, r, ok := repoOf(s.GetRepoUrl(), org); ok && strings.EqualFold(r, repo) {
+			ids = append(ids, strings.TrimPrefix(name, servicePrefix))
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 func (c *Catalog) ListServices(ctx context.Context, req *connect.Request[forgev1.ListServicesRequest]) (*connect.Response[forgev1.ListServicesResponse], error) {
 	if err := require(ctx, PermServicesRead); err != nil {
 		return nil, err

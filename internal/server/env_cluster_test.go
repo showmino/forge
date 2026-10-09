@@ -41,7 +41,7 @@ func TestClusterLifecycle(t *testing.T) {
 		t.Errorf("annotate: %v", ns.Annotations)
 	}
 
-	w := Workload{Service: "payments", Image: "ghcr.io/showmino/payments:1a2b3c4", Host: "pr-1.preview.example", Port: 9090, Health: "/ready"}
+	w := EnvWorkload{Service: "payments", Image: "ghcr.io/showmino/payments:1a2b3c4", Host: "pr-1.preview.example", Port: 9090, Health: "/ready"}
 	if err := c.Deploy(ctx, "pr-1", w); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestGuardIgnoresForeignNamespaces(t *testing.T) {
 		if _, _, err := c.Status(ctx, id, "a"); !errors.Is(err, errNoEnv) {
 			t.Errorf("Status(%s): %v", id, err)
 		}
-		if err := c.Deploy(ctx, id, Workload{Service: "a", Image: "ghcr.io/a/a:1", Host: "h", Port: 80, Health: "/"}); !errors.Is(err, errNoEnv) {
+		if err := c.Deploy(ctx, id, EnvWorkload{Service: "a", Image: "ghcr.io/a/a:1", Host: "h", Port: 80, Health: "/"}); !errors.Is(err, errNoEnv) {
 			t.Errorf("Deploy(%s): %v", id, err)
 		}
 	}

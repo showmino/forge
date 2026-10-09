@@ -69,6 +69,11 @@ func (g *GitHub) ResolveRef(_ context.Context, _, _, ref string) (string, error)
 	if sha, ok := g.Refs[ref]; ok {
 		return sha, nil
 	}
+	for _, sha := range g.Refs {
+		if sha == ref { // a commit some ref points at, as GitHub resolves SHAs
+			return sha, nil
+		}
+	}
 	return "", fmt.Errorf("ref %s: %w", ref, github.ErrNotFound)
 }
 

@@ -22,16 +22,24 @@ import (
 // (repo showmino/payments, run port 9090 health /ready), main at envSHA,
 // its image present, and envtest.Argo playing Argo CD unless noArgo.
 type deployFixture struct {
-	cluster *Cluster
-	repo    *envtest.Repo
-	images  *envtest.Images
-	ops     *Operations
-	deploys *Deploys
-	client  forgev1connect.DeployServiceClient
-	argo    *envtest.Argo
+	opsClient forgev1connect.OperationServiceClient
+	cluster   *Cluster
+	repo      *envtest.Repo
+	images    *envtest.Images
+	ops       *Operations
+	deploys   *Deploys
+	client    forgev1connect.DeployServiceClient
+	argo      *envtest.Argo
 }
 
 func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *envtest.Argo)) *deployFixture {
+	t.Helper()
+	return newDeployFixtureAuth(t, noArgo, tweak, nil)
+}
+
+// newDeployFixtureAuth is newDeployFixture with the authenticator replaced by
+// wrap(catalog, the static one) when wrap is set.
+func newDeployFixtureAuth(t *testing.T, noArgo bool, tweak func(*DeployOptions, *envtest.Argo), wrap func(*Catalog, Authenticator) Authenticator) *deployFixture {
 	t.Helper()
 	f := &deployFixture{
 		cluster: &Cluster{Kube: envtest.Kube(), Dynamic: envtest.Dynamic(), Gateway: "forge/forge-previews", PullSecret: "forge/mino-ghcr"},
@@ -40,9 +48,12 @@ func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *env
 		ops:     NewOperations(nil),
 	}
 	f.images.Add("ghcr.io/showmino/payments:1a2b3c4")
+	f.images.Add("ghcr.io/showmino/payments:9f8e7d6")
+	manifest := []byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n  port: 9090\n  health: /ready\n")
 	gh := &envtest.GitHub{
-		Refs:  map[string]string{"main": envSHA},
-		Files: map[string][]byte{envSHA + ":forge.yaml": []byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n  port: 9090\n  health: /ready\n")},
+		// "release" points at a commit main does not.
+		Refs:  map[string]string{"main": envSHA, "release": ciOldSHA},
+		Files: map[string][]byte{envSHA + ":forge.yaml": manifest, ciOldSHA + ":forge.yaml": manifest},
 	}
 	catalog := NewCatalog(nil)
 	if _, err := catalog.RegisterService(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{
@@ -67,13 +78,29 @@ func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *env
 		wg.Go(func() { f.argo.Run(ctx) })
 		t.Cleanup(func() { cancel(); wg.Wait() })
 	}
-	h, err := New(Options{
-		Authenticator: StaticAuthenticator{
-			"writer": {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}},
-			"reader": {Subject: "bo", Groups: []string{"dev"}},
+	var auth Authenticator = StaticAuthenticator{
+		"writer": {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}},
+		"reader": {Subject: "bo", Groups: []string{"dev"}},
+		"ci": {
+			Subject: "github:showmino/payments", Permissions: []string{PermDeploy("payments", "staging")},
+			Workload: &Workload{Repository: "showmino/payments", Service: "payments", SHA: envSHA},
 		},
-		Authorizer: Authorizer{WriterGroups: []string{"platform"}},
-		Catalog:    catalog, Operations: f.ops, Deploys: f.deploys,
+		"ci-billing": {
+			Subject: "github:showmino/billing", Permissions: []string{PermDeploy("billing", "staging")},
+			Workload: &Workload{Repository: "showmino/billing", Service: "billing", SHA: envSHA},
+		},
+		"ci-old": {
+			Subject: "github:showmino/payments", Permissions: []string{PermDeploy("payments", "staging")},
+			Workload: &Workload{Repository: "showmino/payments", Service: "payments", SHA: ciOldSHA},
+		},
+	}
+	if wrap != nil {
+		auth = wrap(catalog, auth)
+	}
+	h, err := New(Options{
+		Authenticator: auth,
+		Authorizer:    Authorizer{WriterGroups: []string{"platform"}},
+		Catalog:       catalog, Operations: f.ops, Deploys: f.deploys,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +108,7 @@ func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *env
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	f.client = forgev1connect.NewDeployServiceClient(srv.Client(), srv.URL)
+	f.opsClient = forgev1connect.NewOperationServiceClient(srv.Client(), srv.URL)
 	return f
 }
 

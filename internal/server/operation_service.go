@@ -28,8 +28,10 @@ func opNotFound(name string) error {
 type operationService struct{ ops *Operations }
 
 func (s *operationService) GetOperation(ctx context.Context, req *connect.Request[forgev1.GetOperationRequest]) (*connect.Response[forgev1.GetOperationResponse], error) {
-	if err := require(ctx, PermServicesRead); err != nil {
-		return nil, err
+	if workloadOf(ctx) == nil {
+		if err := require(ctx, PermServicesRead); err != nil {
+			return nil, err
+		}
 	}
 	name := req.Msg.GetName()
 	if err := validOpName(name); err != nil {
@@ -38,6 +40,9 @@ func (s *operationService) GetOperation(ctx context.Context, req *connect.Reques
 	op, ok := s.ops.Get(name)
 	if !ok {
 		return nil, opNotFound(name)
+	}
+	if err := ownOperation(ctx, op); err != nil {
+		return nil, err
 	}
 	return connect.NewResponse(&forgev1.GetOperationResponse{Operation: op}), nil
 }
@@ -52,12 +57,23 @@ func (s *operationService) ListOperations(ctx context.Context, req *connect.Requ
 }
 
 func (s *operationService) WatchOperation(ctx context.Context, req *connect.Request[forgev1.WatchOperationRequest], stream *connect.ServerStream[forgev1.WatchOperationResponse]) error {
-	if err := require(ctx, PermServicesRead); err != nil {
-		return err
+	if workloadOf(ctx) == nil {
+		if err := require(ctx, PermServicesRead); err != nil {
+			return err
+		}
 	}
 	name := req.Msg.GetName()
 	if err := validOpName(name); err != nil {
 		return err
+	}
+	if workloadOf(ctx) != nil {
+		op, ok := s.ops.Get(name)
+		if !ok {
+			return opNotFound(name)
+		}
+		if err := ownOperation(ctx, op); err != nil {
+			return err
+		}
 	}
 	err := s.ops.Watch(ctx, name, stream.Send)
 	if errors.Is(err, context.Canceled) && ctx.Err() != nil {

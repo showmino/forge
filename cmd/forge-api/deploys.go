@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,16 @@ import (
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/server"
 )
+
+// withCITokens makes forge-api accept GitHub Actions OIDC tokens next to
+// base's: tokens issued by GitHub go to the GitHub verifier, all others to base.
+func withCITokens(ctx context.Context, base server.Authenticator, audience string, branches server.DefaultBranches,
+	catalog *server.Catalog, org string) server.Authenticator {
+	gh := server.NewGitHubOIDCAuthenticator(ctx, server.GitHubOIDCOptions{
+		Audience: audience, Org: org, Catalog: catalog, Branches: branches,
+	})
+	return server.ByIssuer{Default: base, Issuers: map[string]server.Authenticator{server.GitHubIssuer: gh}}
+}
 
 // deployFlags are forge-api's deploy settings.
 type deployFlags struct {

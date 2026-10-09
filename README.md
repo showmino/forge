@@ -167,6 +167,15 @@ version to the deploy repo, which Argo CD then rolls out; `forge deploy status`,
 `history`, `rollback` and `promote` follow and change it. forge-api serves them
 with `--deploys`.
 
+From GitHub Actions, `forge deploy start --env staging` needs no secret: with
+`permissions: id-token: write`, the CLI requests the job's OIDC token
+(audience `forge`) and forge-api accepts it when `--deploys` is on. The token
+only lets the job deploy its own repo's service to staging, at the commit it
+runs at (`GITHUB_SHA`), from the default branch, and follow that deploy.
+Production stays with humans (`forge deploy promote`). The runner must reach
+the API (`FORGE_API_URL`). forge-api checks the token's audience against
+`FORGE_GITHUB_OIDC_AUDIENCE` (default `forge`).
+
 ## The API
 
 One Protobuf contract served with [ConnectRPC](https://connectrpc.com): gRPC,

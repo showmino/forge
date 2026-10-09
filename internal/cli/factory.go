@@ -205,7 +205,8 @@ func (f *Factory) CredentialStore() auth.Store {
 	return f.Store
 }
 
-// TokenSource returns FORGE_TOKEN if set, otherwise stored credentials.
+// TokenSource returns FORGE_TOKEN if set; in GitHub Actions with an OIDC
+// token available, that token (audience "forge"); otherwise stored credentials.
 func (f *Factory) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	r, err := f.Resolved()
 	if err != nil {
@@ -214,18 +215,45 @@ func (f *Factory) TokenSource(ctx context.Context) (oauth2.TokenSource, error) {
 	if r.Token != "" {
 		return auth.StaticToken(r.Token), nil
 	}
-	return &loginHint{auth.TokenSource(ctx, f.CredentialStore(), r.CredentialKey(), f.HTTPClient, f.Now)}, nil
+	reqURL, _ := f.Env("ACTIONS_ID_TOKEN_REQUEST_URL")
+	reqToken, _ := f.Env("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+	if reqURL != "" && reqToken != "" {
+		return &actionsHint{auth.ActionsToken(f.HTTPClient, reqURL, reqToken, auth.ActionsAudience)}, nil
+	}
+	hint := "run 'forge auth login'"
+	if v, _ := f.Env("GITHUB_ACTIONS"); v == "true" {
+		hint = "in GitHub Actions, give the job 'permissions: id-token: write' so forge can use its OIDC token, or set FORGE_TOKEN"
+	}
+	return &loginHint{ts: auth.TokenSource(ctx, f.CredentialStore(), r.CredentialKey(), f.HTTPClient, f.Now), hint: hint}, nil
 }
 
 // loginHint turns ErrLoginRequired into exit code 4 with a hint.
-type loginHint struct{ ts oauth2.TokenSource }
+type loginHint struct {
+	ts   oauth2.TokenSource
+	hint string
+}
 
 func (l *loginHint) Token() (*oauth2.Token, error) {
 	t, err := l.ts.Token()
 	if errors.Is(err, auth.ErrLoginRequired) {
-		return nil, exitcode.New(exitcode.Unauthenticated, "%v", err).WithHint("run 'forge auth login'")
+		return nil, exitcode.New(exitcode.Unauthenticated, "%v", err).WithHint(l.hint)
 	}
 	return t, err
+}
+
+// actionsHint turns a failed GitHub Actions token request into an exit code:
+// 4 when GitHub refused the job's request token, 1 when it could not be asked.
+type actionsHint struct{ ts oauth2.TokenSource }
+
+func (a *actionsHint) Token() (*oauth2.Token, error) {
+	t, err := a.ts.Token()
+	if errors.Is(err, auth.ErrActionsTokenRefused) {
+		return nil, exitcode.New(exitcode.Unauthenticated, "%v", err).WithHint("the job's OIDC request token was refused; re-run the job")
+	}
+	if err != nil {
+		return nil, exitcode.New(exitcode.Unexpected, "%v", err).WithHint("forge could not get the job's OIDC token from GitHub; retry the job")
+	}
+	return t, nil
 }
 
 // APIURL returns the API URL or a usage error naming how to set one.

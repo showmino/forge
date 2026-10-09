@@ -42,6 +42,18 @@ func (c *Client) RepoExists(ctx context.Context, owner, name string) (bool, erro
 	return err == nil, err
 }
 
+// DefaultBranch returns owner/name's default branch. An unknown repo is ErrNotFound.
+func (c *Client) DefaultBranch(ctx context.Context, owner, name string) (string, error) {
+	var r Repo
+	if err := c.doJSON(ctx, http.MethodGet, repoPath(owner, name), nil, &r); err != nil {
+		return "", err
+	}
+	if r.DefaultBranch == "" {
+		return "", fmt.Errorf("GitHub returned no default branch for %s/%s", owner, name)
+	}
+	return r.DefaultBranch, nil
+}
+
 // CreateOrgRepo creates a private repository in org with GitHub's initial
 // commit: the Git Data API cannot write to an empty repository.
 func (c *Client) CreateOrgRepo(ctx context.Context, org, name, description string) (*Repo, error) {
