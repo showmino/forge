@@ -310,26 +310,50 @@ func (c *Cluster) Status(ctx context.Context, id, service string) (bool, string,
 	if d.Status.AvailableReplicas >= 1 {
 		return true, "", nil
 	}
-	pods, err := c.Kube.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: "app=" + service})
+	problem, err := c.podProblem(ctx, ns, service)
 	if err != nil {
 		return false, "", err
+	}
+	if problem != "" {
+		return false, problem, nil
+	}
+	return false, fmt.Sprintf("%d/1 pods ready", d.Status.ReadyReplicas), nil
+}
+
+// podProblem scans service's pods in ns for why they are not running: a
+// container waiting for a reason, restarts, or an unschedulable pod. It is
+// "" when none shows a problem.
+func (c *Cluster) podProblem(ctx context.Context, ns, service string) (string, error) {
+	pods, err := c.Kube.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: "app=" + service})
+	if err != nil {
+		return "", err
 	}
 	for _, p := range pods.Items {
 		for _, cs := range p.Status.ContainerStatuses {
 			if w := cs.State.Waiting; w != nil && w.Reason != "" && w.Reason != "ContainerCreating" {
-				return false, clip(w.Reason + ": " + w.Message), nil
+				return clip(w.Reason + ": " + w.Message), nil
 			}
 			if cs.RestartCount > 0 {
-				return false, fmt.Sprintf("container restarted %d times", cs.RestartCount), nil
+				return fmt.Sprintf("container restarted %d times", cs.RestartCount), nil
 			}
 		}
 		for _, cond := range p.Status.Conditions {
 			if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse {
-				return false, clip("not scheduled: " + cond.Message), nil
+				return clip("not scheduled: " + cond.Message), nil
 			}
 		}
 	}
-	return false, fmt.Sprintf("%d/1 pods ready", d.Status.ReadyReplicas), nil
+	return "", nil
+}
+
+// ServicePodProblem is why the pods of a deployed service are not running
+// ("" when none shows a problem). It only looks into Forge's own namespace
+// <service>-<env>.
+func (c *Cluster) ServicePodProblem(ctx context.Context, service, env string) (string, error) {
+	if err := c.checkServiceNamespace(ctx, service, env); err != nil {
+		return "", err
+	}
+	return c.podProblem(ctx, service+"-"+env, service)
 }
 
 // clip keeps a problem message short enough for an annotation and a table.
@@ -370,12 +394,33 @@ func (c *Cluster) Application(ctx context.Context, argoNamespace, name string) (
 	var msgs []string
 	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
 	for _, cond := range conds {
-		if m, ok := cond.(map[string]any)["message"].(string); ok && m != "" {
+		cm, _ := cond.(map[string]any)
+		if m, ok := cm["message"].(string); ok && m != "" {
 			msgs = append(msgs, m)
 		}
 	}
 	if m, _, _ := unstructured.NestedString(u.Object, "status", "health", "message"); m != "" {
 		msgs = append(msgs, m)
+	}
+	// Argo CD 3.x leaves health.message empty: a failed sync explains itself
+	// in operationState, an unhealthy resource in its own health.
+	if phase, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "phase"); phase == "Failed" || phase == "Error" {
+		if m, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "message"); m != "" {
+			msgs = append(msgs, m)
+		}
+	}
+	res, _, _ := unstructured.NestedSlice(u.Object, "status", "resources")
+	for _, r := range res {
+		rm, _ := r.(map[string]any)
+		h, _ := rm["health"].(map[string]any)
+		if hs, _ := h["status"].(string); hs == "" || hs == "Healthy" {
+			continue
+		}
+		if m, _ := h["message"].(string); m != "" {
+			kind, _ := rm["kind"].(string)
+			name, _ := rm["name"].(string)
+			msgs = append(msgs, strings.TrimSpace(kind+" "+name)+": "+m)
+		}
 	}
 	st.Message = clip(strings.Join(msgs, "; "))
 	if st.Sync == "" {

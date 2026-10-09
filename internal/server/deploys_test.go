@@ -191,17 +191,60 @@ func TestStartDeployValidation(t *testing.T) {
 
 func TestStartDeploySyncWaitsForRevision(t *testing.T) {
 	t.Parallel()
-	// Argo lags 300ms behind every new head: until then it reports the old
-	// revision (or nothing), and the deploy must keep waiting.
-	f := newDeployFixture(t, false, func(_ *DeployOptions, a *envtest.Argo) { a.Lag = 300 * time.Millisecond })
+	f := newDeployFixture(t, false, nil)
+	first, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, first.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatalf("first deploy: %v", op.GetError())
+	}
+	// Now Argo lags 300ms behind every new head. Until then the Application
+	// stays Synced and Healthy at the first deploy's commit: only the
+	// revision tells the second deploy it is not done.
+	f.argo.SetLag(300 * time.Millisecond)
 	start := time.Now()
+	second, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := wait(t, f.ops, second.GetOperation().GetName())
+	if op.GetError() != nil || time.Since(start) < 300*time.Millisecond {
+		t.Errorf("finished after %v: %v", time.Since(start), op.GetError())
+	}
+	hist, _ := f.repo.History(context.Background(), "services/payments/staging/values.yaml", 1)
+	want := "waiting for " + shortSHA(hist[0].SHA)
+	found := false
+	for _, ev := range op.GetEvents() {
+		found = found || (ev.GetStep() == "sync" && strings.Contains(ev.GetMessage(), want))
+	}
+	if !found {
+		t.Errorf("no sync event containing %q in %v", want, op.GetEvents())
+	}
+}
+
+func TestStartDeployAfterAnotherCommit(t *testing.T) {
+	t.Parallel()
+	// Argo reports the deploy repo's head, so another deploy landing before
+	// Argo syncs makes it report a newer SHA than ours, forever.
+	f := newDeployFixture(t, false, func(o *DeployOptions, a *envtest.Argo) {
+		a.Lag = 200 * time.Millisecond
+		o.SyncTimeout = 2 * time.Second
+	})
 	resp, err := f.start(t, "staging")
 	if err != nil {
 		t.Fatal(err)
 	}
-	op := wait(t, f.ops, resp.GetOperation().GetName())
-	if op.GetError() != nil || time.Since(start) < 300*time.Millisecond {
-		t.Errorf("finished after %v: %v", time.Since(start), op.GetError())
+	zero := strings.Repeat("0", 40)
+	for {
+		if head, _, _ := f.repo.Head(context.Background()); head != zero {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	f.repo.Push("services/other/staging/values.yaml", []byte("image: o\n"), "another deploy")
+	if op := wait(t, f.ops, resp.GetOperation().GetName()); op.GetError() != nil {
+		t.Errorf("deploy: %v", op.GetError())
 	}
 }
 

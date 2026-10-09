@@ -1,10 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"connectrpc.com/connect"
@@ -102,7 +102,8 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 	v.Forge.Time = d.o.Now().UTC().Format(time.RFC3339)
 	rec := v.Forge
 	rec.Image = v.Image
-	commit, err := d.commit(ctx, valuesPath(svc, env), func() ([]byte, error) { return v.marshal(), nil }, commitMessage(rec), emit)
+	content := v.marshal()
+	commit, err := d.commit(ctx, valuesPath(svc, env), func() ([]byte, error) { return content, nil }, commitMessage(rec), emit)
 	if err != nil {
 		return err
 	}
@@ -123,7 +124,7 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 		return stands(fmt.Errorf("pull secret for %s-%s: %w", svc, env, err))
 	}
 	emit("namespace", svc+"-"+env)
-	return stands(d.awaitSync(ctx, svc, env, commit, emit))
+	return stands(d.awaitSync(ctx, svc, env, commit, content, emit))
 }
 
 // commit writes build()'s content to path on the deploy repo's head. When
@@ -150,30 +151,61 @@ func (d *Deploys) commit(ctx context.Context, path string, build func() ([]byte,
 	return "", &OpError{Code: "git_conflict", Message: "the deploy repo kept moving; try again"}
 }
 
-// awaitSync waits until Argo CD has synced deployCommit and the app is healthy.
-func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, emit func(string, string)) error {
+// awaitSync waits until Argo CD has synced the environment's values to
+// deployCommit and the app is healthy. Argo resolves the values source to the
+// deploy repo's head, so once another commit lands it reports that newer SHA
+// for good: a revision then counts when it is deployCommit or when the values
+// file at that revision equals content, what we committed.
+func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, content []byte, emit func(string, string)) error {
 	timeout := time.NewTimer(d.o.SyncTimeout)
 	defer timeout.Stop()
 	last := ""
+	checked := map[string]bool{} // revision -> holds our values
+	atRevision := func(revs []string) bool {
+		for _, rev := range revs {
+			if rev == deployCommit {
+				return true
+			}
+			same, done := checked[rev]
+			if !done {
+				data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), rev)
+				if err != nil {
+					continue // not there yet (or the chart revision): try again
+				}
+				same = bytes.Equal(data, content)
+				checked[rev] = same
+			}
+			if same {
+				return true
+			}
+		}
+		return false
+	}
 	for {
 		st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, svc+"-"+env)
-		if err == nil {
-			atRev := slices.Contains(st.Revisions, deployCommit)
+		var msg string
+		if err != nil {
+			msg = "reading the Argo CD application: " + clip(err.Error())
+		} else {
+			atRev := atRevision(st.Revisions)
 			if atRev && st.Sync == "Synced" && st.Health == "Healthy" {
 				emit("sync", "http://"+d.host(svc, env))
 				return nil
 			}
-			msg := fmt.Sprintf("%s, %s", st.Sync, st.Health)
+			msg = fmt.Sprintf("%s, %s", st.Sync, st.Health)
 			if !atRev {
 				msg += ", waiting for " + shortSHA(deployCommit)
 			}
 			if st.Message != "" {
 				msg += ": " + st.Message
 			}
-			if msg != last {
-				emit("sync", msg)
-				last = msg
+			if problem, perr := d.o.Cluster.ServicePodProblem(ctx, svc, env); perr == nil && problem != "" {
+				msg += "; pod: " + problem
 			}
+		}
+		if msg != last {
+			emit("sync", msg)
+			last = msg
 		}
 		select {
 		case <-ctx.Done():

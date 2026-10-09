@@ -280,9 +280,28 @@ type Argo struct {
 	Dynamic   dynamic.Interface
 	Repo      *Repo
 	Namespace string
-	// Unhealthy maps "<svc>-<env>" to the message of its Degraded health.
+	// Unhealthy maps "<svc>-<env>" to the container waiting reason of its
+	// Degraded app: like Argo CD 3.x it sets no health message, and the
+	// reason is on a pod <svc>-0 (label app=<svc>) in the namespace.
 	Unhealthy map[string]string
-	Lag       time.Duration
+	// Lag is how long Argo takes to notice a new head; change it while
+	// running with SetLag.
+	Lag time.Duration
+
+	mu sync.Mutex
+}
+
+// SetLag changes Lag; it applies to heads Argo has not synced yet.
+func (a *Argo) SetLag(d time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Lag = d
+}
+
+func (a *Argo) lag() time.Duration {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Lag
 }
 
 // Run blocks until ctx ends.
@@ -309,7 +328,7 @@ func (a *Argo) Run(ctx context.Context) {
 			svc, env := parts[1], parts[2]
 			name := svc + "-" + env
 			a.ensureNamespace(ctx, name, svc, env)
-			if time.Since(seen[head]) < a.Lag || synced[name] == head {
+			if time.Since(seen[head]) < a.lag() || synced[name] == head {
 				continue
 			}
 			if a.sync(ctx, name, head) == nil {
@@ -331,10 +350,23 @@ func (a *Argo) ensureNamespace(ctx context.Context, name, svc, env string) {
 	_ = err // AlreadyExists is the steady state
 }
 
+// ensurePod creates the pod whose container waits with reason, once.
+func (a *Argo) ensurePod(ctx context.Context, name, reason string) {
+	svc := name[:strings.LastIndex(name, "-")] // envs have no hyphen
+	_, err := a.Kube.CoreV1().Pods(name).Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: svc + "-0", Namespace: name, Labels: map[string]string{"app": svc}},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{
+			Name: svc, State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reason}},
+		}}},
+	}, metav1.CreateOptions{})
+	_ = err // AlreadyExists is the steady state
+}
+
 func (a *Argo) sync(ctx context.Context, name, head string) error {
 	health := map[string]any{"status": "Healthy"}
-	if msg, bad := a.Unhealthy[name]; bad {
-		health = map[string]any{"status": "Degraded", "message": msg}
+	if reason, bad := a.Unhealthy[name]; bad {
+		health = map[string]any{"status": "Degraded"}
+		a.ensurePod(ctx, name, reason)
 	}
 	status := map[string]any{
 		"sync":   map[string]any{"status": "Synced", "revisions": []any{"chart", head}},
