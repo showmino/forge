@@ -122,7 +122,7 @@ storage:
   - **reads:** get by name, list (owner-team filter, after-name cursor, limit), names of all services, and services for a repo;
   - **writes:** run inside a store transaction that offers get, put (with revision), delete, the names of services that depend on a name, and remember or recall a request ID.
   - `Postgres` serializes write transactions with a transaction-scoped advisory lock. Catalog writes are rare, and this keeps the existence and dependency checks atomic without row-locking subtleties.
-- `server.Catalog` keeps every RPC handler and its validation, and stores through the interface. `NewCatalog(store, now)` takes the store; a nil store means `store.NewMemory()`.
+- `server.Catalog` keeps every RPC handler and its validation, and stores through the interface. `NewCatalog(now)` keeps the memory store, and `NewCatalogWithStore(s, now)` takes one.
 - The helpers `has`, `get`, `ids` and `servicesForRepo` gain a `context.Context` and an error. Their callers (`create.go`, `source.go`, `deploys.go`, `ci_auth.go`) return `Unavailable` when the database fails.
 
 **Tests:**

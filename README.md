@@ -15,7 +15,8 @@ internal/config/    layered config and kubeconfig-style contexts
 internal/auth/      OIDC device flow, keyring storage, token refresh
 internal/output/    table, json, yaml and name printers (golden-tested)
 internal/manifest/  forge.yaml schema and validation
-internal/server/    API handlers: catalog (in memory), auth, OIDC verification
+internal/server/    API handlers: catalog, auth, OIDC verification
+internal/store/     catalog storage: memory or PostgreSQL (pgx, embedded migrations)
 pkg/client/         Connect client wrapper: auth, retries, request IDs, version headers
 proto/forge/v1/     API contract
 gen/                buf-generated code (committed; CI checks it is current)
@@ -49,6 +50,11 @@ bin/forge context set local --api http://localhost:8080 --use
 bin/forge auth login               # open the URL, log in as admin@example.com / password
 bin/forge auth status
 ```
+
+The API keeps the catalog in memory unless it gets `--database-url` (or
+`FORGE_DATABASE_URL`). `make db` starts a local PostgreSQL on port 55432 for
+that and for the store tests:
+`FORGE_TEST_DATABASE_URL='postgres://postgres:forge@localhost:55432/postgres?sslmode=disable' make test`.
 
 The CLI asks the API which issuer and client ID to use (`AuthService.GetServerInfo`),
 runs the OIDC device flow, and stores the ID and refresh tokens in the OS
@@ -127,8 +133,17 @@ Once deploys are on, every re-render must include `FORGE_DEPLOYS=1` and the curr
 
 Both the CLI and the forge-api pod must reach Dex at the same issuer URL
 (`http://dex.<node-ip or dex-ip>.nip.io/dex`), which is why Dex is exposed
-outside the cluster rather than called by its Service name. Change the static
-password in the ConfigMap before sharing the cluster. Phase 1 serves plain
+outside the cluster rather than called by its Service name. On k3s you log in
+through GitHub: only members of `FORGE_DEX_GITHUB_ORG` (default the GitHub org)
+can log in, and only the teams in `FORGE_WRITER_GROUPS` (default
+`<org>:platform-engineering`) may register, create, preview or deploy. Create a
+GitHub OAuth App owned by the org with the callback
+`http://dex.<dex-ip>.nip.io/dex/callback`, and put its `client_id` and
+`client_secret` in the Secret `dex-github`, or in a 1Password item named by
+`FORGE_DEX_ONEPASSWORD_ITEM`. The render also creates the CloudNativePG cluster
+`forge-db` (2 instances, `longhorn-retain`), which holds the service catalog
+and Dex's logins; it needs the CloudNativePG operator. There are no backups yet.
+Phase 1 serves plain
 HTTP; add TLS (cert-manager) before real use.
 
 ## Using the CLI
