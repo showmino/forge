@@ -125,6 +125,9 @@ func run() error {
 			groups = append(groups, g)
 		}
 	}
+	if len(groups) == 0 && !*insecureDev {
+		log.Warn("no --writer-groups: every authenticated user may change the catalog, create services and deploy")
+	}
 	app, err := githubApp(*appID, *appKey, *githubOrg)
 	if err != nil {
 		return err
