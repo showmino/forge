@@ -113,6 +113,8 @@ kubectl delete clusterrole,clusterrolebinding forge-api-previews
 
 ## Deploys (Phase 4)
 
+The Phase 4 exit gate (2026-10-09): `bin/forge create gate-<x> --template go-grpc --team platform`, then `gh run watch` its CI (test → image → deploy, about 5 minutes), `bin/forge deploy status gate-<x>`, `/healthz` and Greet (`<pkg>.v1.GreeterService/Greet`, JSON over HTTP) at `http://gate-<x>.staging.10.150.1.222.nip.io` with `python3 -I` urllib, then `bin/forge deploy promote gate-<x> --yes` and the same at `.production.`. The first pod pull fails until forge-api writes `forge-pull`; that is expected.
+
 Render with deploys on (needs previews and a commit on origin/main for the chart; an unpushed commit makes every Application fail):
 
 ```sh
