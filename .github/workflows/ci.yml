@@ -19,6 +19,8 @@ jobs:
       - run: go mod tidy -diff
       - run: go build ./...
       - run: go test -race -count=1 ./...
+      - name: Deploy chart golden
+        run: make chart-test
 
   lint:
     runs-on: ubuntu-latest

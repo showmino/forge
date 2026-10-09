@@ -1,0 +1,5 @@
+apiVersion: v2
+name: forge-service
+description: A Forge service in one deploy environment (staging or production).
+type: application
+version: 0.1.0
