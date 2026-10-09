@@ -28,7 +28,8 @@ type Store interface {
 	ForRepo(ctx context.Context, owner, repo string) ([]string, error)
 	// Write runs fn in a transaction; write transactions never overlap. What
 	// fn writes through tx takes effect only if fn returns nil. fn's error is
-	// returned unchanged.
+	// returned unchanged. fn must use only tx: calling the Store itself from
+	// inside fn deadlocks the memory store and can exhaust the PostgreSQL pool.
 	Write(ctx context.Context, fn func(tx Tx) error) error
 	// Close releases the store's resources.
 	Close()
