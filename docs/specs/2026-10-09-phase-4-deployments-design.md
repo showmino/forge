@@ -254,7 +254,7 @@ The pull-secret write needs no new permission: Phase 3's ClusterRole already all
 
 ### Security
 
-- **One production cluster.** The AppProject confines Forge's Applications to `*-staging` / `*-production` namespaces and to the chart's kinds. forge-api itself only reads Applications and writes one secret per service namespace.
+- **One production cluster.** The AppProject confines Forge's Applications to `*-staging` / `*-production` namespaces and to the chart's kinds. forge-api's code only reads Applications and writes one pull secret per Forge service namespace; its Phase 3 ClusterRole is broader (secrets create, namespaces patch/delete in any namespace) and is held to Forge's namespaces by code guards. A ValidatingAdmissionPolicy to enforce that in the API server is a follow-up.
 - **CI tokens** are short-lived (GitHub's 5 to 10 minutes), audience-bound and scoped to one service in staging, only from the default branch, at the token's own commit.
 - **Audit:** every change is a commit in `forge-deploys` whose message names the actor and the operation.
 - **No new long-lived secrets.**

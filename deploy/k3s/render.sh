@@ -25,9 +25,15 @@
 # forge.yaml.tmpl with a trailing "previews" marker exist only then:
 #   FORGE_PREVIEW_IP=10.150.1.222 FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 #
-# Deploys (forge deploy) need previews, plus the forge commit Argo CD takes the
-# chart from; lines with a trailing "deploys" marker exist only then:
-#   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse HEAD) FORGE_PREVIEW_IP=... | kubectl apply -f -
+# Deploys (forge deploy) need previews, plus a commit on origin/main that Argo
+# CD takes the chart from (an unpushed commit makes every Application fail);
+# lines with a trailing "deploys" marker exist only then:
+#   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=... | kubectl apply -f -
+# Once deploys are on, every re-render must include FORGE_DEPLOYS=1 and the
+# current FORGE_DEPLOY_CHART_REVISION (read it with `kubectl -n argocd get
+# applicationset forge-services -o jsonpath='{.spec.template.spec.sources[0].targetRevision}'`);
+# a render without them removes the staging and production routes. Changing the
+# revision re-renders every deployed service.
 set -eu
 
 usage() {

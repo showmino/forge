@@ -80,9 +80,10 @@ Previews (rendered with `FORGE_PREVIEW_IP`):
 ```sh
 kubectl -n forge wait gateway/forge-previews --for=condition=Programmed --timeout=120s
 kubectl -n forge get gateway forge-previews -o jsonpath='{.status.addresses[0].value}'   # 10.150.1.222
-# forge-api's permissions: yes yes yes yes no yes no
+# forge-api's permissions: yes yes yes yes no yes no, then with deploys on: yes no
 for v in "create namespaces" "delete namespaces" "create deployments -n x" "create httproutes.gateway.networking.k8s.io -n x" \
-         "get secrets -n kube-system" "get secrets/mino-ghcr -n forge" "delete deployments -n x"; do
+         "get secrets -n kube-system" "get secrets/mino-ghcr -n forge" "delete deployments -n x" \
+         "get applications.argoproj.io -n argocd" "patch applications.argoproj.io -n argocd"; do
   printf '%-55s %s\n' "$v" "$(kubectl auth can-i $v --as=system:serviceaccount:forge:forge-api)"; done
 ```
 
@@ -101,7 +102,8 @@ The Phase 3 exit gate (2026-10-09, 4m37s): `time (bin/forge create gate-<x> --te
 | Every command warns "older than ... 0.1.0" | Go pseudo-version not treated as dev (fixed in `internal/version`) |
 
 Tear down, previews first (the reaper dies with forge-api, and the ClusterRole is
-cluster-scoped, so deleting namespace `forge` leaves both behind):
+cluster-scoped, so deleting namespace `forge` leaves both behind). With deploys on,
+do the Deploys teardown (below) first, otherwise services lose their routes:
 
 ```sh
 kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/environment
@@ -111,12 +113,14 @@ kubectl delete clusterrole,clusterrolebinding forge-api-previews
 
 ## Deploys (Phase 4)
 
-Render with deploys on (needs previews and a pinned forge commit for the chart):
+Render with deploys on (needs previews and a commit on origin/main for the chart; an unpushed commit makes every Application fail):
 
 ```sh
-FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse HEAD) FORGE_PREVIEW_IP=<gateway-ip> FORGE_GITHUB_APP_ID=<app-id> ... \
+FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=<gateway-ip> FORGE_GITHUB_APP_ID=<app-id> ... \
   deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 ```
+
+Once deploys are on, every re-render must include `FORGE_DEPLOYS=1` and the current `FORGE_DEPLOY_CHART_REVISION` (read it with `kubectl -n argocd get applicationset forge-services -o jsonpath='{.spec.template.spec.sources[0].targetRevision}'`); a render without them removes the staging and production routes. Changing the revision re-renders every deployed service.
 
 Check the ApplicationSet generated its Applications:
 
@@ -126,7 +130,8 @@ kubectl -n argocd get applicationset forge-services -o jsonpath='{.status.condit
 
 Tear down a service: delete the `services/<svc>` directory in `forge-deploys`,
 wait for the Applications to disappear, then delete the `<svc>-staging` and
-`<svc>-production` namespaces.
+`<svc>-production` namespaces by name (`kubectl delete ns <svc>-staging <svc>-production`);
+the finalizer does not remove namespaces.
 
 Remove the Argo objects and forge-api's access. This deletes every deployed
 service: the ApplicationSet cascades to its Applications, and their finalizer
@@ -139,4 +144,5 @@ kubectl -n argocd delete applicationset forge-services
 kubectl -n argocd get app -l app.kubernetes.io/managed-by=forge   # repeat until empty
 kubectl -n argocd delete appproject forge-services
 kubectl -n argocd delete role,rolebinding forge-api-applications
+kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   # the finalizer does not remove namespaces
 ```

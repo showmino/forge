@@ -110,11 +110,11 @@ FORGE_PREVIEW_IP=<gateway-ip> FORGE_PREVIEW_PULL_SECRET=<secret> FORGE_GITHUB_AP
 Previews are then reached at `http://<env>.preview.<gateway-ip>.nip.io`.
 
 Deploys (`forge deploy`) need previews, the GitOps repo `showmino/forge-deploys`
-(private, with an initial commit), and the forge commit Argo CD takes the chart
-from:
+(private, with an initial commit), and a commit on origin/main that Argo CD
+takes the chart from (an unpushed commit makes every Application fail):
 
 ```sh
-FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse HEAD) FORGE_PREVIEW_IP=<gateway-ip> ... \
+FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=<gateway-ip> ... \
   deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 ```
 
@@ -122,6 +122,8 @@ This adds the Argo CD AppProject and ApplicationSet `forge-services`, a Role
 that lets forge-api read Applications, and the Gateway listeners for
 `http://<service>.staging.<gateway-ip>.nip.io` and `.production.`. Argo CD's
 repo credentials must be able to read both repos.
+
+Once deploys are on, every re-render must include `FORGE_DEPLOYS=1` and the current `FORGE_DEPLOY_CHART_REVISION` (read it with `kubectl -n argocd get applicationset forge-services -o jsonpath='{.spec.template.spec.sources[0].targetRevision}'`); a render without them removes the staging and production routes. Changing the revision re-renders every deployed service.
 
 Both the CLI and the forge-api pod must reach Dex at the same issuer URL
 (`http://dex.<node-ip or dex-ip>.nip.io/dex`), which is why Dex is exposed

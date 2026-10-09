@@ -772,28 +772,24 @@ The controller pushes, opens the PR, merges it, and tags `v1.2.0` (rollout step 
 
 Each step is run by the controller and checked before the next. The owner authorized all of milestone 3 ("Do all the milestone 3, you can use gh cli and argocd cli as well").
 
-- **R1, image.** On `main` after the forge PR merges:
-  ```sh
-  docker build --build-arg VERSION=$(git describe --tags --always) --build-arg COMMIT=$(git rev-parse HEAD) \
-    -t ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD) .
-  docker push ...
-  ```
-- **R2, `forge-deploys`.** Run `gh repo create showmino/forge-deploys --private --add-readme --description "Forge deploys: one values.yaml per service and environment, written by forge-api"`. Then check that the App `mino-forge` can see it: its installation covers all repos; verify with an App token, or by forge-api's first commit in the gate.
-- **R3, render and apply.**
+- **R1, image.** From a clean checkout of merged `main`: build with `--build-arg VERSION=$(git describe --tags --always) --build-arg COMMIT=$(git rev-parse HEAD)`, tag `ghcr.io/showmino/forge-api:<sha7>`, `docker push` it. That same main SHA is `FORGE_DEPLOY_CHART_REVISION`.
+- **R2, `forge-deploys`.** The repo already exists (created 2026-10-09); verify instead of creating: `gh repo view showmino/forge-deploys --json visibility,defaultBranchRef` (private, default branch `main`) and `gh api 'repos/showmino/forge-deploys/git/trees/HEAD?recursive=1' --jq '.tree[].path'` shows nothing under `services/`.
+- **R3, render and apply.** Render once to a file, and also write `rollback.yaml` (the same render without `FORGE_DEPLOYS*`, with `FORGE_API_IMAGE=ghcr.io/showmino/forge-api:0244a5d`):
   ```sh
   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=<main sha> FORGE_PREVIEW_IP=10.150.1.222 \
     FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_GITHUB_APP_ID=5239131 \
-    FORGE_API_IMAGE=ghcr.io/showmino/forge-api:<sha7> deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221
+    FORGE_API_IMAGE=ghcr.io/showmino/forge-api:<sha7> deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 > deploys.yaml
   ```
-  Review it with `kubectl diff -f -`, then `kubectl apply -f -`. Wait for `kubectl -n forge rollout status deploy/forge-api`. Check:
-  - the ApplicationSet has no error condition: Argo can read `forge-deploys` with `argocd-repo-kubernetes`;
-  - `/cli/forge-linux-amd64` downloads from `http://forge.10.150.1.221.nip.io`;
+  `kubectl diff -f deploys.yaml` (exit 1 means differences) and expect only: the forge-api image and the `FORGE_DEPLOYS` env, the Gateway's two new listeners, and four new objects (AppProject, ApplicationSet, Role, RoleBinding). Anything else: stop. Then `kubectl apply -f deploys.yaml` and `kubectl -n forge rollout status deploy/forge-api --timeout=3m`; on failure `kubectl apply -f rollback.yaml`. The restart wipes the in-memory catalog. Check:
+  - the Gateway is Programmed with three accepted listeners;
+  - the ApplicationSet has no `ErrorOccurred` condition: Argo can read `forge-deploys` with `argocd-repo-kubernetes`;
+  - `/cli/forge-linux-amd64` downloads from `http://forge.10.150.1.221.nip.io` (`python3 -I` urllib);
   - forge-api's log says deploys are on and GitHub OIDC is accepted.
-- **R4, org variable `FORGE_API_URL`.** Run `gh variable set FORGE_API_URL --org showmino --visibility all --body http://forge.10.150.1.221.nip.io`. This needs the `admin:org` scope, which the current `gh` login lacks. The owner runs `gh auth refresh -h github.com -s admin:org` (or sets the variable in the org settings). With that scope, also check that the runner group `kube` serves all repos: `gh api orgs/showmino/actions/runner-groups`.
-- **R5, a runner-reachability check.** From a pod in `arc-runners`, the API must answer. Use the existing runner pod: `kubectl -n arc-runners exec <runner pod> -c runner -- curl -fsS http://forge.10.150.1.221.nip.io/healthz`.
+- **R4, org variable `FORGE_API_URL`.** Run `gh variable set FORGE_API_URL --org showmino --visibility all --body http://forge.10.150.1.221.nip.io`. This needs the `admin:org` scope, which the current `gh` login lacks. The owner runs `gh auth refresh -h github.com -s admin:org` (or sets the variable in the org settings). With that scope, also check that the runner group `kube` serves all repos (`gh api orgs/showmino/actions/runner-groups`) and the App's installation (`gh api orgs/showmino/installations --jq '.installations[]|[.app_slug,.repository_selection]'`).
+- **R5, a runner-reachability check.** From a pod in `arc-runners`, the API must answer. Use the existing runner pod: `kubectl -n arc-runners exec <runner pod> -c runner -- curl -fsS http://forge.10.150.1.221.nip.io/healthz`, and fetch `/cli/forge-linux-amd64` from the same pod.
 - **R6, template release.** Push `go-grpc-v1.2.0`, open the PR, merge, then `git tag v1.2.0 && git push origin v1.2.0` in `forge-templates`.
 - **R7, the gate.** Log in as a human (`forge auth login`; scripted approval per verifying.md), then:
-  1. `forge create gate-<MMDDhhmm> --template go-grpc --team platform`. After this, no human acts until step 3.
+  1. `forge create gate-<MMDDhhmm> --template go-grpc --team platform`. After this, no human acts until step 3. Never restart or re-apply forge-api between `forge create` and the end of CI: the in-memory catalog maps the token's repo to the service.
   2. `gh run watch` the repo's CI: `test` → `image` → `deploy`, all green.
   3. Check:
      - `forge deploy status gate-<x>` shows staging Synced and Healthy at the pushed commit;
@@ -802,6 +798,6 @@ Each step is run by the controller and checked before the next. The owner author
   4. `forge deploy promote gate-<x> --yes`; production answers `/healthz` and Greet at `.production.`.
   5. Check the Argo Applications report both revisions (multi-source `status.sync.revisions`), to settle the milestone 1 question.
 - **R8, cleanup.**
-  - Delete `services/gate-<x>` in `forge-deploys` (`gh api -X DELETE repos/showmino/forge-deploys/contents/<path>` for each `values.yaml`). Wait until both Applications and their Deployments are gone (the finalizer), then delete the two namespaces.
+  - Delete each `values.yaml` under `services/gate-<x>` in `forge-deploys` with its blob sha: `sha=$(gh api repos/showmino/forge-deploys/contents/<path> --jq .sha)`, then `gh api -X DELETE repos/showmino/forge-deploys/contents/<path> -f message="cleanup gate-<x> <env> (manual, not via forge-api)" -f sha=$sha`. Wait until both Applications and their Deployments are gone (the finalizer), then delete the two namespaces. Never strip the finalizer by hand.
   - Run `forge service delete gate-<x>` and `gh repo delete showmino/gate-<x> --yes`.
   - The ghcr package needs the `delete:packages` scope. Leave it for the owner, with the other leftover packages.
