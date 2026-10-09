@@ -151,7 +151,7 @@ func (e *Environments) createWork(p envPlan) Work {
 // deployAndWait creates the workload and waits until it is available.
 func (e *Environments) deployAndWait(ctx context.Context, p envPlan, emit func(string, string)) error {
 	host := p.id + "." + e.o.Domain
-	if err := e.o.Cluster.Deploy(ctx, p.id, Workload{Service: p.serviceID, Image: p.image, Host: host, Port: p.port, Health: p.health}); err != nil {
+	if err := e.o.Cluster.Deploy(ctx, p.id, EnvWorkload{Service: p.serviceID, Image: p.image, Host: host, Port: p.port, Health: p.health}); err != nil {
 		return err
 	}
 	emit("apply", fmt.Sprintf("deployment %s on port %d, route %s", p.serviceID, p.port, host))

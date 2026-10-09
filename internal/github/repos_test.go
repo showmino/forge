@@ -184,3 +184,27 @@ func TestPushFiles(t *testing.T) {
 		t.Errorf("ref update: %v", o.ref)
 	}
 }
+
+func TestDefaultBranch(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/showmino/svc", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"full_name":"showmino/svc","default_branch":"trunk"}`)
+	})
+	mux.HandleFunc("GET /repos/showmino/blank", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"full_name":"showmino/blank"}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL}
+	ctx := context.Background()
+	if b, err := c.DefaultBranch(ctx, "showmino", "svc"); err != nil || b != "trunk" {
+		t.Errorf("svc: %q %v", b, err)
+	}
+	if _, err := c.DefaultBranch(ctx, "showmino", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing repo: %v", err)
+	}
+	if _, err := c.DefaultBranch(ctx, "showmino", "blank"); err == nil {
+		t.Error("no default_branch: want an error")
+	}
+}

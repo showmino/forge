@@ -26,6 +26,32 @@ type Principal struct {
 	Email       string
 	Groups      []string
 	Permissions []string
+	// Workload is set for a CI caller. Its Permissions come from its token,
+	// not from the Authorizer.
+	Workload *Workload
+}
+
+// Workload is a CI job of a service's repo, from its GitHub Actions token.
+type Workload struct {
+	// Repository is "<org>/<repo>" as the token spells it.
+	Repository string
+	// Service is the catalog id, without "services/".
+	Service string
+	// SHA is the commit the job runs at.
+	SHA string
+}
+
+// PermDeploy is a CI caller's permission to deploy service to env.
+func PermDeploy(service, env string) string { return "deploy:" + service + ":" + env }
+
+// workloadOf returns the caller's Workload, or nil for a human.
+//
+//nolint:unused // used by the CI handlers (later task)
+func workloadOf(ctx context.Context) *Workload {
+	if p, ok := PrincipalFrom(ctx); ok {
+		return p.Workload
+	}
+	return nil
 }
 
 // Authenticator turns a bearer token into a Principal.

@@ -69,8 +69,8 @@ type Cluster struct {
 	PullSecret string
 }
 
-// Workload is what an environment runs.
-type Workload struct {
+// EnvWorkload is what an environment runs.
+type EnvWorkload struct {
 	Service, Image, Host string
 	Port                 int32
 	Health               string
@@ -183,7 +183,7 @@ func (c *Cluster) PullSecretData(ctx context.Context) ([]byte, error) {
 // Deploy creates what environment id runs: the pull secret copy, quota and
 // limits, the Deployment, its Service and an HTTPRoute for w.Host. The
 // namespace is new, so every object is created once.
-func (c *Cluster) Deploy(ctx context.Context, id string, w Workload) error {
+func (c *Cluster) Deploy(ctx context.Context, id string, w EnvWorkload) error {
 	if _, err := c.Env(ctx, id); err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func (c *Cluster) Deploy(ctx context.Context, id string, w Workload) error {
 	return nil
 }
 
-func deployment(w Workload) *appsv1.Deployment {
+func deployment(w EnvWorkload) *appsv1.Deployment {
 	yes, no := true, false
 	one := int32(1)
 	labels := map[string]string{"app": w.Service}
