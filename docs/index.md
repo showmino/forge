@@ -225,13 +225,13 @@ forge/
 
 ## Phased delivery plan
 
-Build in five phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 and 2 are done; Phase 3 is next.
+Build in five phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 3 are done; Phase 4 is next.
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |
 | 1 · Foundations (done) | auth, context, service list / get / register; doctor, version, completion, init; API skeleton, protos, CI, signed releases | Log in with SSO and register a service from a Homebrew install |
 | 2 · Templates and scaffolding (done) | template list / get / lint; `forge create` from a Git template repo; first golden path: Go gRPC service | A scaffolded service passes its own CI and appears in the catalog |
-| 3 · Environments | env create / list / destroy / extend with a TTL; operations: op watch, streamed progress; one Kubernetes namespace per preview | `forge create` to a running preview environment in under 10 minutes |
+| 3 · Environments (done) | env create / list / destroy / extend with a TTL; operations: op watch, streamed progress; one Kubernetes namespace per preview | `forge create` to a running preview environment in under 10 minutes |
 | 4 · Deployments | deploy start / status / history; rollback and promote through Argo CD; deploys from CI with workload identity | A team ships to staging from CI without kubectl or Argo access |
 | 5 · Resources and audit | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
 

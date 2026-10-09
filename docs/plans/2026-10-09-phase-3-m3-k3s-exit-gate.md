@@ -64,7 +64,7 @@
 
 ### Task 0: Branch
 
-- [ ] **Step 1:** `cd /home/mino/code/forge && git branch --show-current`. Expected: `phase-3-m3` (created from `main` at `5ef06a8`). If not, run `git checkout main && git pull && git checkout -b phase-3-m3`.
+- [x] **Step 1:** `cd /home/mino/code/forge && git branch --show-current`. Expected: `phase-3-m3` (created from `main` at `5ef06a8`). If not, run `git checkout main && git pull && git checkout -b phase-3-m3`.
 
 ---
 
@@ -78,9 +78,9 @@
 
 The skeleton uses `{% %}` delimiters. `{% .Params.port %}` is the template's `port` parameter (int, default 8080), and `{% .Service.Name %}` is the service id.
 
-- [ ] **Step 1: Branch.** `cd ~/code/forge-templates && git checkout main && git pull && git checkout -b go-grpc-v1.1.0`
+- [x] **Step 1: Branch.** `cd ~/code/forge-templates && git checkout main && git pull && git checkout -b go-grpc-v1.1.0`
 
-- [ ] **Step 2: Write the failing test** `go-grpc/skeleton/cmd/{% .Service.Name %}/main_test.go`:
+- [x] **Step 2: Write the failing test** `go-grpc/skeleton/cmd/{% .Service.Name %}/main_test.go`:
 
 ```go
 package main
@@ -100,7 +100,7 @@ func TestListenAddr(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run lint and the render build to see it fail.** From `~/code/forge-templates`:
+- [x] **Step 3: Run lint and the render build to see it fail.** From `~/code/forge-templates`:
 
 ```bash
 export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
@@ -111,7 +111,7 @@ R=$(mktemp -d)
 
 Expected: the lint passes, but `make test` fails with `undefined: listenAddr`. Build `bin/forge` from forge `main` first if it's missing: `cd /home/mino/code/forge && make build`.
 
-- [ ] **Step 4: Implement.** In `main.go`, replace
+- [x] **Step 4: Implement.** In `main.go`, replace
 
 ```go
 	addr := flag.String("addr", ":{% .Params.port %}", "listen address")
@@ -151,9 +151,9 @@ run:
 server listens on `$PORT` there (`run:` in `forge.yaml`).
 ```
 
-- [ ] **Step 5: See it pass.** Rerun Step 3's commands, and also run `make lint` in the render. Expected: lint is clean, `make tools test lint` passes, and `grep -A2 '^run:' "$R/go-grpc/forge.yaml"` shows `port: 8080` and `health: /healthz`.
+- [x] **Step 5: See it pass.** Rerun Step 3's commands, and also run `make lint` in the render. Expected: lint is clean, `make tools test lint` passes, and `grep -A2 '^run:' "$R/go-grpc/forge.yaml"` shows `port: 8080` and `health: /healthz`.
 
-- [ ] **Step 6: Commit and push the branch, then open a PR** (on that repo's own branch):
+- [x] **Step 6: Commit and push the branch, then open a PR** (on that repo's own branch):
 
 ```bash
 git add go-grpc
@@ -165,7 +165,7 @@ gh pr checks -R showmino/forge-templates --watch
 
 Expected: the repo's `lint` workflow passes. It builds forge from `main`, which already knows `run:`, lints and renders every template, then runs `make tools test lint` on each.
 
-- [ ] **Step 7 (owner confirms): Merge and tag.**
+- [x] **Step 7 (owner confirms): Merge and tag.**
 
 ```bash
 gh pr merge -R showmino/forge-templates --merge
@@ -187,7 +187,7 @@ Expected: `git tag` lists `v1.0.0 v1.1.0`. forge-api picks up the new tag within
 **Interfaces:**
 - Produces render variables: `FORGE_PREVIEW_IP` (turns previews on) and `FORGE_PREVIEW_PULL_SECRET` (default `mino-ghcr`). Lines marked `#previews` in `forge.yaml.tmpl` exist only with previews on.
 
-- [ ] **Step 1: Save today's output as goldens**, before editing any template. They pin Review Focus 1, which says rendering without previews must not change:
+- [x] **Step 1: Save today's output as goldens**, before editing any template. They pin Review Focus 1, which says rendering without previews must not change:
 
 ```bash
 mkdir -p deploy/k3s/testdata
@@ -195,7 +195,7 @@ sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 > deploy/k3s/testdata/lb.
 FORGE_GITHUB_APP_ID=5239131 sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 > deploy/k3s/testdata/lb-app.golden
 ```
 
-- [ ] **Step 2: Write the failing checks.** Create `deploy/k3s/testdata/section.sh`. It prints one manifest kind's section; the checks run in `sh -c`, which cannot see the test script's functions, so they source this file:
+- [x] **Step 2: Write the failing checks.** Create `deploy/k3s/testdata/section.sh`. It prints one manifest kind's section; the checks run in `sh -c`, which cannot see the test script's functions, so they source this file:
 
 ```sh
 # section <kind> <manifests>: the lines from "kind: <kind>" to the next "---".
@@ -233,9 +233,9 @@ check "bad pull secret refused"             sh -c "! FORGE_GITHUB_APP_ID=1 FORGE
 
   If a quoting detail in these one-liners trips `sh`, keep each check's meaning and simplify its quoting, for example with a small shell function per check in `testdata/`. Say so in the report.
 
-- [ ] **Step 3:** `sh deploy/k3s/render_test.sh`. Expected: the new `previews:` checks FAIL, and the two `output unchanged` checks pass because nothing has changed yet.
+- [x] **Step 3:** `sh deploy/k3s/render_test.sh`. Expected: the new `previews:` checks FAIL, and the two `output unchanged` checks pass because nothing has changed yet.
 
-- [ ] **Step 4: Write `deploy/k3s/previews.yaml.tmpl`**
+- [x] **Step 4: Write `deploy/k3s/previews.yaml.tmpl`**
 
 ```yaml
 # Preview environments: forge-api's ServiceAccount and cluster permissions, and
@@ -335,7 +335,7 @@ spec:
               app.kubernetes.io/managed-by: forge
 ```
 
-- [ ] **Step 5: Mark the forge-api lines.** In `deploy/k3s/forge.yaml.tmpl`:
+- [x] **Step 5: Mark the forge-api lines.** In `deploy/k3s/forge.yaml.tmpl`:
   - Add to the header comment: `Lines with a trailing "previews" marker comment exist only when render.sh gets FORGE_PREVIEW_IP.`
   - In the forge-api pod spec, add a line directly above `securityContext:` (pod level, same indentation):
 
@@ -351,7 +351,7 @@ spec:
             - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/${PULL_SECRET}} #previews
 ```
 
-- [ ] **Step 6: `render.sh`.**
+- [x] **Step 6: `render.sh`.**
   - Add to the header comment, after the 1Password lines:
 
 ```sh
@@ -392,7 +392,7 @@ fi
 
   - Add `-e "$previews"` after `-e "$app"`, and `-e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g"` to the `sed` call.
 
-- [ ] **Step 7:** `sh deploy/k3s/render_test.sh`. Expected: every check is `ok`. Then validate against the real API server without changing anything:
+- [x] **Step 7:** `sh deploy/k3s/render_test.sh`. Expected: every check is `ok`. Then validate against the real API server without changing anything:
 
 ```bash
 FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_PREVIEW_IP=10.150.1.222 \
@@ -402,7 +402,7 @@ FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-githu
 
   Expected: `serviceaccount/forge-api created (server dry run)`, the ClusterRole, ClusterRoleBinding, Role and RoleBinding created, and `gateway.gateway.networking.k8s.io/forge-previews created (server dry run)`.
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 make build test lint && sh deploy/k3s/render_test.sh
@@ -416,14 +416,14 @@ git commit -m "deploy/k3s: preview environments behind FORGE_PREVIEW_IP"
 
 **Files:** none in the repo.
 
-- [ ] **Step 1: Build and push the image** from this branch:
+- [x] **Step 1: Build and push the image** from this branch:
 
 ```bash
 IMG=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD)
 docker build -q --build-arg COMMIT=$(git rev-parse HEAD) -t $IMG . && docker push $IMG
 ```
 
-- [ ] **Step 2: Apply.**
+- [x] **Step 2: Apply.**
 
 ```bash
 FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_PREVIEW_IP=10.150.1.222 FORGE_API_IMAGE=$IMG \
@@ -434,7 +434,7 @@ kubectl -n forge logs deploy/forge-api | head -5 | cut -c1-200
 
 Expected: the rollout succeeds, and the forge-api pod pulls its image through the new ServiceAccount's pull secret. The logs show `forge-api listening` and do not show "preview environments are off". If the pod is `ErrImagePull`, the SA lacks the pull secret: see Review Focus 2.
 
-- [ ] **Step 3: The Gateway.**
+- [x] **Step 3: The Gateway.**
 
 ```bash
 kubectl -n forge wait gateway/forge-previews --for=condition=Programmed --timeout=120s
@@ -445,7 +445,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://nothing.preview.10.150.1.222.nip
 
 Expected: `Programmed`, address `10.150.1.222`, and a `forge-previews-istio` Service with EXTERNAL-IP .222. `curl` answers 404, meaning the Gateway works and no route matches. If the address is not .222, check the generated Service's annotation; Istio copies `infrastructure.annotations` onto it.
 
-- [ ] **Step 4: Permissions as forge-api sees them.**
+- [x] **Step 4: Permissions as forge-api sees them.**
 
 ```bash
 for v in "create namespaces" "delete namespaces" "create deployments -n x" "create httproutes.gateway.networking.k8s.io -n x" "get secrets -n kube-system" "get secrets/mino-ghcr -n forge" "delete deployments -n x"; do
@@ -455,7 +455,7 @@ done
 
 Expected: yes, yes, yes, yes, **no**, yes, **no**.
 
-- [ ] **Step 5: Smoke.**
+- [x] **Step 5: Smoke.**
 
 ```bash
 bin/forge context use k3s
@@ -470,7 +470,7 @@ Expected: `No environments.`, and `== N passed, 0 failed`. Use the scratchpad di
 
 ### Task 4: The Phase 3 exit gate (owner confirms first)
 
-- [ ] **Step 1: Run and time it.**
+- [x] **Step 1: Run and time it.**
 
 ```bash
 NAME=gate-$(date +%m%d%H%M)
@@ -483,7 +483,7 @@ Expected:
 - `forge env create` streams `resolve`, `image` (waiting, CI status), `namespace`, `apply`, `ready http://$NAME.preview.10.150.1.222.nip.io`, then prints the environment with `state ready`.
 - **`real` under 10m.** That is the exit gate.
 
-- [ ] **Step 2: It answers.**
+- [x] **Step 2: It answers.**
 
 ```bash
 URL=http://$NAME.preview.10.150.1.222.nip.io
@@ -496,7 +496,7 @@ kubectl -n preview-$NAME get deploy,svc,httproute,resourcequota,limitrange
 
 Expected: `200`, and a JSON greeting containing `gate`. `env get` shows ready, the URL and the operation. The namespace has exactly the expected objects.
 
-- [ ] **Step 3: Clean up, whatever Steps 1-2 showed.**
+- [x] **Step 3: Clean up, whatever Steps 1-2 showed.**
 
 ```bash
 bin/forge --context k3s env destroy $NAME --yes
@@ -513,7 +513,7 @@ The repo `showmino/$NAME` and its ghcr package stay for the owner to delete (`gh
 **Files:**
 - Modify: `.claude/skills/forge/verifying.md` (section 3), `.claude/skills/forge/SKILL.md` (status), `README.md` (k3s section), `docs/index.md` (Phase 3 done), `docs/plans/2026-10-09-phase-3-m3-k3s-exit-gate.md` (tick the boxes)
 
-- [ ] **Step 1: Docs.**
+- [x] **Step 1: Docs.**
   - **`verifying.md` section 3:**
     - Add `FORGE_PREVIEW_IP=10.150.1.222` to the render command.
     - Add the Gateway checks from Task 3 Step 3 and the `can-i` table from Task 3 Step 4.
@@ -526,7 +526,7 @@ The repo `showmino/$NAME` and its ghcr package stay for the owner to delete (`gh
     - Mark the Phase 3 row `(done)`.
     - Change "Phases 1 and 2 are done; Phase 3 is next." to "Phases 1 to 3 are done; Phase 4 is next."
 
-- [ ] **Step 2: Gate, PR, merge** (the standing rule covers `showmino/forge`):
+- [x] **Step 2: Gate, PR, merge** (the standing rule covers `showmino/forge`):
 
 ```bash
 make build test lint && sh deploy/k3s/render_test.sh
