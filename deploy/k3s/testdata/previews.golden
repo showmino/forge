@@ -20,7 +20,15 @@ data:
   config.yaml: |
     issuer: http://dex.10.150.1.220.nip.io/dex
     storage:
-      type: memory # Phase 1: logins reset when Dex restarts
+      type: postgres
+      config:
+        host: forge-db-rw.forge.svc
+        port: 5432
+        database: dex
+        user: forge
+        password: $DEX_DB_PASSWORD # from the Secret forge-db-app
+        ssl:
+          mode: require
     web:
       http: 0.0.0.0:5556
     oauth2:
@@ -72,6 +80,9 @@ spec:
             - name: GITHUB_CLIENT_SECRET
               valueFrom:
                 secretKeyRef: {name: dex-github, key: client_secret}
+            - name: DEX_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: forge-db-app, key: password}
           ports:
             - {name: http, containerPort: 5556}
           readinessProbe:
@@ -91,7 +102,7 @@ metadata:
   name: forge-api
   namespace: forge
 spec:
-  replicas: 1 # the Phase 1 catalog is in memory; keep one replica
+  replicas: 1 # operations are in memory; keep one replica
   selector:
     matchLabels: {app: forge-api}
   template:
@@ -118,6 +129,9 @@ spec:
             - {name: FORGE_OIDC_ISSUER, value: "http://dex.10.150.1.220.nip.io/dex"}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
             - {name: FORGE_WRITER_GROUPS, value: "showmino:platform-engineering"}
+            - name: FORGE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: forge-db-app, key: uri}
             - {name: FORGE_LOG_FORMAT, value: json}
             - {name: FORGE_GITHUB_APP_ID, value: "5239131"}
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key}
@@ -173,6 +187,40 @@ spec:
   selector: {app: forge-api}
   ports:
     - {name: http, port: 80, targetPort: http}
+---
+# Forge's database: the service catalog (forge-api) and Dex's logins.
+# CloudNativePG creates the Secret forge-db-app (keys uri, password, ...)
+# for the owner forge. No backups yet: the catalog can be re-registered from
+# each repo's forge.yaml, and Dex's data is only sessions.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: forge-db
+  namespace: forge
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+  storage:
+    size: 5Gi
+    storageClass: longhorn-retain # the volumes outlive an accidental delete
+  bootstrap:
+    initdb:
+      database: forge
+      owner: forge
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {memory: 512Mi}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: forge-db-dex
+  namespace: forge
+spec:
+  name: dex
+  owner: forge
+  cluster:
+    name: forge-db
 ---
 # Preview environments: forge-api's ServiceAccount and cluster permissions, and
 # the LAN Gateway previews are reached through. render.sh adds this when

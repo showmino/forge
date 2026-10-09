@@ -161,6 +161,8 @@ fi
   cat "$dir/forge.yaml.tmpl"
   echo "---"
   cat "$exposure"
+  echo "---"
+  cat "$dir/database.yaml.tmpl"
   if [ -n "$onepassword_item" ]; then
     echo "---"
     cat "$dir/onepassword.yaml.tmpl"
