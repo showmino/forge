@@ -57,6 +57,9 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err != nil {
 		return nil, err
 	}
+	if w := workloadOf(ctx); w != nil && src.commit != w.SHA {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolved %s to %s, not the CI token's commit %s", ref, shortSHA(src.commit), shortSHA(w.SHA)))
+	}
 	env, actor := m.GetEnv(), actorOf(ctx)
 	v := deployValues{
 		Name: src.serviceID, Env: env, Image: src.image, Port: src.port, Health: src.health, Replicas: 1,

@@ -43,7 +43,7 @@ func ownOperation(ctx context.Context, op *forgev1.Operation) error {
 	if w == nil {
 		return nil
 	}
-	if p, _ := PrincipalFrom(ctx); op.GetCreator() == p.Subject {
+	if op.GetCreator() == actorOf(ctx) {
 		return nil
 	}
 	return workloadDenied(w, "only read operations it started")

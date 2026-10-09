@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -71,7 +72,7 @@ func NewGitHubOIDCAuthenticator(ctx context.Context, o GitHubOIDCOptions) *GitHu
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	keys := oidc.NewRemoteKeySet(ctx, o.JWKSURL)
+	keys := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, &http.Client{Timeout: 30 * time.Second}), o.JWKSURL)
 	return &GitHubOIDCAuthenticator{
 		o:        o,
 		verifier: oidc.NewVerifier(o.Issuer, keys, &oidc.Config{ClientID: o.Audience, Now: o.Now}),

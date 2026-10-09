@@ -442,3 +442,52 @@ func TestWorkloadInterceptor(t *testing.T) {
 		t.Errorf("CreateService stream as CI: %v (want PermissionDenied naming the CI token)", err)
 	}
 }
+
+// TestCIEndToEnd runs signed Actions tokens through ByIssuer, the OIDC
+// authenticator, the interceptor and a deploy on fakes.
+func TestCIEndToEnd(t *testing.T) {
+	t.Parallel()
+	iss := newActionsIssuer(t)
+	f := newDeployFixtureAuth(t, false, nil, func(cat *Catalog, base Authenticator) Authenticator {
+		return ByIssuer{Default: base, Issuers: map[string]Authenticator{
+			iss.srv.URL: NewGitHubOIDCAuthenticator(t.Context(), GitHubOIDCOptions{Issuer: iss.srv.URL, Org: "showmino", Catalog: cat, Branches: &fakeBranches{}}),
+		}}
+	})
+	ctx := context.Background()
+	now := time.Now()
+	token := iss.sign(t, nil, iss.claims(now, nil))
+	call := func(tok string) *connect.Request[forgev1.StartDeployRequest] {
+		req := connect.NewRequest(&forgev1.StartDeployRequest{Service: "services/payments", Env: "staging"})
+		req.Header().Set("Authorization", "Bearer "+tok)
+		return req
+	}
+
+	resp, err := f.client.StartDeploy(ctx, call(token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := resp.Msg.GetOperation()
+	if op.GetCreator() != "github:showmino/payments" {
+		t.Errorf("creator %q", op.GetCreator())
+	}
+	if done := waitCIOp(t, f.ops, op.GetName()); done.GetError() != nil {
+		t.Fatalf("deploy failed: %v", done.GetError())
+	}
+
+	list := connect.NewRequest(&forgev1.ListDeploymentsRequest{})
+	list.Header().Set("Authorization", "Bearer "+token)
+	_, err = f.client.ListDeployments(ctx, list)
+	if connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "CI token") {
+		t.Errorf("ListDeployments: %v", err)
+	}
+	feature := iss.sign(t, nil, iss.claims(now, map[string]any{"ref": "refs/heads/feature", "sub": "repo:showmino/payments:ref:refs/heads/feature"}))
+	_, err = f.client.StartDeploy(ctx, call(feature))
+	if connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "ref") {
+		t.Errorf("feature branch: %v", err)
+	}
+	expired := iss.sign(t, nil, iss.claims(now.Add(-time.Hour), nil))
+	_, err = f.client.StartDeploy(ctx, call(expired))
+	if connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("expired: %v", err)
+	}
+}
