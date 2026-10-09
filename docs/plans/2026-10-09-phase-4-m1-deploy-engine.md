@@ -52,7 +52,7 @@
 
 ### Task 0: Branch
 
-- [ ] **Step 1:** `cd /home/mino/code/forge && git branch --show-current`. Expected: `phase-4` (the spec is committed there). Then run `git checkout -b phase-4-m1`.
+- [x] **Step 1:** `cd /home/mino/code/forge && git branch --show-current`. Expected: `phase-4` (the spec is committed there). Then run `git checkout -b phase-4-m1`.
 
 ---
 
@@ -69,9 +69,9 @@
   - `func waitForImage(ctx context.Context, gh EnvGitHub, images ImageChecker, s source, timeout, poll time.Duration, emit func(step, message string)) error`, with the same behaviour and OpError codes (`ci_failed`, `image_timeout`) as today's method.
 - `envPlan` becomes `struct { source; id, creator string; ttl time.Duration }`, embedding `source` so `p.serviceID`, `p.image` and the rest keep working.
 
-- [ ] **Step 1: Baseline.** `export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH && go test -race -count=1 ./internal/server > /tmp/claude-1000/-home-mino-code-forge/base.txt 2>&1; tail -1 /tmp/claude-1000/-home-mino-code-forge/base.txt`. Expected: `ok`. This refactor's test is that the environment suite stays green, unchanged.
+- [x] **Step 1: Baseline.** `export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH && go test -race -count=1 ./internal/server > /tmp/claude-1000/-home-mino-code-forge/base.txt 2>&1; tail -1 /tmp/claude-1000/-home-mino-code-forge/base.txt`. Expected: `ok`. This refactor's test is that the environment suite stays green, unchanged.
 
-- [ ] **Step 2: Write `internal/server/source.go`** by moving code, not rewriting it:
+- [x] **Step 2: Write `internal/server/source.go`** by moving code, not rewriting it:
   - Move the service, ref, `forge.yaml` and image part of `(*Environments).plan` into `resolveSource`. Keep the `envIDRE` and TTL checks and the creator in `plan`.
   - Move `(*Environments).waitForImage` into the free function `waitForImage` above, replacing `e.o.*` with the parameters.
   - Move `failedRun` too.
@@ -153,15 +153,15 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
   - `e.o.ImageTimeout` → `timeout`, `e.o.ImagePoll` → `poll`, `e.o.Images` → `images`, `e.o.GitHub` → `gh`;
   - `p.image`, `p.owner`, `p.repo`, `p.commit` → `s.`.
 
-- [ ] **Step 3: Rewire `env_create.go`.**
+- [x] **Step 3: Rewire `env_create.go`.**
   - `envPlan` becomes `type envPlan struct { source; id, creator string; ttl time.Duration }`.
   - `plan` keeps the id and TTL checks, then does `src, err := resolveSource(ctx, e.o.Catalog, e.o.GitHub, e.o.Org, m.GetService(), m.GetRef()); if err != nil { return p, err }; p.source = src`, and then sets `p.creator` from the principal.
   - In `createWork`, `e.waitForImage(ctx, p, emit)` becomes `waitForImage(ctx, e.o.GitHub, e.o.Images, p.source, e.o.ImageTimeout, e.o.ImagePoll, emit)`.
   - Delete the moved method and functions, and fix the imports.
 
-- [ ] **Step 4:** `go test -race -count=1 ./internal/server ./internal/cli`. Expected: `ok` for both, with no test changed. Then `git diff --stat -- '*_test.go'` must be empty.
+- [x] **Step 4:** `go test -race -count=1 ./internal/server ./internal/cli`. Expected: `ok` for both, with no test changed. Then `git diff --stat -- '*_test.go'` must be empty.
 
-- [ ] **Step 5:** `make build test lint`, then `git add internal/server && git commit -m "server: share service resolution and the image wait"`.
+- [x] **Step 5:** `make build test lint`, then `git add internal/server && git commit -m "server: share service resolution and the image wait"`.
 
 ---
 
@@ -182,7 +182,7 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
     - `CommitFile(ctx, parent, tree, path string, content []byte, message string) (string, error)`: one commit with parent `parent`, on `tree` plus `path`=`content`, then a non-force ref update; a 422 on the update is `ErrNotFastForward`;
     - `History(ctx, path string, limit int) ([]CommitInfo, error)`: commits touching path, newest first.
 
-- [ ] **Step 1: Write the failing test** `internal/github/repofiles_test.go`:
+- [x] **Step 1: Write the failing test** `internal/github/repofiles_test.go`:
 
 ```go
 package github
@@ -308,9 +308,9 @@ func TestRepoFiles(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./internal/github -run TestRepoFiles`. Expected: build failure, `undefined: RepoFiles`.
+- [x] **Step 2:** `go test ./internal/github -run TestRepoFiles`. Expected: build failure, `undefined: RepoFiles`.
 
-- [ ] **Step 3: Implement** `internal/github/repofiles.go`:
+- [x] **Step 3: Implement** `internal/github/repofiles.go`:
 
 ```go
 package github
@@ -425,9 +425,9 @@ func (r *RepoFiles) History(ctx context.Context, path string, limit int) ([]Comm
 }
 ```
 
-- [ ] **Step 4:** `go test -race ./internal/github`. Expected: PASS.
+- [x] **Step 4:** `go test -race ./internal/github`. Expected: PASS.
 
-- [ ] **Step 5:** `make build test lint`, then `git add internal/github && git commit -m "github: single-file commits and history on a repo branch"`.
+- [x] **Step 5:** `make build test lint`, then `git add internal/github && git commit -m "github: single-file commits and history on a repo branch"`.
 
 ---
 
@@ -445,7 +445,7 @@ func (r *RepoFiles) History(ctx context.Context, path string, limit int) ([]Comm
   - the request and response types below;
   - `forgev1connect.DeployServiceHandler` and `client.Client.Deploys`.
 
-- [ ] **Step 1: Write the proto**
+- [x] **Step 1: Write the proto**
 
 ```protobuf
 syntax = "proto3";
@@ -623,11 +623,11 @@ message PromoteDeployResponse {
 }
 ```
 
-- [ ] **Step 2:** `export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH && make generate && buf lint && go build ./...`. Expected: lint is clean.
+- [x] **Step 2:** `export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH && make generate && buf lint && go build ./...`. Expected: lint is clean.
 
-- [ ] **Step 3: Client.** Add `Deploys forgev1connect.DeployServiceClient` after `Environments` in `pkg/client/client.go`, wire it in `New`, then run `gofmt -w`.
+- [x] **Step 3: Client.** Add `Deploys forgev1connect.DeployServiceClient` after `Environments` in `pkg/client/client.go`, wire it in `New`, then run `gofmt -w`.
 
-- [ ] **Step 4:** `make build test lint`, then `git add proto gen pkg/client && git commit -m "proto: DeployService"`.
+- [x] **Step 4:** `make build test lint`, then `git add proto gen pkg/client && git commit -m "proto: DeployService"`.
 
 ---
 
@@ -640,7 +640,7 @@ message PromoteDeployResponse {
 
 Values contract: `name`, `env`, `image`, `port`, `health`, `replicas` and `host` are used. The `forge:` block is ignored. The spec lists `name` and `env` implicitly through `forge:`; this task makes them top-level values for the chart.
 
-- [ ] **Step 1: The test input and the Makefile target first.** Create `deploy/argocd/chart/testdata/staging.yaml`:
+- [x] **Step 1: The test input and the Makefile target first.** Create `deploy/argocd/chart/testdata/staging.yaml`:
 
 ```yaml
 name: payments
@@ -671,9 +671,9 @@ chart-test: ## Render deploy/argocd/chart and compare it with its golden
 	  -f deploy/argocd/chart/testdata/staging.yaml | diff -u deploy/argocd/chart/testdata/staging.golden -
 ```
 
-- [ ] **Step 2:** `make chart-test`. Expected: fails, because the chart does not exist (`Error: path "deploy/argocd/chart" not found`).
+- [x] **Step 2:** `make chart-test`. Expected: fails, because the chart does not exist (`Error: path "deploy/argocd/chart" not found`).
 
-- [ ] **Step 3: The chart.**
+- [x] **Step 3: The chart.**
 
 `Chart.yaml`:
 
@@ -794,7 +794,7 @@ spec:
       default: {cpu: 500m, memory: 512Mi}
 ```
 
-- [ ] **Step 4: Generate the golden, then read it.** Run `go run helm.sh/helm/v3/cmd/helm@v3.21.4 template payments deploy/argocd/chart --namespace payments-staging -f deploy/argocd/chart/testdata/staging.yaml > deploy/argocd/chart/testdata/staging.golden`. Then read the file and check:
+- [x] **Step 4: Generate the golden, then read it.** Run `go run helm.sh/helm/v3/cmd/helm@v3.21.4 template payments deploy/argocd/chart --namespace payments-staging -f deploy/argocd/chart/testdata/staging.yaml > deploy/argocd/chart/testdata/staging.golden`. Then read the file and check:
   - image `ghcr.io/showmino/payments:1a2b3c4`, `containerPort: 9090`, both probes on `/ready` port 9090, `PORT` `"9090"`;
   - the Service maps 80→9090;
   - the HTTPRoute's parentRef has `sectionName: staging` and the hostname is `"payments.staging.10.150.1.222.nip.io"`;
@@ -802,14 +802,14 @@ spec:
   - no `forge:` content leaked into any object.
   Fix the templates until all of that holds, then regenerate.
 
-- [ ] **Step 5:** `make chart-test`. Expected: no diff, exit 0. Then add a step to `.github/workflows/ci.yml`'s `test` job, after the Go tests:
+- [x] **Step 5:** `make chart-test`. Expected: no diff, exit 0. Then add a step to `.github/workflows/ci.yml`'s `test` job, after the Go tests:
 
 ```yaml
       - name: Deploy chart golden
         run: make chart-test
 ```
 
-- [ ] **Step 6:** `make build test lint chart-test`, then `git add Makefile .github deploy/argocd && git commit -m "deploy/argocd: the service chart and its golden"`.
+- [x] **Step 6:** `make build test lint chart-test`, then `git add Makefile .github deploy/argocd && git commit -m "deploy/argocd: the service chart and its golden"`.
 
 ---
 
@@ -836,7 +836,7 @@ spec:
   - `func (c *Cluster) WaitServiceNamespace(ctx, service, env string, poll time.Duration) error`;
   - `func (c *Cluster) WriteServicePullSecret(ctx, service, env string) error`: guarded, and idempotent (AlreadyExists → nil).
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
 
 `internal/server/deploy_cluster_test.go`:
 
@@ -1011,9 +1011,9 @@ func TestArgo(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./internal/envtest ./internal/server -run 'TestRepo|TestArgo|TestWritePullSecretGuard|TestApplicationStatus'`. Expected: build failure (`undefined: Repo`, `undefined: labelDeployEnv`).
+- [x] **Step 2:** `go test ./internal/envtest ./internal/server -run 'TestRepo|TestArgo|TestWritePullSecretGuard|TestApplicationStatus'`. Expected: build failure (`undefined: Repo`, `undefined: labelDeployEnv`).
 
-- [ ] **Step 3: Implement the fakes** in `internal/envtest/envtest.go`:
+- [x] **Step 3: Implement the fakes** in `internal/envtest/envtest.go`:
   - **`Applications`:** add the var, and add it to `Dynamic()`'s list-kind map as `ApplicationList`.
   - **`Repo`:** an in-memory git repo. Commits are a slice of `{sha string; files map[string][]byte; message string; time time.Time}`. The SHA is `fmt.Sprintf("%040x", n)` for the n-th commit, starting at 1; a zero commit with no files is the initial state, so `Head` on a new repo returns the zero SHA. The tree id equals the commit SHA.
     - `Head` returns the last commit's SHA twice.
@@ -1026,7 +1026,7 @@ func TestArgo(t *testing.T) {
     1. creates the namespace if missing, with labels `app.kubernetes.io/managed-by: forge`, `forge.dev/service: <svc>`, `forge.dev/deploy-env: <env>`;
     2. if `Lag` has passed since that head was first seen, creates or updates the Application with `status.sync = {status: Synced, revisions: [chart, <head>]}` and `status.health`, which is `{status: Healthy}` or `{status: Degraded, message: Unhealthy[key]}`. Use `Create`, and on AlreadyExists, `Get` then `Update`.
 
-- [ ] **Step 4: Implement the cluster side** in `internal/server/env_cluster.go`:
+- [x] **Step 4: Implement the cluster side** in `internal/server/env_cluster.go`:
 
 ```go
 const labelDeployEnv = "forge.dev/deploy-env"
@@ -1131,9 +1131,9 @@ func (c *Cluster) WriteServicePullSecret(ctx context.Context, service, env strin
 
   `WaitServiceNamespace` takes `poll` as a parameter, because `Cluster` holds no timings. Add the `time` import.
 
-- [ ] **Step 5:** `go test -race ./internal/envtest ./internal/server`. Expected: PASS, the whole server suite included.
+- [x] **Step 5:** `go test -race ./internal/envtest ./internal/server`. Expected: PASS, the whole server suite included.
 
-- [ ] **Step 6:** `make build test lint`, then `git add internal/envtest internal/server && git commit -m "server: read Argo CD Applications and write service pull secrets; envtest Repo and Argo"`.
+- [x] **Step 6:** `make build test lint`, then `git add internal/envtest internal/server && git commit -m "server: read Argo CD Applications and write service pull secrets; envtest Repo and Argo"`.
 
 ---
 
@@ -1159,7 +1159,7 @@ func (c *Cluster) WriteServicePullSecret(ctx context.Context, service, env strin
   - `(d *Deploys) lock(target, opName string) error` and `unlock(target)`;
   - `(d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit string, st AppStatus) *forgev1.Deployment`.
 
-- [ ] **Step 1: Write the failing tests** `internal/server/deploys_test.go`:
+- [x] **Step 1: Write the failing tests** `internal/server/deploys_test.go`:
 
 ```go
 package server
@@ -1435,9 +1435,9 @@ func TestDeployConcurrencyAndConflict(t *testing.T) {
 
   `BeforeCommit` is cleared by the fake before it runs. The `bump` closure re-arms it, so every attempt races: three attempts, then `git_conflict`.
 
-- [ ] **Step 2:** `go test ./internal/server -run 'TestStartDeploy|TestDeployConcurrency'`. Expected: build failure, `undefined: Deploys`.
+- [x] **Step 2:** `go test ./internal/server -run 'TestStartDeploy|TestDeployConcurrency'`. Expected: build failure, `undefined: Deploys`.
 
-- [ ] **Step 3: `catalog.go`:** add
+- [x] **Step 3: `catalog.go`:** add
 
 ```go
 // ids returns the registered service ids, sorted.
@@ -1455,7 +1455,7 @@ func (c *Catalog) ids() []string {
 
   Add the `slices` import if it's missing.
 
-- [ ] **Step 4: Write `internal/server/deploys.go`**: the service, its values and records, and the reads.
+- [x] **Step 4: Write `internal/server/deploys.go`**: the service, its values and records, and the reads.
 
 ```go
 package server
@@ -1808,7 +1808,7 @@ func (d *Deploys) PromoteDeploy(context.Context, *connect.Request[forgev1.Promot
 
   `strings.SplitSeq` is in Go 1.24+.
 
-- [ ] **Step 5: Write `internal/server/deploy_work.go`**: start, the lock, commit-with-retry, namespace and sync.
+- [x] **Step 5: Write `internal/server/deploy_work.go`**: start, the lock, commit-with-retry, namespace and sync.
 
 ```go
 package server
@@ -2000,7 +2000,7 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 
   **`StartDeploy`'s `d.lock(target, "an operation")`** reserves the target before `Start`, and the next line replaces the placeholder with the real name while `d.mu` is still held. A concurrent caller therefore always sees a running entry.
 
-- [ ] **Step 6: Wire it.** In `server.go`, add to `Options`, after `Environments`:
+- [x] **Step 6: Wire it.** In `server.go`, add to `Options`, after `Environments`:
 
 ```go
 	// Deploys serves DeployService; nil answers FAILED_PRECONDITION. It must
@@ -2010,9 +2010,9 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 
   and register `mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))`.
 
-- [ ] **Step 7:** `go test -race -count=3 ./internal/server`. Expected: PASS, including every earlier test and `TestStartDeploy*` / `TestDeployConcurrencyAndConflict`.
+- [x] **Step 7:** `go test -race -count=3 ./internal/server`. Expected: PASS, including every earlier test and `TestStartDeploy*` / `TestDeployConcurrencyAndConflict`.
 
-- [ ] **Step 8:** `make build test lint`, then `git add internal/server && git commit -m "server: DeployService start, get and list"`.
+- [x] **Step 8:** `make build test lint`, then `git add internal/server && git commit -m "server: DeployService start, get and list"`.
 
 ---
 
@@ -2025,7 +2025,7 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 **Interfaces:**
 - Consumes: Task 6's `current`, `deploymentFrom`, `lock`/`unlock`, `apply`, `parseRecord`, `parseValues`, `valuesPath` and `deployFixture`.
 
-- [ ] **Step 1: Write the failing tests** `internal/server/deploys_more_test.go`:
+- [x] **Step 1: Write the failing tests** `internal/server/deploys_more_test.go`:
 
 ```go
 package server
@@ -2122,9 +2122,9 @@ func TestRollbackAndPromote(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./internal/server -run TestRollbackAndPromote`. Expected: FAIL (`Unimplemented`).
+- [x] **Step 2:** `go test ./internal/server -run TestRollbackAndPromote`. Expected: FAIL (`Unimplemented`).
 
-- [ ] **Step 3: Implement**, replacing the three methods in `deploys.go`:
+- [x] **Step 3: Implement**, replacing the three methods in `deploys.go`:
 
 ```go
 func (d *Deploys) ListDeployHistory(ctx context.Context, req *connect.Request[forgev1.ListDeployHistoryRequest]) (*connect.Response[forgev1.ListDeployHistoryResponse], error) {
@@ -2294,9 +2294,9 @@ func (d *Deploys) startMutation(ctx context.Context, kind, svc, env string, v de
 
   `StartDeploy` keeps its own code path because of the resolve/image steps and `request_id`; don't merge them.
 
-- [ ] **Step 4:** `go test -race -count=3 ./internal/server`. Expected: PASS.
+- [x] **Step 4:** `go test -race -count=3 ./internal/server`. Expected: PASS.
 
-- [ ] **Step 5:** `make build test lint`, then `git add internal/server && git commit -m "server: deploy history, rollback and promote"`.
+- [x] **Step 5:** `make build test lint`, then `git add internal/server && git commit -m "server: deploy history, rollback and promote"`.
 
 ---
 
@@ -2313,7 +2313,7 @@ func (d *Deploys) startMutation(ctx context.Context, kind, svc, env string, v de
   - `type deployFlags struct { on bool; repo, domain, syncTimeout string }`;
   - `func deploys(f deployFlags, app *github.App, previewDomain string, cluster *server.Cluster, images server.ImageChecker, catalog *server.Catalog, ops *server.Operations, org string, log *slog.Logger) (*server.Deploys, error)`.
 
-- [ ] **Step 1: Write the failing test** `cmd/forge-api/deploys_test.go`:
+- [x] **Step 1: Write the failing test** `cmd/forge-api/deploys_test.go`:
 
 ```go
 package main
@@ -2371,9 +2371,9 @@ func TestDeploys(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2:** `go test ./cmd/forge-api -run TestDeploys`. Expected: build failure, `undefined: deployFlags`.
+- [x] **Step 2:** `go test ./cmd/forge-api -run TestDeploys`. Expected: build failure, `undefined: deployFlags`.
 
-- [ ] **Step 3: Implement** `cmd/forge-api/deploys.go`:
+- [x] **Step 3: Implement** `cmd/forge-api/deploys.go`:
 
 ```go
 package main
@@ -2449,9 +2449,9 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 
   - **Wiring:** after `previews(...)`, call `deploys(deployFlags{on: *deploysOn, repo: *deployRepo, domain: *deployDomain, syncTimeout: env("FORGE_DEPLOY_SYNC_TIMEOUT", "10m")}, app, *previewDomain, cluster, images, catalog, ops, *githubOrg, log)`, log "deploys are off; set --deploys" when nil, and pass `Deploys: deps` in `server.Options`.
 
-- [ ] **Step 4:** `go test ./cmd/forge-api && go build ./...`. Expected: PASS.
+- [x] **Step 4:** `go test ./cmd/forge-api && go build ./...`. Expected: PASS.
 
-- [ ] **Step 5:** `make build test lint`, then `git add cmd/forge-api && git commit -m "forge-api: --deploys settings"`.
+- [x] **Step 5:** `make build test lint`, then `git add cmd/forge-api && git commit -m "forge-api: --deploys settings"`.
 
 ---
 
@@ -2486,9 +2486,9 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
   - Dry run: `Would promote <image> from <from> to <to>`.
   - Success prints the deployment.
 
-- [ ] **Step 1: Harness.** In `internal/cli/cli_test.go`, add the field `deploys *server.Deploys` and pass `Deploys: h.deploys` in `startAPI`'s Options.
+- [x] **Step 1: Harness.** In `internal/cli/cli_test.go`, add the field `deploys *server.Deploys` and pass `Deploys: h.deploys` in `startAPI`'s Options.
 
-- [ ] **Step 2: Write the failing tests** `internal/cli/deploy_test.go`:
+- [x] **Step 2: Write the failing tests** `internal/cli/deploy_test.go`:
 
 ```go
 package cli
@@ -2600,9 +2600,9 @@ func TestDeployFailureAndOff(t *testing.T) {
 
   Write `internal/cli/testdata/deploy_status_table.golden` by running `go test ./internal/cli -run TestDeployLifecycle -update`, then read it. It must hold the header `SERVICE   ENV   IMAGE   SYNC   HEALTH   DEPLOYED   BY   URL` (spacing as the table writer makes it) and the first row up to the actor, for example `payments   staging   1a2b3c4   synced   healthy   <1m   `. Check that before keeping it. The history test checks substrings, because its ages vary.
 
-- [ ] **Step 3:** `go test ./internal/cli -run 'TestDeploy'`. Expected: FAIL (`unknown command "deploy"`).
+- [x] **Step 3:** `go test ./internal/cli -run 'TestDeploy'`. Expected: FAIL (`unknown command "deploy"`).
 
-- [ ] **Step 4: Write `internal/cli/deploy.go`**:
+- [x] **Step 4: Write `internal/cli/deploy.go`**:
 
 ```go
 package cli
@@ -2780,11 +2780,11 @@ func (f *Factory) printDeployment(format output.Format, d *forgev1.Deployment) e
 
   `printStarted`, `sha7`, `age` and `opID` already exist in `internal/cli` (env.go and operation.go).
 
-- [ ] **Step 5: Register** `newDeployCmd(f)` in `root.go`'s core list after `newEnvCmd(f)`.
+- [x] **Step 5: Register** `newDeployCmd(f)` in `root.go`'s core list after `newEnvCmd(f)`.
 
-- [ ] **Step 6:** `go test -race ./internal/cli`. Expected: PASS.
+- [x] **Step 6:** `go test -race ./internal/cli`. Expected: PASS.
 
-- [ ] **Step 7:** `make build test lint`, then `git add internal/cli && git commit -m "cli: forge deploy start, status, history, rollback and promote"`.
+- [x] **Step 7:** `make build test lint`, then `git add internal/cli && git commit -m "cli: forge deploy start, status, history, rollback and promote"`.
 
 ---
 
@@ -2793,7 +2793,7 @@ func (f *Factory) printDeployment(format output.Format, d *forgev1.Deployment) e
 **Files:**
 - Modify: `.claude/skills/forge/SKILL.md`, `README.md`, `docs/plans/2026-10-09-phase-4-m1-deploy-engine.md` (tick boxes)
 
-- [ ] **Step 1:**
+- [x] **Step 1:**
   - **`SKILL.md`:** add the bullet `- **Phase 4 (in progress):** spec docs/specs/2026-10-09-phase-4-deployments-design.md. Milestone 1: deploy engine (DeployService, internal/server/deploy*.go, github.RepoFiles, deploy/argocd/chart with make chart-test, forge deploy) per docs/plans/2026-10-09-phase-4-m1-deploy-engine.md. Then milestone 2 (CI workload identity) and 3 (k3s and the exit gate).` after the Phase 3 backlog.
   - **README:** after the `forge env` paragraph, add a paragraph saying that `forge deploy start <svc> --env staging|production` commits the version to the deploy repo for Argo CD, with `status`, `history`, `rollback` and `promote`, served by forge-api with `--deploys`.
-- [ ] **Step 2:** `make build test lint chart-test`, then `git add -A .claude README.md docs && git commit -m "docs: Phase 4 milestone 1 (deploy engine)"`. Don't push; the push, PR and merge come after the final review.
+- [x] **Step 2:** `make build test lint chart-test`, then `git add -A .claude README.md docs && git commit -m "docs: Phase 4 milestone 1 (deploy engine)"`. Don't push; the push, PR and merge come after the final review.
