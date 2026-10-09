@@ -175,6 +175,8 @@ runs at (`GITHUB_SHA`), from the default branch, and follow that deploy.
 Production stays with humans (`forge deploy promote`). The runner must reach
 the API (`FORGE_API_URL`). forge-api checks the token's audience against
 `FORGE_GITHUB_OIDC_AUDIENCE` (default `forge`).
+forge-api serves the matching CLI for Linux at `$FORGE_API_URL/cli/forge-linux-amd64`
+(and `-arm64`), so a job needs no token for the forge repo.
 
 ## The API
 

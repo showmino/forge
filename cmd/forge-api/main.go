@@ -73,6 +73,8 @@ func run() error {
 		deploysOn    = flag.Bool("deploys", env("FORGE_DEPLOYS", "") == "1" || env("FORGE_DEPLOYS", "") == "true", "serve deploys to staging and production through Argo CD (needs --previews)")
 		deployRepo   = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", "showmino/forge-deploys"), "GitOps repo (owner/name) Forge commits deploys to")
 		deployDomain = flag.String("deploy-domain", env("FORGE_DEPLOY_DOMAIN", ""), "deploy hosts are <service>.<env>.<domain> (default: the preview domain without 'preview.')")
+
+		cliDir = flag.String("cli-dir", env("FORGE_CLI_DIR", ""), "directory of forge CLI builds served at /cli/forge-linux-<arch> for CI jobs")
 	)
 	flag.Parse()
 	if *printVersion {
@@ -164,6 +166,7 @@ func run() error {
 		Operations:       ops,
 		Environments:     envs,
 		Deploys:          deps,
+		CLIDir:           *cliDir,
 		Templates:        templates,
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,
