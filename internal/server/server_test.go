@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/pkg/client"
 )
 
@@ -167,6 +168,44 @@ func TestPermissions(t *testing.T) {
 	a.Grant(p)
 	if len(p.Permissions) != 2 {
 		t.Errorf("writer group: %v", p.Permissions)
+	}
+}
+
+// Dex's GitHub connector sends groups as "<org>:<team-slug>"; only the writer
+// team may write, and every member may read.
+func TestWriterGroupsGitHubTeams(t *testing.T) {
+	t.Parallel()
+	h, err := New(Options{
+		Authenticator: StaticAuthenticator{
+			"platform": {Subject: "ana", Groups: []string{"showmino:platform-engineering", "showmino:mino"}},
+			"member":   {Subject: "bo", Groups: []string{"showmino:test-team"}},
+			"nogroups": {Subject: "cy"},
+		},
+		Authorizer: Authorizer{WriterGroups: []string{"showmino:platform-engineering"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	client := forgev1connect.NewServiceCatalogServiceClient(srv.Client(), srv.URL)
+	ctx := context.Background()
+	reg := func(token, id string) error {
+		_, err := client.RegisterService(ctx, as(token, &forgev1.RegisterServiceRequest{
+			ServiceId: id, Service: &forgev1.Service{OwnerTeam: "billing"},
+		}))
+		return err
+	}
+	for _, token := range []string{"member", "nogroups"} {
+		if err := reg(token, "x-"+token); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "services.write") {
+			t.Errorf("%s register: %v", token, err)
+		}
+		if _, err := client.ListServices(ctx, as(token, &forgev1.ListServicesRequest{})); err != nil {
+			t.Errorf("%s list: %v", token, err)
+		}
+	}
+	if err := reg("platform", "payments"); err != nil {
+		t.Errorf("platform-engineering register: %v", err)
 	}
 }
 

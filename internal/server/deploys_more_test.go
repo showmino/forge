@@ -90,3 +90,14 @@ func TestRollbackAndPromote(t *testing.T) {
 		t.Errorf("limit 51: %v", err)
 	}
 }
+
+func TestStartDeployNeedsWrite(t *testing.T) {
+	t.Parallel()
+	f := newDeployFixture(t, true, nil)
+	for _, env := range []string{"staging", "production"} {
+		_, err := f.client.StartDeploy(context.Background(), as("reader", &forgev1.StartDeployRequest{Service: "services/payments", Env: env}))
+		if connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Errorf("reader deploy to %s: %v", env, err)
+		}
+	}
+}

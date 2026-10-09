@@ -313,3 +313,14 @@ func TestReaper(t *testing.T) {
 		t.Errorf("malformed expiry: %v", expiry(ns))
 	}
 }
+
+func TestCreateEnvironmentNeedsWrite(t *testing.T) {
+	t.Parallel()
+	f := newEnvFixture(t, false, nil)
+	_, err := f.client.CreateEnvironment(context.Background(), as("reader", &forgev1.CreateEnvironmentRequest{
+		Service: "services/payments", EnvironmentId: "pr-9",
+	}))
+	if connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Fatalf("reader create: %v", err)
+	}
+}
