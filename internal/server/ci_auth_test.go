@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -18,6 +19,7 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 )
 
 // actionsIssuer plays token.actions.githubusercontent.com: a JWKS endpoint at
@@ -292,5 +294,141 @@ func TestGitHubOIDCDefaults(t *testing.T) {
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("defaults %v, want %v", got, want)
+	}
+}
+
+// authFunc adapts a function to Authenticator.
+type authFunc func(ctx context.Context, token string) (*Principal, error)
+
+func (f authFunc) Authenticate(ctx context.Context, token string) (*Principal, error) {
+	return f(ctx, token)
+}
+
+// unsignedJWT is a JWT-shaped token with claims and no valid signature.
+func unsignedJWT(claims map[string]any) string {
+	b, _ := json.Marshal(claims)
+	return "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString(b) + ".c2ln"
+}
+
+func TestByIssuer(t *testing.T) {
+	t.Parallel()
+	var routed []string
+	gh := authFunc(func(_ context.Context, token string) (*Principal, error) {
+		routed = append(routed, "github")
+		return &Principal{Subject: "github:showmino/payments"}, nil
+	})
+	b := ByIssuer{
+		Default: StaticAuthenticator{"dev": {Subject: "dev"}},
+		Issuers: map[string]Authenticator{GitHubIssuer: gh},
+	}
+	ctx := context.Background()
+	if p, err := b.Authenticate(ctx, unsignedJWT(map[string]any{"iss": GitHubIssuer})); err != nil || p.Subject != "github:showmino/payments" {
+		t.Errorf("GitHub token: %+v %v", p, err)
+	}
+	if p, err := b.Authenticate(ctx, "dev"); err != nil || p.Subject != "dev" {
+		t.Errorf("non-JWT token to Default: %+v %v", p, err)
+	}
+	for _, tok := range []string{
+		unsignedJWT(map[string]any{"iss": "https://dex.example/dex"}),
+		unsignedJWT(map[string]any{"iss": GitHubIssuer + "/"}),
+		"a.b.c",
+		"a.!!!.c",
+		"",
+	} {
+		if _, err := b.Authenticate(ctx, tok); err == nil {
+			t.Errorf("%q: Default should reject it", tok)
+		}
+	}
+	if len(routed) != 1 {
+		t.Errorf("GitHub authenticator called %d times, want 1", len(routed))
+	}
+}
+
+func TestWorkloadInterceptor(t *testing.T) {
+	t.Parallel()
+	ci := Principal{
+		Subject: "github:showmino/payments", Permissions: []string{PermDeploy("payments", "staging")},
+		Workload: &Workload{Repository: "showmino/payments", Service: "payments", SHA: envSHA},
+	}
+	authn := authFunc(func(_ context.Context, token string) (*Principal, error) {
+		switch token {
+		case "ci":
+			c := ci
+			return &c, nil
+		case "writer":
+			return &Principal{Subject: "ana", Groups: []string{"platform"}}, nil
+		case "denied":
+			return nil, ciDenied("ref %q is not the default branch", "refs/heads/x")
+		}
+		return nil, errors.New("unknown token")
+	})
+	h, err := New(Options{Authenticator: authn, Authorizer: Authorizer{WriterGroups: []string{"platform"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	cat := forgev1connect.NewServiceCatalogServiceClient(srv.Client(), srv.URL)
+	authc := forgev1connect.NewAuthServiceClient(srv.Client(), srv.URL)
+	opc := forgev1connect.NewOperationServiceClient(srv.Client(), srv.URL)
+	envc := forgev1connect.NewEnvironmentServiceClient(srv.Client(), srv.URL)
+	ctx := context.Background()
+
+	for name, call := range map[string]func() error{
+		"ListServices": func() error {
+			_, err := cat.ListServices(ctx, as("ci", &forgev1.ListServicesRequest{}))
+			return err
+		},
+		"GetService": func() error {
+			_, err := cat.GetService(ctx, as("ci", &forgev1.GetServiceRequest{Name: "services/payments"}))
+			return err
+		},
+		"GetStatus": func() error {
+			_, err := authc.GetStatus(ctx, as("ci", &forgev1.GetStatusRequest{}))
+			return err
+		},
+		"ListOperations": func() error {
+			_, err := opc.ListOperations(ctx, as("ci", &forgev1.ListOperationsRequest{}))
+			return err
+		},
+		"CancelOperation": func() error {
+			_, err := opc.CancelOperation(ctx, as("ci", &forgev1.CancelOperationRequest{Name: "operations/op_000000000000"}))
+			return err
+		},
+		"CreateEnvironment": func() error {
+			_, err := envc.CreateEnvironment(ctx, as("ci", &forgev1.CreateEnvironmentRequest{}))
+			return err
+		},
+	} {
+		err := call()
+		if connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "CI token") {
+			t.Errorf("%s as CI: %v (want PermissionDenied from the interceptor)", name, err)
+		}
+	}
+
+	// Allowed procedures reach their handler; deploys are off here.
+	if _, err := forgev1connect.NewDeployServiceClient(srv.Client(), srv.URL).StartDeploy(ctx, as("ci", &forgev1.StartDeployRequest{})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("StartDeploy as CI with deploys off: %v", err)
+	}
+	// A *connect.Error from the Authenticator keeps its code; others are Unauthenticated.
+	if _, err := cat.ListServices(ctx, as("denied", &forgev1.ListServicesRequest{})); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "ref") {
+		t.Errorf("denied token: %v", err)
+	}
+	if _, err := cat.ListServices(ctx, as("bogus", &forgev1.ListServicesRequest{})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("bogus token: %v", err)
+	}
+	// Humans are unchanged.
+	if _, err := cat.ListServices(ctx, as("writer", &forgev1.ListServicesRequest{})); err != nil {
+		t.Errorf("writer: %v", err)
+	}
+	// Streaming calls are confined too.
+	stream, err := opc.WatchOperation(ctx, as("ci", &forgev1.WatchOperationRequest{Name: "operations/op_000000000000"}))
+	if err == nil {
+		for stream.Receive() {
+		}
+		err = stream.Err()
+	}
+	if c := connect.CodeOf(err); err == nil || c == connect.CodeUnauthenticated {
+		t.Errorf("WatchOperation as CI should pass the interceptor and fail in the handler: %v", err)
 	}
 }

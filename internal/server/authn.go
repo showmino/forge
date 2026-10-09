@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -95,6 +97,15 @@ func require(ctx context.Context, perm string) error {
 // public procedures need no credentials.
 var public = []string{forgev1connect.AuthServiceGetServerInfoProcedure}
 
+// workloadProcedures are the only RPCs a CI caller may make; their handlers
+// narrow each one to the caller's own service, staging and operations.
+var workloadProcedures = []string{
+	forgev1connect.DeployServiceStartDeployProcedure,
+	forgev1connect.DeployServiceGetDeploymentProcedure,
+	forgev1connect.OperationServiceGetOperationProcedure,
+	forgev1connect.OperationServiceWatchOperationProcedure,
+}
+
 // authInterceptor authenticates every call except the public ones.
 type authInterceptor struct {
 	authn Authenticator
@@ -106,7 +117,7 @@ func (i *authInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 		if slices.Contains(public, req.Spec().Procedure) {
 			return next(ctx, req)
 		}
-		ctx, err := i.authenticate(ctx, req.Header().Get("Authorization"))
+		ctx, err := i.authenticate(ctx, req.Spec().Procedure, req.Header().Get("Authorization"))
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +131,7 @@ func (i *authInterceptor) WrapStreamingClient(next connect.StreamingClientFunc) 
 
 func (i *authInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
 	return func(ctx context.Context, conn connect.StreamingHandlerConn) error {
-		ctx, err := i.authenticate(ctx, conn.RequestHeader().Get("Authorization"))
+		ctx, err := i.authenticate(ctx, conn.Spec().Procedure, conn.RequestHeader().Get("Authorization"))
 		if err != nil {
 			return err
 		}
@@ -128,16 +139,27 @@ func (i *authInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFunc
 	}
 }
 
-func (i *authInterceptor) authenticate(ctx context.Context, header string) (context.Context, error) {
+func (i *authInterceptor) authenticate(ctx context.Context, procedure, header string) (context.Context, error) {
 	token, ok := strings.CutPrefix(header, "Bearer ")
 	if !ok || token == "" {
 		return ctx, connect.NewError(connect.CodeUnauthenticated, errors.New("missing bearer token"))
 	}
 	p, err := i.authn.Authenticate(ctx, token)
 	if err != nil {
+		var ce *connect.Error
+		if errors.As(err, &ce) {
+			return ctx, err // the Authenticator chose the code (a CI token out of scope)
+		}
 		return ctx, connect.NewError(connect.CodeUnauthenticated, err)
 	}
-	i.authz.Grant(p)
+	if p.Workload != nil {
+		if !slices.Contains(workloadProcedures, procedure) {
+			return ctx, connect.NewError(connect.CodePermissionDenied,
+				fmt.Errorf("CI token %s may only start and follow its own staging deploy, not call %s", p.Subject, procedure))
+		}
+	} else {
+		i.authz.Grant(p)
+	}
 	return context.WithValue(ctx, principalKey{}, p), nil
 }
 
@@ -185,4 +207,40 @@ func (s StaticAuthenticator) Authenticate(_ context.Context, token string) (*Pri
 	c := p
 	c.Groups = slices.Clone(p.Groups)
 	return &c, nil
+}
+
+// ByIssuer sends a JWT whose iss claim is a key of Issuers to that
+// Authenticator, and every other token, JWT or not, to Default. The claim is
+// read unverified: the chosen Authenticator verifies the token, issuer included.
+type ByIssuer struct {
+	Default Authenticator
+	Issuers map[string]Authenticator
+}
+
+// Authenticate routes the token.
+func (b ByIssuer) Authenticate(ctx context.Context, token string) (*Principal, error) {
+	if a, ok := b.Issuers[unverifiedIssuer(token)]; ok {
+		return a.Authenticate(ctx, token)
+	}
+	return b.Default.Authenticate(ctx, token)
+}
+
+// unverifiedIssuer reads a JWT's iss claim without checking anything; "" when
+// the token is not a JWT.
+func unverifiedIssuer(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var c struct {
+		Iss string `json:"iss"`
+	}
+	if json.Unmarshal(payload, &c) != nil {
+		return ""
+	}
+	return c.Iss
 }
