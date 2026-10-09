@@ -380,8 +380,9 @@ func (a *Argo) sync(ctx context.Context, name, head string) error {
 	apps := a.Dynamic.Resource(Applications).Namespace(a.Namespace)
 	app := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "argoproj.io/v1alpha1", "kind": "Application",
-		"metadata": map[string]any{"name": name, "namespace": a.Namespace},
-		"status":   status,
+		"metadata": map[string]any{"name": name, "namespace": a.Namespace,
+			"labels": map[string]any{"app.kubernetes.io/managed-by": "forge"}},
+		"status": status,
 	}}
 	_, err := apps.Create(ctx, app, metav1.CreateOptions{})
 	if !apierrors.IsAlreadyExists(err) {

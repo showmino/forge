@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -448,6 +449,41 @@ func (c *Cluster) checkServiceNamespace(ctx context.Context, service, env string
 		return errUnlabelled
 	}
 	return nil
+}
+
+// ServiceNamespaceFree reports whether Forge may deploy into <service>-<env>:
+// it must not exist yet, or be one Argo CD made for Forge. On the one
+// production cluster, a namespace with that name that isn't Forge's is
+// someone else's, and Argo CD would otherwise take it over.
+func (c *Cluster) ServiceNamespaceFree(ctx context.Context, service, env string) error {
+	err := c.checkServiceNamespace(ctx, service, env)
+	switch {
+	case err == nil, errors.Is(err, errNoEnv) && !errors.Is(err, errUnlabelled):
+		return nil
+	case errors.Is(err, errUnlabelled):
+		return connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("namespace %s-%s exists and is not Forge's (it lacks Forge's labels); pick another service name or remove that namespace", service, env))
+	default:
+		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("check namespace %s-%s: %w", service, env, err))
+	}
+}
+
+// ApplicationFree reports whether Forge may use the Argo CD Application name:
+// it must not exist yet, or be one the ApplicationSet made (labelled
+// managed-by forge). Otherwise forge-api would report a foreign
+// Application's status and time out waiting for its own.
+func (c *Cluster) ApplicationFree(ctx context.Context, argoNamespace, name string) error {
+	u, err := c.Dynamic.Resource(applications).Namespace(argoNamespace).Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("check Argo CD Application %s/%s: %w", argoNamespace, name, err))
+	case u.GetLabels()[labelManagedBy] == "forge":
+		return nil
+	}
+	return connect.NewError(connect.CodeFailedPrecondition,
+		fmt.Errorf("Argo CD Application %s/%s exists and is not Forge's", argoNamespace, name)) //nolint:staticcheck // Argo CD is a proper noun
 }
 
 // WaitServiceNamespace waits until Argo CD has created <service>-<env>.

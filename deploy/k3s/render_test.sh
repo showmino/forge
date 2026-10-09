@@ -62,4 +62,41 @@ check "previews: valid YAML for kubectl"    sh -c "printf '%s' \"\$1\" | kubectl
 check "previews need an App"                sh -c "! FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad preview IP refused"              sh -c "! FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP='1.2.3.4;x' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad pull secret refused"             sh -c "! FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_PREVIEW_PULL_SECRET='A_b' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+rev=0123456789abcdef0123456789abcdef01234567
+dep=$(FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+# deploys_section: everything deploys.yaml.tmpl adds (from its first line to the end).
+deploys_section() { printf '%s\n' "$dep" | awk '/^# Deploys:/ {on=1} on'; }
+gateway_listeners() {
+  printf '%s\n' "$dep" | awk '$0 == "kind: Gateway" {on=1} on' | grep -qF 'name: staging' &&
+    printf '%s\n' "$dep" | grep -qF 'hostname: "*.staging.10.150.1.222.nip.io"' &&
+    printf '%s\n' "$dep" | grep -qF 'hostname: "*.production.10.150.1.222.nip.io"'
+}
+# gateway_of <render>: the Gateway section of a render.
+gateway_of() { printf '%s\n' "$1" | awk '$0 == "kind: Gateway" {on=1} on && /^---/ {on=0} on'; }
+listener_selectors() {
+  gateway_of "$dep" | grep -qF 'forge.dev/deploy-env: staging' &&
+    gateway_of "$dep" | grep -qF 'forge.dev/deploy-env: production'
+}
+no_listener_selectors() { ! gateway_of "$prev" | grep -qF 'forge.dev/deploy-env'; }
+deploys_exact() { deploys_section | cmp -s - "$dir/testdata/deploys.golden"; }
+# previews.golden is the render at 9bcbeff, before deploys existed.
+prev_unchanged() { printf '%s\n' "$prev" | cmp -s - "$dir/testdata/previews.golden"; }
+deny_destination() { printf '%s\n' "$dep" | grep -qF 'namespace: "!docs-dev-staging"}'; }
+
+check "deploys: forge-api setting"          sh -c "printf '%s' \"\$1\" | grep -qF 'FORGE_DEPLOYS, value: \"1\"'" _ "$dep"
+check "deploys: no FORGE_DEPLOYS without it" sh -c "! printf '%s' \"\$1\" | grep -qF FORGE_DEPLOYS" _ "$prev"
+check "deploys: gateway listeners"          gateway_listeners
+check "deploys: listeners select the staging and production namespaces" listener_selectors
+check "deploys: no env selectors without it" no_listener_selectors
+check "deploys: no listeners without it"    sh -c "! printf '%s' \"\$1\" | grep -qF '.staging.'" _ "$prev"
+check "deploys: Argo objects and RBAC exactly as reviewed" deploys_exact
+check "deploys: deny destination for docs-dev-staging" deny_destination
+check "deploys: chart pinned to the revision" sh -c "printf '%s' \"\$1\" | grep -qF 'targetRevision: $rev'" _ "$dep"
+check "deploys: no #deploys markers"        sh -c "! printf '%s' \"\$1\" | grep -qF '#deploys'" _ "$dep"
+check "deploys: valid YAML for kubectl"     sh -c "printf '%s' \"\$1\" | kubectl apply --dry-run=client -f - >/dev/null" _ "$dep"
+check "previews output unchanged by deploys support" prev_unchanged
+check "deploys need previews"               sh -c "! FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "deploys need a pinned chart revision" sh -c "! FORGE_DEPLOYS=1 FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "deploys refuse a branch as revision" sh -c "! FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=main FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "bad FORGE_DEPLOYS refused"           sh -c "! FORGE_DEPLOYS=yes FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 exit $fail

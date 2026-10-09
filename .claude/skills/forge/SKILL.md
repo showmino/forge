@@ -63,7 +63,7 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - Pods and inputs: no `runAsUser` (images with a named USER fail) and no `/tmp` emptyDir; caller labels could override ownership labels; `EnvGone` unguarded; image refs with digests accepted; `FORGE_PREVIEWS` accepts only 1/true and a bad `FORGE_PREVIEW_MAX` is reported as -1; `clip` may split UTF-8.
   - Tests: some timing-based tests (TestCreateNotReady's 100ms) and a near-tautological malformed-expiry test; the slash-in-ref test cannot see escaping.
   - go-grpc still targets Go 1.24 and golangci-lint v2.5.0 in the services it generates.
-- **Phase 4 (in progress):** spec docs/specs/2026-10-09-phase-4-deployments-design.md. Milestone 1 (done, PR #14): deploy engine (DeployService, internal/server/deploy*.go, github.RepoFiles, deploy/argocd/chart with make chart-test, forge deploy) per docs/plans/2026-10-09-phase-4-m1-deploy-engine.md. Milestone 2: CI workload identity (internal/server/ci_auth.go verifies GitHub Actions tokens, ByIssuer routes by iss, ci_scope.go confines workloads; internal/auth/actions.go and the CLI's Actions token pick-up) per docs/plans/2026-10-09-phase-4-m2-ci-identity.md. Then milestone 3 (k3s and the exit gate).
+- **Phase 4 (in progress):** spec docs/specs/2026-10-09-phase-4-deployments-design.md. Milestone 1 (done, PR #14): deploy engine (DeployService, internal/server/deploy*.go, github.RepoFiles, deploy/argocd/chart with make chart-test, forge deploy) per docs/plans/2026-10-09-phase-4-m1-deploy-engine.md. Milestone 2: CI workload identity (internal/server/ci_auth.go verifies GitHub Actions tokens, ByIssuer routes by iss, ci_scope.go confines workloads; internal/auth/actions.go and the CLI's Actions token pick-up) per docs/plans/2026-10-09-phase-4-m2-ci-identity.md. Milestone 3 (k3s and the exit gate, in progress): namespace and Application guards, `/cli/` download, render.sh's Argo CD objects, per docs/plans/2026-10-09-phase-4-m3-k3s-exit-gate.md.
 
   Phase 4 follow-up backlog:
   - Any workflow or event on the default branch (pull_request_target, workflow_dispatch, schedule) gets a deploy principal; consider pinning `event_name` / `job_workflow_ref`.
@@ -74,6 +74,9 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - `forge auth token` prints the Actions token unmasked.
   - The Actions token request ignores the command's context (30s cap).
   - The streaming client interceptor drops token errors.
+  - A ValidatingAdmissionPolicy binding forge-api's secret create and namespace patch/delete to Forge-labelled namespaces (today a compromised forge-api could write Argo `repository` secrets in `argocd`).
+  - Dex still has the demo password and `FORGE_WRITER_GROUPS` is empty, so any LAN user who logs in can deploy and promote to production.
+  - The GoReleaser image's `COPY ${TARGETPLATFORM}/forge` is unbuilt until the first release snapshot.
 - **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
 - **Later:** environments, resources (OpenTofu jobs).
 - **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP with Dex's demo password.

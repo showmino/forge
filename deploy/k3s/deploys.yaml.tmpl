@@ -1,0 +1,112 @@
+# Deploys: Forge's Argo CD objects and forge-api's read access to them.
+# render.sh adds this when FORGE_DEPLOYS=1.
+#   ${DEPLOY_CHART_REVISION}  forge commit the chart is taken from (pinned)
+# Applications are named <service>-<env> and deploy into the namespace of that
+# name; forge-api refuses a namespace that exists and isn't Forge's.
+# Existing namespaces named like *-staging or *-production that are not Forge's
+# must be listed in the AppProject as "!<name>" deny destinations (forge-api
+# refuses them too, but this stops Argo even if a directory is committed by hand).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: forge-services
+  namespace: argocd
+spec:
+  description: Forge services, deployed by forge-api through showmino/forge-deploys
+  sourceRepos:
+    - https://github.com/showmino/forge.git
+    - https://github.com/showmino/forge-deploys.git
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: "!docs-dev-staging"}
+    - {server: https://kubernetes.default.svc, namespace: "*-staging"}
+    - {server: https://kubernetes.default.svc, namespace: "*-production"}
+  clusterResourceWhitelist:
+    - {group: "", kind: Namespace}
+  namespaceResourceWhitelist:
+    - {group: apps, kind: Deployment}
+    - {group: "", kind: Service}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute}
+    - {group: "", kind: ResourceQuota}
+    - {group: "", kind: LimitRange}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: forge-services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/showmino/forge-deploys.git
+        revision: main
+        directories:
+          - path: services/*/staging
+          - path: services/*/production
+        # LAN-only, so no webhooks; Argo's default is 180s.
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{ index .path.segments 1 }}-{{ .path.basename }}'
+      labels:
+        app.kubernetes.io/managed-by: forge
+      # Deleting a services/<service>/<env> directory removes its workload too.
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: forge-services
+      sources:
+        - repoURL: https://github.com/showmino/forge.git
+          targetRevision: ${DEPLOY_CHART_REVISION}
+          path: deploy/argocd/chart
+          helm:
+            releaseName: '{{ index .path.segments 1 }}'
+            valueFiles:
+              - '$values/{{ .path.path }}/values.yaml'
+        - repoURL: https://github.com/showmino/forge-deploys.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ index .path.segments 1 }}-{{ .path.basename }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
+        syncOptions:
+          - CreateNamespace=true
+        managedNamespaceMetadata:
+          labels:
+            app.kubernetes.io/managed-by: forge
+            forge.dev/service: '{{ index .path.segments 1 }}'
+            forge.dev/deploy-env: '{{ .path.basename }}'
+---
+# forge-api reads Applications to report sync and health.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-applications
+  namespace: argocd
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-applications
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-applications
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}

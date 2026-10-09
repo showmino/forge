@@ -54,7 +54,7 @@ signs:
     artifacts: checksum
 
 dockers_v2:
-  - ids: [forge-api]
+  - ids: [forge-api, forge]
     images: ["ghcr.io/showmino/forge-api"]
     tags: ["{{ .Version }}", latest]
     dockerfile: build/forge-api.Dockerfile
