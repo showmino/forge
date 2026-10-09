@@ -68,6 +68,10 @@ func run() error {
 		previewGateway = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
 		previewPull    = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", "forge/mino-ghcr"), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images")
 		previewMax     = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
+
+		deploysOn    = flag.Bool("deploys", env("FORGE_DEPLOYS", "") == "1" || env("FORGE_DEPLOYS", "") == "true", "serve deploys to staging and production through Argo CD (needs --previews)")
+		deployRepo   = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", "showmino/forge-deploys"), "GitOps repo (owner/name) Forge commits deploys to")
+		deployDomain = flag.String("deploy-domain", env("FORGE_DEPLOY_DOMAIN", ""), "deploy hosts are <service>.<env>.<domain> (default: the preview domain without 'preview.')")
 	)
 	flag.Parse()
 	if *printVersion {
@@ -128,7 +132,7 @@ func run() error {
 		log.Info("creating services is off; set --github-app-id and --github-app-key-file")
 	}
 	catalog, ops := server.NewCatalog(nil), server.NewOperations(nil)
-	envs, err := previews(previewFlags{
+	envs, cluster, images, err := previews(previewFlags{
 		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, max: *previewMax,
 		imageTimeout: env("FORGE_PREVIEW_IMAGE_TIMEOUT", "10m"), readyTimeout: env("FORGE_PREVIEW_READY_TIMEOUT", "5m"),
 	}, app, catalog, ops, *githubOrg, log, kubeClients)
@@ -140,10 +144,20 @@ func run() error {
 	} else {
 		go envs.RunReaper(ctx, time.Minute)
 	}
+	deps, err := deploys(deployFlags{
+		on: *deploysOn, repo: *deployRepo, domain: *deployDomain, syncTimeout: env("FORGE_DEPLOY_SYNC_TIMEOUT", "10m"),
+	}, app, *previewDomain, cluster, images, catalog, ops, *githubOrg, log)
+	if err != nil {
+		return err
+	}
+	if deps == nil {
+		log.Info("deploys are off; set --deploys")
+	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,
 		Environments:     envs,
+		Deploys:          deps,
 		Templates:        templates,
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,

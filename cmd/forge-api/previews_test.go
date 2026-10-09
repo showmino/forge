@@ -30,10 +30,10 @@ func TestPreviews(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
 	cat, ops := server.NewCatalog(nil), server.NewOperations(nil)
 
-	if envs, err := previews(previewFlags{}, nil, cat, ops, "showmino", log, fakeKube); envs != nil || err != nil {
+	if envs, _, _, err := previews(previewFlags{}, nil, cat, ops, "showmino", log, fakeKube); envs != nil || err != nil {
 		t.Errorf("off: %v %v", envs, err)
 	}
-	if envs, err := previews(ok, app, cat, ops, "showmino", log, fakeKube); envs == nil || err != nil {
+	if envs, _, _, err := previews(ok, app, cat, ops, "showmino", log, fakeKube); envs == nil || err != nil {
 		t.Errorf("on: %v %v", envs, err)
 	}
 	for name, tc := range map[string]struct {
@@ -49,7 +49,7 @@ func TestPreviews(t *testing.T) {
 		"bad image t/o": {func() previewFlags { f := ok; f.imageTimeout = "soon"; return f }(), app, "FORGE_PREVIEW_IMAGE_TIMEOUT"},
 		"bad ready t/o": {func() previewFlags { f := ok; f.readyTimeout = "-1m"; return f }(), app, "FORGE_PREVIEW_READY_TIMEOUT"},
 	} {
-		if _, err := previews(tc.f, tc.app, cat, ops, "showmino", log, fakeKube); err == nil || !strings.Contains(err.Error(), tc.msg) {
+		if _, _, _, err := previews(tc.f, tc.app, cat, ops, "showmino", log, fakeKube); err == nil || !strings.Contains(err.Error(), tc.msg) {
 			t.Errorf("%s: %v, want an error mentioning %q", name, err, tc.msg)
 		}
 	}
