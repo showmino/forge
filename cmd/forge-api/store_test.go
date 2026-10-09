@@ -5,7 +5,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -84,5 +86,34 @@ func TestCatalogSurvivesRestart(t *testing.T) {
 	retry, err := client.RegisterService(ctx, authed(register))
 	if err != nil || retry.Msg.GetService().GetName() != "services/payments" {
 		t.Fatalf("retried request_id after restart: %v %v (want the stored service)", retry, err)
+	}
+}
+
+func TestOpenStoreBadURLDoesNotRetry(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	_, err := openStore(context.Background(), "postgres://u:p@h:notaport/db", quiet)
+	if err == nil {
+		t.Fatal("want an error for an invalid URL")
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("invalid URL took %v: it was retried", d)
+	}
+	if strings.Contains(err.Error(), ":p@") {
+		t.Fatalf("error leaks the password: %v", err)
+	}
+}
+
+func TestOpenStoreStopsOnCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := openStore(ctx, "postgres://u:p@127.0.0.1:1/db?connect_timeout=1", quiet)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("cancelled openStore took %v", d)
 	}
 }

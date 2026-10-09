@@ -2,16 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/showmino/forge/internal/store"
 )
 
 // openStore returns the service catalog's store: PostgreSQL at url, migrated,
 // or memory when url is empty. The database may start after forge-api (k3s),
-// so connecting is retried for about 45 seconds. Never log url: it holds the
+// so connecting is retried for about a minute (10 attempts, waiting 1.5s longer each time),
+// except for an invalid URL or a cancelled ctx, which fail at once. Never log url: it holds the
 // password.
 func openStore(ctx context.Context, url string, log *slog.Logger) (store.Store, error) {
 	if url == "" {
@@ -24,11 +28,16 @@ func openStore(ctx context.Context, url string, log *slog.Logger) (store.Store, 
 	)
 	for attempt := 1; ; attempt++ {
 		pg, err = store.OpenPostgres(ctx, url)
-		if err == nil || attempt == 10 || ctx.Err() != nil {
+		var bad *pgconn.ParseConfigError
+		if err == nil || attempt == 10 || errors.As(err, &bad) {
 			break
 		}
 		log.Info("waiting for the database", "attempt", attempt, "error", err)
-		time.Sleep(time.Duration(attempt) * time.Second)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("open the database: %w", ctx.Err())
+		case <-time.After(time.Duration(attempt) * 1500 * time.Millisecond):
+		}
 	}
 	if err != nil {
 		return nil, err
