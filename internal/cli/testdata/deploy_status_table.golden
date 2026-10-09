@@ -1,0 +1,2 @@
+SERVICE    ENV       IMAGE     SYNC     HEALTH    DEPLOYED   BY                URL
+payments   staging   1a2b3c4   synced   healthy   <1m        

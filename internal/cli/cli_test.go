@@ -35,6 +35,7 @@ type harness struct {
 	ops       *server.Operations
 	catalog   *server.Catalog
 	envs      *server.Environments
+	deploys   *server.Deploys
 }
 
 const (
@@ -72,6 +73,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Operations:    h.ops,
 		Catalog:       h.catalog,
 		Environments:  h.envs,
+		Deploys:       h.deploys,
 	})
 	if err != nil {
 		h.t.Fatal(err)
