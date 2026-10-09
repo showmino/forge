@@ -483,7 +483,7 @@ func (c *Cluster) ApplicationFree(ctx context.Context, argoNamespace, name strin
 		return nil
 	}
 	return connect.NewError(connect.CodeFailedPrecondition,
-		fmt.Errorf("Argo CD Application %s/%s exists and is not Forge's", argoNamespace, name))
+		fmt.Errorf("Argo CD Application %s/%s exists and is not Forge's", argoNamespace, name)) //nolint:staticcheck // Argo CD is a proper noun
 }
 
 // WaitServiceNamespace waits until Argo CD has created <service>-<env>.
