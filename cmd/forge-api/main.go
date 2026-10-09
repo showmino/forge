@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/server"
 	"github.com/showmino/forge/internal/version"
 )
@@ -153,6 +154,10 @@ func run() error {
 	}
 	if deps == nil {
 		log.Info("deploys are off; set --deploys")
+	} else {
+		audience := env("FORGE_GITHUB_OIDC_AUDIENCE", "forge")
+		authn = withCITokens(ctx, authn, audience, &github.Client{Token: app.Token}, catalog, *githubOrg)
+		log.Info("accepting GitHub Actions OIDC tokens for staging deploys", "issuer", server.GitHubIssuer, "audience", audience)
 	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,

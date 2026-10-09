@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"log/slog"
@@ -50,5 +51,21 @@ func TestDeploys(t *testing.T) {
 	}
 	if d, err := deploys(deployFlags{on: true, repo: "a/b", domain: "lan.example", syncTimeout: "1m", namespaceTimeout: "5m"}, app, "x.nip.io", cluster, &envtest.Images{}, cat, ops, "showmino", log); d == nil || err != nil {
 		t.Errorf("explicit domain: %v %v", d, err)
+	}
+}
+
+func TestWithCITokens(t *testing.T) {
+	t.Parallel()
+	base := server.StaticAuthenticator{"dev": {Subject: "dev"}}
+	got := withCITokens(t.Context(), base, "forge", nil, server.NewCatalog(nil), "showmino")
+	b, ok := got.(server.ByIssuer)
+	if !ok {
+		t.Fatalf("got %T, want server.ByIssuer", got)
+	}
+	if _, ok := b.Issuers[server.GitHubIssuer].(*server.GitHubOIDCAuthenticator); !ok || len(b.Issuers) != 1 {
+		t.Errorf("issuers: %v", b.Issuers)
+	}
+	if p, err := got.Authenticate(context.Background(), "dev"); err != nil || p.Subject != "dev" {
+		t.Errorf("the dev token must still work: %+v %v", p, err)
 	}
 }
