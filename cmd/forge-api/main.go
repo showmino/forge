@@ -1,6 +1,5 @@
-// Command forge-api is the Forge API server.
-//
-// Phase 1 serves the service catalog (in memory) and auth discovery. Callers
+// Command forge-api is the Forge API server: the service catalog (in memory),
+// templates and new services, operations and preview environments. Callers
 // authenticate with OIDC ID tokens from the configured issuer (Dex locally).
 package main
 
@@ -14,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,6 +36,16 @@ func env(key, def string) string {
 	return def
 }
 
+func envInt(key string, def int) int {
+	if v, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+		return -1 // invalid: --preview-max validation reports it
+	}
+	return def
+}
+
 func run() error {
 	var (
 		addr         = flag.String("addr", env("FORGE_API_ADDR", ":8080"), "listen address")
@@ -52,6 +62,12 @@ func run() error {
 		appID         = flag.String("github-app-id", env("FORGE_GITHUB_APP_ID", ""), "GitHub App ID forge-api acts as")
 		appKey        = flag.String("github-app-key-file", env("FORGE_GITHUB_APP_KEY_FILE", ""), "file with the GitHub App's private key (PEM)")
 		githubOrg     = flag.String("github-org", env("FORGE_GITHUB_ORG", "showmino"), "GitHub org the App is installed on")
+
+		previewsOn     = flag.Bool("previews", env("FORGE_PREVIEWS", "") == "1" || env("FORGE_PREVIEWS", "") == "true", "serve preview environments (needs the GitHub App and Kubernetes access)")
+		previewDomain  = flag.String("preview-domain", env("FORGE_PREVIEW_DOMAIN", ""), "preview hosts are <environment>.<domain>, for example preview.10.150.1.222.nip.io")
+		previewGateway = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
+		previewPull    = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", "forge/mino-ghcr"), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images")
+		previewMax     = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
 	)
 	flag.Parse()
 	if *printVersion {
@@ -111,7 +127,23 @@ func run() error {
 	if app == nil {
 		log.Info("creating services is off; set --github-app-id and --github-app-key-file")
 	}
+	catalog, ops := server.NewCatalog(nil), server.NewOperations(nil)
+	envs, err := previews(previewFlags{
+		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, max: *previewMax,
+		imageTimeout: env("FORGE_PREVIEW_IMAGE_TIMEOUT", "10m"), readyTimeout: env("FORGE_PREVIEW_READY_TIMEOUT", "5m"),
+	}, app, catalog, ops, *githubOrg, log, kubeClients)
+	if err != nil {
+		return err
+	}
+	if envs == nil {
+		log.Info("preview environments are off; set --previews")
+	} else {
+		go envs.RunReaper(ctx, time.Minute)
+	}
 	h, err := server.New(server.Options{
+		Catalog:          catalog,
+		Operations:       ops,
+		Environments:     envs,
 		Templates:        templates,
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,

@@ -1,6 +1,6 @@
 // Package manifest reads and writes forge.yaml, the per-repo source of truth
-// for a service's catalog entry. Phase 1 covers the catalog fields; later
-// phases add environments and resources.
+// for a service's catalog entry. Phase 1 covers the catalog fields; Phase 3
+// adds run, how a preview environment runs the service.
 package manifest
 
 import (
@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,6 +28,38 @@ type Manifest struct {
 	Service    Service `yaml:"service"`
 	// Namespace is the default namespace for commands run inside the repo.
 	Namespace string `yaml:"namespace,omitempty"`
+	// Run says how preview environments run the service.
+	Run *Run `yaml:"run,omitempty"`
+}
+
+// Defaults for a manifest without run settings.
+const (
+	DefaultRunPort   = 8080
+	DefaultRunHealth = "/healthz"
+)
+
+// Run says how preview environments run the service.
+type Run struct {
+	// Port the service listens on for HTTP.
+	Port int `yaml:"port,omitempty"`
+	// Health is the HTTP path probed for readiness and liveness.
+	Health string `yaml:"health,omitempty"`
+}
+
+// RunPort returns run.port or DefaultRunPort.
+func (m *Manifest) RunPort() int {
+	if m.Run != nil && m.Run.Port != 0 {
+		return m.Run.Port
+	}
+	return DefaultRunPort
+}
+
+// RunHealth returns run.health or DefaultRunHealth.
+func (m *Manifest) RunHealth() string {
+	if m.Run != nil && m.Run.Health != "" {
+		return m.Run.Health
+	}
+	return DefaultRunHealth
 }
 
 // Service is the catalog part of the manifest.
@@ -61,6 +94,14 @@ func (m *Manifest) Validate() error {
 	case "", "experimental", "production", "deprecated":
 	default:
 		return fmt.Errorf("service.lifecycle %q must be experimental, production or deprecated", m.Service.Lifecycle)
+	}
+	if r := m.Run; r != nil {
+		if r.Port < 0 || r.Port > 65535 {
+			return fmt.Errorf("run.port %d must be 1-65535", r.Port)
+		}
+		if r.Health != "" && !strings.HasPrefix(r.Health, "/") {
+			return fmt.Errorf("run.health %q must be an absolute path such as /healthz", r.Health)
+		}
 	}
 	return nil
 }

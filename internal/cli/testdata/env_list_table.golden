@@ -1,0 +1,2 @@
+NAME   SERVICE    STATE   REF    COMMIT    EXPIRES   URL
+pr-1   payments   ready   main   1a2b3c4   in 23h    http://pr-1.preview.example

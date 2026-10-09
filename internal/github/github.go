@@ -1,5 +1,5 @@
 // Package github is a small client for the GitHub REST API: what Forge needs
-// and nothing more. App authentication is in app.go; milestone 3 adds repo creation.
+// and nothing more. App authentication is in app.go; repos.go creates repos and commits.go reads refs, files and CI runs.
 package github
 
 import (

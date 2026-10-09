@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "forge/v1/operation.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// EnvironmentService runs a service's CI image in a short-lived preview
+// environment: one Kubernetes namespace with a URL and a TTL. Resource names
+// follow AIP style: "environments/{environment}".
+service EnvironmentService {
+  // CreateEnvironment checks the request, resolves the ref and starts an
+  // operation that waits for the image, creates the namespace and waits
+  // until the service is ready. validate_only returns the environment it
+  // would create, without an operation.
+  rpc CreateEnvironment(CreateEnvironmentRequest) returns (CreateEnvironmentResponse) {}
+
+  // GetEnvironment returns one environment with its live readiness.
+  rpc GetEnvironment(GetEnvironmentRequest) returns (GetEnvironmentResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListEnvironments returns every environment, by name.
+  rpc ListEnvironments(ListEnvironmentsRequest) returns (ListEnvironmentsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ExtendEnvironment sets the expiry to now plus ttl.
+  rpc ExtendEnvironment(ExtendEnvironmentRequest) returns (ExtendEnvironmentResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
+
+  // DestroyEnvironment starts an operation that removes the environment.
+  rpc DestroyEnvironment(DestroyEnvironmentRequest) returns (DestroyEnvironmentResponse) {}
+}
+
+// Environment is one preview environment.
+message Environment {
+  // State is where the environment is in its life.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_CREATING = 1;
+    STATE_READY = 2;
+    STATE_FAILED = 3;
+    STATE_DESTROYING = 4;
+  }
+
+  // "environments/{environment}".
+  string name = 1;
+  // "services/{service}".
+  string service = 2;
+  // The ref as given: a branch, tag or commit.
+  string ref = 3;
+  // The full commit SHA the ref resolved to.
+  string commit = 4;
+  // The image it runs, for example "ghcr.io/showmino/payments:1a2b3c4".
+  string image = 5;
+  // Where it is reached, for example "http://pr-142.preview.10.150.1.222.nip.io".
+  string url = 6;
+  State state = 7;
+  // Why it is not ready or failed, for example "ImagePullBackOff".
+  string state_message = 8;
+  // The Kubernetes namespace, "preview-{environment}".
+  string namespace = 9;
+  // Subject of the caller that created it.
+  string creator = 10;
+  google.protobuf.Timestamp create_time = 11;
+  google.protobuf.Timestamp expire_time = 12;
+  // The newest operation on it, while forge-api still has it in memory.
+  string operation = 13;
+}
+
+message CreateEnvironmentRequest {
+  // The new environment's name without "environments/": a DNS label of at
+  // most 40 characters.
+  string environment_id = 1;
+  // "services/{service}": a catalog service with a GitHub repo.
+  string service = 2;
+  // Branch, tag or commit to run; default "main".
+  string ref = 3;
+  // Lifetime, 1h to 168h; default 24h.
+  google.protobuf.Duration ttl = 4;
+  // Retries with the same request_id return the same operation.
+  string request_id = 5;
+  // Check and resolve only; create nothing.
+  bool validate_only = 6;
+}
+
+message CreateEnvironmentResponse {
+  // Unset when validate_only.
+  Operation operation = 1;
+  // What will be (or, with validate_only, would be) created.
+  Environment environment = 2;
+}
+
+message GetEnvironmentRequest {
+  // "environments/{environment}".
+  string name = 1;
+}
+
+message GetEnvironmentResponse {
+  Environment environment = 1;
+}
+
+message ListEnvironmentsRequest {
+  // Only environments of this service, "services/{service}".
+  string service = 1;
+}
+
+message ListEnvironmentsResponse {
+  repeated Environment environments = 1;
+}
+
+message ExtendEnvironmentRequest {
+  // "environments/{environment}".
+  string name = 1;
+  // New lifetime from now, 1h to 168h.
+  google.protobuf.Duration ttl = 2;
+}
+
+message ExtendEnvironmentResponse {
+  Environment environment = 1;
+}
+
+message DestroyEnvironmentRequest {
+  // "environments/{environment}".
+  string name = 1;
+  // Check only; destroy nothing.
+  bool validate_only = 2;
+}
+
+message DestroyEnvironmentResponse {
+  // Unset when validate_only.
+  Operation operation = 1;
+  Environment environment = 2;
+}

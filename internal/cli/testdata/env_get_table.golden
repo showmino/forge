@@ -1,0 +1,10 @@
+FIELD       VALUE
+name        environments/pr-1
+service     services/payments
+state       ready
+ref         main
+commit      1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d
+image       ghcr.io/showmino/payments:1a2b3c4
+url         http://pr-1.preview.example
+namespace   preview-pr-1
+creator     ana
