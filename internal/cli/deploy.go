@@ -70,6 +70,11 @@ func newDeployStartCmd(f *Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if ref == "" {
+				if sha, _ := f.Env("GITHUB_SHA"); sha != "" {
+					ref = sha // in GitHub Actions: the commit the job runs at
+				}
+			}
 			format, err := f.Format()
 			if err != nil {
 				return err
@@ -98,7 +103,7 @@ func newDeployStartCmd(f *Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&env, "env", "", "staging or production")
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit (default main)")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit (default $GITHUB_SHA in GitHub Actions, else main)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check and resolve without deploying")
 	cmd.Flags().BoolVar(&wait, "wait", true, "watch the deploy until it ends")
 	return cmd
