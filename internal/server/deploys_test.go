@@ -22,13 +22,14 @@ import (
 // (repo showmino/payments, run port 9090 health /ready), main at envSHA,
 // its image present, and envtest.Argo playing Argo CD unless noArgo.
 type deployFixture struct {
-	cluster *Cluster
-	repo    *envtest.Repo
-	images  *envtest.Images
-	ops     *Operations
-	deploys *Deploys
-	client  forgev1connect.DeployServiceClient
-	argo    *envtest.Argo
+	opsClient forgev1connect.OperationServiceClient
+	cluster   *Cluster
+	repo      *envtest.Repo
+	images    *envtest.Images
+	ops       *Operations
+	deploys   *Deploys
+	client    forgev1connect.DeployServiceClient
+	argo      *envtest.Argo
 }
 
 func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *envtest.Argo)) *deployFixture {
@@ -71,6 +72,14 @@ func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *env
 		Authenticator: StaticAuthenticator{
 			"writer": {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}},
 			"reader": {Subject: "bo", Groups: []string{"dev"}},
+			"ci": {
+				Subject: "github:showmino/payments", Permissions: []string{PermDeploy("payments", "staging")},
+				Workload: &Workload{Repository: "showmino/payments", Service: "payments", SHA: envSHA},
+			},
+			"ci-billing": {
+				Subject: "github:showmino/billing", Permissions: []string{PermDeploy("billing", "staging")},
+				Workload: &Workload{Repository: "showmino/billing", Service: "billing", SHA: envSHA},
+			},
 		},
 		Authorizer: Authorizer{WriterGroups: []string{"platform"}},
 		Catalog:    catalog, Operations: f.ops, Deploys: f.deploys,
@@ -81,6 +90,7 @@ func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *env
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	f.client = forgev1connect.NewDeployServiceClient(srv.Client(), srv.URL)
+	f.opsClient = forgev1connect.NewOperationServiceClient(srv.Client(), srv.URL)
 	return f
 }
 

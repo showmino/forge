@@ -421,14 +421,24 @@ func TestWorkloadInterceptor(t *testing.T) {
 	if _, err := cat.ListServices(ctx, as("writer", &forgev1.ListServicesRequest{})); err != nil {
 		t.Errorf("writer: %v", err)
 	}
-	// Streaming calls are confined too.
+	// Streaming calls are confined too: an allowed one reaches its handler
+	// (NotFound for an unknown operation), a denied one stops at the interceptor.
 	stream, err := opc.WatchOperation(ctx, as("ci", &forgev1.WatchOperationRequest{Name: "operations/op_000000000000"}))
 	if err == nil {
 		for stream.Receive() {
 		}
 		err = stream.Err()
 	}
-	if c := connect.CodeOf(err); err == nil || c == connect.CodeUnauthenticated {
-		t.Errorf("WatchOperation as CI should pass the interceptor and fail in the handler: %v", err)
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("WatchOperation as CI should reach the handler and be NotFound: %v", err)
+	}
+	denied, err := cat.CreateService(ctx, as("ci", &forgev1.CreateServiceRequest{}))
+	if err == nil {
+		for denied.Receive() {
+		}
+		err = denied.Err()
+	}
+	if connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "CI token") {
+		t.Errorf("CreateService stream as CI: %v (want PermissionDenied naming the CI token)", err)
 	}
 }

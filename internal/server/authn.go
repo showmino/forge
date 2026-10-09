@@ -47,8 +47,6 @@ type Workload struct {
 func PermDeploy(service, env string) string { return "deploy:" + service + ":" + env }
 
 // workloadOf returns the caller's Workload, or nil for a human.
-//
-//nolint:unused // used by the CI handlers (later task)
 func workloadOf(ctx context.Context) *Workload {
 	if p, ok := PrincipalFrom(ctx); ok {
 		return p.Workload

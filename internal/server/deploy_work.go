@@ -49,10 +49,11 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err := validEnv(m.GetEnv()); err != nil {
 		return nil, err
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
+	ref, err := startRef(ctx, m.GetService(), m.GetEnv(), m.GetRef())
+	if err != nil {
 		return nil, err
 	}
-	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, m.GetService(), m.GetRef())
+	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, m.GetService(), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +71,7 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if key := m.GetRequestId(); key != "" {
-		if name, ok := d.requests[key]; ok {
+		if name, ok := d.requests[requestKey(ctx, key)]; ok {
 			if op, ok := d.o.Operations.Get(name); ok {
 				return connect.NewResponse(&forgev1.StartDeployResponse{Operation: op, Deployment: preview}), nil
 			}
@@ -89,7 +90,7 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	})
 	d.running[target] = op.GetName()
 	if key := m.GetRequestId(); key != "" {
-		d.requests[key] = op.GetName()
+		d.requests[requestKey(ctx, key)] = op.GetName()
 	}
 	return connect.NewResponse(&forgev1.StartDeployResponse{Operation: op, Deployment: preview}), nil
 }

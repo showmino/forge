@@ -66,7 +66,7 @@ type Deploys struct {
 	mu sync.Mutex
 	// running maps "<service>/<env>" to its running mutation.
 	running map[string]string
-	// requests maps StartDeploy request_ids to their operation.
+	// requests maps a caller's StartDeploy request_id (requestKey) to its operation.
 	requests map[string]string
 }
 
@@ -270,11 +270,16 @@ func (d *Deploys) GetDeployment(ctx context.Context, req *connect.Request[forgev
 	if err := d.ready(); err != nil {
 		return nil, err
 	}
-	if err := require(ctx, PermServicesRead); err != nil {
-		return nil, err
+	if workloadOf(ctx) == nil {
+		if err := require(ctx, PermServicesRead); err != nil {
+			return nil, err
+		}
 	}
 	svc, env, err := parseDeployName(req.Msg.GetName())
 	if err != nil {
+		return nil, err
+	}
+	if err := ownDeployment(ctx, svc, env); err != nil {
 		return nil, err
 	}
 	v, commit, err := d.current(ctx, svc, env)
