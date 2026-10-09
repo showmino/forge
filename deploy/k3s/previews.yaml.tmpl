@@ -93,3 +93,23 @@ spec:
           selector:
             matchLabels:
               app.kubernetes.io/managed-by: forge
+    - name: staging #deploys
+      protocol: HTTP #deploys
+      port: 80 #deploys
+      hostname: "*.staging.${PREVIEW_IP}.nip.io" #deploys
+      allowedRoutes: #deploys
+        namespaces: #deploys
+          from: Selector #deploys
+          selector: #deploys
+            matchLabels: #deploys
+              app.kubernetes.io/managed-by: forge #deploys
+    - name: production #deploys
+      protocol: HTTP #deploys
+      port: 80 #deploys
+      hostname: "*.production.${PREVIEW_IP}.nip.io" #deploys
+      allowedRoutes: #deploys
+        namespaces: #deploys
+          from: Selector #deploys
+          selector: #deploys
+            matchLabels: #deploys
+              app.kubernetes.io/managed-by: forge #deploys

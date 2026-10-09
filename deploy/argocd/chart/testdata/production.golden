@@ -1,0 +1,86 @@
+---
+# Source: forge-service/templates/limits.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: forge
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
+    pods: "10"
+---
+# Source: forge-service/templates/limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: forge
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {cpu: 500m, memory: 512Mi}
+---
+# Source: forge-service/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments
+spec:
+  selector: {app: payments}
+  ports:
+    - {name: http, port: 80, targetPort: 9090}
+---
+# Source: forge-service/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  labels: {app: payments}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: payments}
+  template:
+    metadata:
+      labels: {app: payments}
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: forge-pull
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: payments
+          image: ghcr.io/showmino/payments:1a2b3c4
+          ports:
+            - {name: http, containerPort: 9090}
+          env:
+            - {name: PORT, value: "9090"}
+          readinessProbe:
+            httpGet: {path: /ready, port: 9090}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /ready, port: 9090}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+# Source: forge-service/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: payments
+spec:
+  parentRefs:
+    - {name: forge-previews, namespace: forge, sectionName: production}
+  hostnames: ["payments.production.10.150.1.222.nip.io"]
+  rules:
+    - backendRefs:
+        - {name: payments, port: 80}

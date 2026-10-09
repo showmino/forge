@@ -108,3 +108,29 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge
 kubectl delete ns forge
 kubectl delete clusterrole,clusterrolebinding forge-api-previews
 ```
+
+## Deploys (Phase 4)
+
+Render with deploys on (needs previews and a pinned forge commit for the chart):
+
+```sh
+FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse HEAD) FORGE_PREVIEW_IP=<gateway-ip> FORGE_GITHUB_APP_ID=<app-id> ... \
+  deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+```
+
+Check the ApplicationSet generated its Applications:
+
+```sh
+kubectl -n argocd get applicationset forge-services -o jsonpath='{.status.conditions}'
+```
+
+Tear down a service: delete the `services/<svc>` directory in `forge-deploys`,
+wait for the Applications to disappear, then delete the `<svc>-staging` and
+`<svc>-production` namespaces.
+
+Remove the Argo objects and forge-api's access:
+
+```sh
+kubectl -n argocd delete applicationset,appproject forge-services
+kubectl -n argocd delete role,rolebinding forge-api-applications
+```

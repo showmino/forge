@@ -24,6 +24,10 @@
 # Gateway and the pull secret in namespace forge (default mino-ghcr); lines in
 # forge.yaml.tmpl with a trailing "previews" marker exist only then:
 #   FORGE_PREVIEW_IP=10.150.1.222 FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
+#
+# Deploys (forge deploy) need previews, plus the forge commit Argo CD takes the
+# chart from; lines with a trailing "deploys" marker exist only then:
+#   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse HEAD) FORGE_PREVIEW_IP=... | kubectl apply -f -
 set -eu
 
 usage() {
@@ -95,6 +99,22 @@ if [ -n "$preview_ip" ]; then
 else
   previews='/#previews$/d' # no previews: drop the preview lines
 fi
+deploys=${FORGE_DEPLOYS:-}
+chart_rev=${FORGE_DEPLOY_CHART_REVISION:-}
+case $deploys in
+  ''|1) ;;
+  *) echo "invalid FORGE_DEPLOYS: $deploys (use 1)" >&2; exit 2 ;;
+esac
+if [ -n "$deploys" ]; then
+  [ -n "$preview_ip" ] || { echo "FORGE_DEPLOYS needs FORGE_PREVIEW_IP" >&2; exit 2; }
+  case $chart_rev in
+    *[!0-9a-f]*|'') echo "FORGE_DEPLOYS needs FORGE_DEPLOY_CHART_REVISION, a 40-character commit SHA" >&2; exit 2 ;;
+  esac
+  [ ${#chart_rev} -eq 40 ] || { echo "FORGE_DEPLOY_CHART_REVISION must be a full commit SHA" >&2; exit 2; }
+  deploys_marks='s/ *#deploys$//'
+else
+  deploys_marks='/#deploys$/d'
+fi
 if [ -n "$app_id" ]; then
   app='s/ *#app$//' # keep the App lines, drop their marker
 else
@@ -113,7 +133,11 @@ fi
     echo "---"
     cat "$dir/previews.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$previews" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+  if [ -n "$deploys" ]; then
+    echo "---"
+    cat "$dir/deploys.yaml.tmpl"
+  fi
+} | sed -e "$app" -e "$previews" -e "$deploys_marks" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g"

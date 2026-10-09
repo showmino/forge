@@ -230,6 +230,14 @@ The pull-secret write needs no new permission: Phase 3's ClusterRole already all
   - The org variable `FORGE_API_URL` points at the API.
 - **Deploy:** `forge deploy start --env staging`.
 
+**As built (milestone 3):**
+
+- The runner scale set is `kube-runners` (Argo app `action-runner-set`), so `runs-on: kube-runners`.
+- The CI job downloads the CLI from forge-api (`$FORGE_API_URL/cli/forge-linux-<arch>`) instead of `go install`, so it needs no token for the private forge repo.
+- The chart revision is a pinned commit (`FORGE_DEPLOY_CHART_REVISION`).
+- Generated Applications carry Argo's resources finalizer.
+- forge-api refuses a `<service>-<env>` namespace that exists and isn't Forge's.
+
 ## 6. Errors, security and testing
 
 ### Errors

@@ -109,6 +109,20 @@ FORGE_PREVIEW_IP=<gateway-ip> FORGE_PREVIEW_PULL_SECRET=<secret> FORGE_GITHUB_AP
 
 Previews are then reached at `http://<env>.preview.<gateway-ip>.nip.io`.
 
+Deploys (`forge deploy`) need previews, the GitOps repo `showmino/forge-deploys`
+(private, with an initial commit), and the forge commit Argo CD takes the chart
+from:
+
+```sh
+FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse HEAD) FORGE_PREVIEW_IP=<gateway-ip> ... \
+  deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+```
+
+This adds the Argo CD AppProject and ApplicationSet `forge-services`, a Role
+that lets forge-api read Applications, and the Gateway listeners for
+`http://<service>.staging.<gateway-ip>.nip.io` and `.production.`. Argo CD's
+repo credentials must be able to read both repos.
+
 Both the CLI and the forge-api pod must reach Dex at the same issuer URL
 (`http://dex.<node-ip or dex-ip>.nip.io/dex`), which is why Dex is exposed
 outside the cluster rather than called by its Service name. Change the static
