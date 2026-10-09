@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -18,6 +16,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/manifest"
+	"github.com/showmino/forge/internal/store"
 )
 
 const (
@@ -26,74 +25,76 @@ const (
 	servicePrefix   = "services/"
 )
 
-// Catalog is an in-memory ServiceCatalogService. Phase 2 replaces the storage
-// with PostgreSQL behind the same handler.
+// Catalog is the ServiceCatalogService. Its rules live here; a store.Store
+// keeps the services (in memory, or PostgreSQL in production).
 type Catalog struct {
-	mu       sync.Mutex
-	services map[string]*forgev1.Service // by resource name
-	revision map[string]int64
-	// idempotency remembers RegisterService results by request_id.
-	idempotency map[string]*forgev1.Service
-	now         func() time.Time
+	store store.Store
+	now   func() time.Time
 }
 
-// NewCatalog returns an empty catalog.
-func NewCatalog(now func() time.Time) *Catalog {
+// NewCatalog returns an empty catalog in memory.
+func NewCatalog(now func() time.Time) *Catalog { return NewCatalogWithStore(store.NewMemory(), now) }
+
+// NewCatalogWithStore returns a catalog kept in s.
+func NewCatalogWithStore(s store.Store, now func() time.Time) *Catalog {
 	if now == nil {
 		now = time.Now
 	}
-	return &Catalog{
-		services:    map[string]*forgev1.Service{},
-		revision:    map[string]int64{},
-		idempotency: map[string]*forgev1.Service{},
-		now:         now,
+	return &Catalog{store: s, now: now}
+}
+
+// storeErr passes connect errors through and turns a storage failure into
+// Unavailable.
+func storeErr(err error) error {
+	var ce *connect.Error
+	if err == nil || errors.As(err, &ce) {
+		return err
 	}
+	return connect.NewError(connect.CodeUnavailable, fmt.Errorf("service catalog storage: %w", err))
 }
 
 // has reports whether a service is registered under name.
-func (c *Catalog) has(name string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, ok := c.services[name]
-	return ok
+func (c *Catalog) has(ctx context.Context, name string) (bool, error) {
+	_, _, err := c.store.Get(ctx, name)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, storeErr(err)
 }
 
 // ids returns the registered service ids, sorted.
-func (c *Catalog) ids() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := make([]string, 0, len(c.services))
-	for name := range c.services {
-		out = append(out, strings.TrimPrefix(name, servicePrefix))
+func (c *Catalog) ids(ctx context.Context) ([]string, error) {
+	names, err := c.store.Names(ctx)
+	if err != nil {
+		return nil, storeErr(err)
 	}
-	slices.Sort(out)
-	return out
+	for i, n := range names {
+		names[i] = strings.TrimPrefix(n, servicePrefix)
+	}
+	return names, nil
 }
 
-// get returns a copy of the service registered under name.
-func (c *Catalog) get(name string) (*forgev1.Service, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	s, ok := c.services[name]
-	if !ok {
-		return nil, false
+// get returns the service registered under name: a NotFound error when
+// there is none.
+func (c *Catalog) get(ctx context.Context, name string) (*forgev1.Service, error) {
+	s, _, err := c.store.Get(ctx, name)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, notFound(name)
 	}
-	return cloneSvc(s), true
+	return s, storeErr(err)
 }
 
 // servicesForRepo returns the ids, sorted, of the services whose repo_url is
 // https://github.com/<org>/<repo>, both compared case-insensitively.
-func (c *Catalog) servicesForRepo(org, repo string) []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var ids []string
-	for name, s := range c.services {
-		if _, r, ok := repoOf(s.GetRepoUrl(), org); ok && strings.EqualFold(r, repo) {
-			ids = append(ids, strings.TrimPrefix(name, servicePrefix))
-		}
+func (c *Catalog) servicesForRepo(ctx context.Context, org, repo string) ([]string, error) {
+	names, err := c.store.ForRepo(ctx, org, repo)
+	if err != nil {
+		return nil, storeErr(err)
 	}
-	slices.Sort(ids)
-	return ids
+	for i, n := range names {
+		names[i] = strings.TrimPrefix(n, servicePrefix)
+	}
+	return names, nil
 }
 
 func (c *Catalog) ListServices(ctx context.Context, req *connect.Request[forgev1.ListServicesRequest]) (*connect.Response[forgev1.ListServicesResponse], error) {
@@ -119,25 +120,14 @@ func (c *Catalog) ListServices(ctx context.Context, req *connect.Request[forgev1
 		after = string(b)
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	names := make([]string, 0, len(c.services))
-	for n, s := range c.services {
-		if m.GetOwnerTeam() != "" && s.GetOwnerTeam() != m.GetOwnerTeam() {
-			continue
-		}
-		if n > after {
-			names = append(names, n)
-		}
+	svcs, err := c.store.List(ctx, store.ListQuery{OwnerTeam: m.GetOwnerTeam(), After: after, Limit: size + 1})
+	if err != nil {
+		return nil, storeErr(err)
 	}
-	sort.Strings(names)
-	resp := &forgev1.ListServicesResponse{}
-	for i, n := range names {
-		if i == size {
-			resp.NextPageToken = base64.RawURLEncoding.EncodeToString([]byte(names[i-1]))
-			break
-		}
-		resp.Services = append(resp.Services, cloneSvc(c.services[n]))
+	resp := &forgev1.ListServicesResponse{Services: svcs}
+	if len(svcs) > size {
+		resp.Services = svcs[:size]
+		resp.NextPageToken = base64.RawURLEncoding.EncodeToString([]byte(svcs[size-1].GetName()))
 	}
 	return connect.NewResponse(resp), nil
 }
@@ -150,13 +140,11 @@ func (c *Catalog) GetService(ctx context.Context, req *connect.Request[forgev1.G
 	if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	s, ok := c.services[name]
-	if !ok {
-		return nil, notFound(name)
+	s, err := c.get(ctx, name)
+	if err != nil {
+		return nil, err
 	}
-	return connect.NewResponse(&forgev1.GetServiceResponse{Service: cloneSvc(s)}), nil
+	return connect.NewResponse(&forgev1.GetServiceResponse{Service: s}), nil
 }
 
 func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forgev1.RegisterServiceRequest]) (*connect.Response[forgev1.RegisterServiceResponse], error) {
@@ -176,33 +164,48 @@ func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forg
 	}
 	name := servicePrefix + m.GetServiceId()
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if key := m.GetRequestId(); key != "" {
-		if prev, ok := c.idempotency[key]; ok {
-			return connect.NewResponse(&forgev1.RegisterServiceResponse{Service: cloneSvc(prev)}), nil
+	var out *forgev1.Service
+	err := c.store.Write(ctx, func(tx store.Tx) error {
+		if key := m.GetRequestId(); key != "" {
+			prev, err := tx.Recall(ctx, key)
+			if err == nil {
+				out = prev
+				return nil
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
 		}
+		switch _, _, err := tx.Get(ctx, name); {
+		case err == nil:
+			return connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s already exists", name))
+		case !errors.Is(err, store.ErrNotFound):
+			return err
+		}
+		if err := checkDependencies(ctx, tx, name, in); err != nil {
+			return err
+		}
+		s := cloneSvc(in)
+		s.Name = name
+		now := timestamppb.New(c.now())
+		s.CreateTime, s.UpdateTime = now, now
+		s.Etag = etag(1)
+		out = s
+		if m.GetValidateOnly() {
+			return nil
+		}
+		if err := tx.Put(ctx, s, 1); err != nil {
+			return err
+		}
+		if key := m.GetRequestId(); key != "" {
+			return tx.Remember(ctx, key, s)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, storeErr(err)
 	}
-	if _, exists := c.services[name]; exists {
-		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s already exists", name))
-	}
-	if err := c.checkDependencies(name, in); err != nil {
-		return nil, err
-	}
-	s := cloneSvc(in)
-	s.Name = name
-	now := timestamppb.New(c.now())
-	s.CreateTime, s.UpdateTime = now, now
-	s.Etag = etag(1)
-	if m.GetValidateOnly() {
-		return connect.NewResponse(&forgev1.RegisterServiceResponse{Service: s}), nil
-	}
-	c.services[name] = s
-	c.revision[name] = 1
-	if key := m.GetRequestId(); key != "" {
-		c.idempotency[key] = s
-	}
-	return connect.NewResponse(&forgev1.RegisterServiceResponse{Service: cloneSvc(s)}), nil
+	return connect.NewResponse(&forgev1.RegisterServiceResponse{Service: out}), nil
 }
 
 // updatable lists the field mask paths UpdateService accepts.
@@ -230,49 +233,55 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		}
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cur, ok := c.services[name]
-	if !ok {
-		return nil, notFound(name)
-	}
-	if in.GetEtag() != "" && in.GetEtag() != cur.GetEtag() {
-		return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, in.GetEtag(), cur.GetEtag()))
-	}
-	next := cloneSvc(cur)
-	for _, p := range paths {
-		switch p {
-		case "display_name":
-			next.DisplayName = in.GetDisplayName()
-		case "owner_team":
-			next.OwnerTeam = in.GetOwnerTeam()
-		case "owners":
-			next.Owners = slices.Clone(in.GetOwners())
-		case "lifecycle":
-			next.Lifecycle = in.GetLifecycle()
-		case "repo_url":
-			next.RepoUrl = in.GetRepoUrl()
-		case "dependencies":
-			next.Dependencies = slices.Clone(in.GetDependencies())
-		case "labels":
-			next.Labels = in.GetLabels()
+	var out *forgev1.Service
+	err = c.store.Write(ctx, func(tx store.Tx) error {
+		cur, rev, err := tx.Get(ctx, name)
+		if errors.Is(err, store.ErrNotFound) {
+			return notFound(name)
 		}
+		if err != nil {
+			return err
+		}
+		if in.GetEtag() != "" && in.GetEtag() != cur.GetEtag() {
+			return connect.NewError(connect.CodeAborted, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, in.GetEtag(), cur.GetEtag()))
+		}
+		next := cur // the store returned a copy
+		for _, p := range paths {
+			switch p {
+			case "display_name":
+				next.DisplayName = in.GetDisplayName()
+			case "owner_team":
+				next.OwnerTeam = in.GetOwnerTeam()
+			case "owners":
+				next.Owners = slices.Clone(in.GetOwners())
+			case "lifecycle":
+				next.Lifecycle = in.GetLifecycle()
+			case "repo_url":
+				next.RepoUrl = in.GetRepoUrl()
+			case "dependencies":
+				next.Dependencies = slices.Clone(in.GetDependencies())
+			case "labels":
+				next.Labels = in.GetLabels()
+			}
+		}
+		if err := validateService(next); err != nil {
+			return err
+		}
+		if err := checkDependencies(ctx, tx, name, next); err != nil {
+			return err
+		}
+		next.UpdateTime = timestamppb.New(c.now())
+		next.Etag = etag(rev + 1)
+		out = next
+		if req.Msg.GetValidateOnly() {
+			return nil
+		}
+		return tx.Put(ctx, next, rev+1)
+	})
+	if err != nil {
+		return nil, storeErr(err)
 	}
-	if err := validateService(next); err != nil {
-		return nil, err
-	}
-	if err := c.checkDependencies(name, next); err != nil {
-		return nil, err
-	}
-	rev := c.revision[name] + 1
-	next.UpdateTime = timestamppb.New(c.now())
-	next.Etag = etag(rev)
-	if req.Msg.GetValidateOnly() {
-		return connect.NewResponse(&forgev1.UpdateServiceResponse{Service: next}), nil
-	}
-	c.services[name] = next
-	c.revision[name] = rev
-	return connect.NewResponse(&forgev1.UpdateServiceResponse{Service: cloneSvc(next)}), nil
+	return connect.NewResponse(&forgev1.UpdateServiceResponse{Service: out}), nil
 }
 
 func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev1.DeleteServiceRequest]) (*connect.Response[forgev1.DeleteServiceResponse], error) {
@@ -283,37 +292,49 @@ func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cur, ok := c.services[name]
-	if !ok {
-		return nil, notFound(name)
-	}
-	if e := req.Msg.GetEtag(); e != "" && e != cur.GetEtag() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, e, cur.GetEtag()))
-	}
-	for other, s := range c.services {
-		if other != name && slices.Contains(s.GetDependencies(), name) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is a dependency of %s", name, other))
+	err = c.store.Write(ctx, func(tx store.Tx) error {
+		cur, _, err := tx.Get(ctx, name)
+		if errors.Is(err, store.ErrNotFound) {
+			return notFound(name)
 		}
-	}
-	if !req.Msg.GetValidateOnly() {
-		delete(c.services, name)
-		delete(c.revision, name)
+		if err != nil {
+			return err
+		}
+		if e := req.Msg.GetEtag(); e != "" && e != cur.GetEtag() {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, e, cur.GetEtag()))
+		}
+		deps, err := tx.Dependents(ctx, name)
+		if err != nil {
+			return err
+		}
+		if len(deps) > 0 {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is a dependency of %s", name, deps[0]))
+		}
+		if req.Msg.GetValidateOnly() {
+			return nil
+		}
+		return tx.Delete(ctx, name)
+	})
+	if err != nil {
+		return nil, storeErr(err)
 	}
 	return connect.NewResponse(&forgev1.DeleteServiceResponse{}), nil
 }
 
 // checkDependencies requires every dependency of the service called name to be
 // another registered service, so DeleteService's check is never undermined by
-// dangling references. The caller holds c.mu.
-func (c *Catalog) checkDependencies(name string, s *forgev1.Service) error {
+// dangling references.
+func checkDependencies(ctx context.Context, tx store.Tx, name string, s *forgev1.Service) error {
 	for _, d := range s.GetDependencies() {
 		if d == name {
 			return invalid(fmt.Sprintf("%s cannot depend on itself", name))
 		}
-		if _, ok := c.services[d]; !ok {
+		_, _, err := tx.Get(ctx, d)
+		if errors.Is(err, store.ErrNotFound) {
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("dependency %s is not registered", d))
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return nil

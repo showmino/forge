@@ -160,11 +160,15 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 // error before any side effect).
 func (c *creator) create(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) (*forgev1.CreateServiceResponse, error) {
 	id := req.GetServiceId()
-	if c.catalog.has(servicePrefix + id) {
+	exists, err := c.catalog.has(ctx, servicePrefix+id)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s%s already exists", servicePrefix, id))
 	}
 	if c.repos != nil {
-		exists, err := c.repos.RepoExists(ctx, c.org, id)
+		exists, err = c.repos.RepoExists(ctx, c.org, id)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("check github.com/%s/%s: %w", c.org, id, err))
 		}
