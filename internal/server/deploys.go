@@ -323,24 +323,166 @@ func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forg
 	return connect.NewResponse(&forgev1.ListDeploymentsResponse{Deployments: out}), nil
 }
 
-// ListDeployHistory, RollbackDeploy and PromoteDeploy: Task 7.
-func (d *Deploys) ListDeployHistory(context.Context, *connect.Request[forgev1.ListDeployHistoryRequest]) (*connect.Response[forgev1.ListDeployHistoryResponse], error) {
+func (d *Deploys) ListDeployHistory(ctx context.Context, req *connect.Request[forgev1.ListDeployHistoryRequest]) (*connect.Response[forgev1.ListDeployHistoryResponse], error) {
 	if err := d.ready(); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("ListDeployHistory is not implemented yet"))
+	if err := require(ctx, PermServicesRead); err != nil {
+		return nil, err
+	}
+	svc, env, err := parseDeployName(req.Msg.GetName())
+	if err != nil {
+		return nil, err
+	}
+	limit := int(req.Msg.GetLimit())
+	switch {
+	case limit == 0:
+		limit = 20
+	case limit < 0 || limit > 50:
+		return nil, invalidArg("limit %d must be 1 to 50", limit)
+	}
+	recs, err := d.history(ctx, svc, env, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*forgev1.DeployRecord, 0, len(recs))
+	for _, r := range recs {
+		pr := &forgev1.DeployRecord{DeployCommit: r.DeployCommit, Kind: r.Kind, Image: r.Image, Ref: r.Ref, Commit: r.Commit, Actor: r.Actor, Operation: r.Operation}
+		if t, err := time.Parse(time.RFC3339, r.Time); err == nil {
+			pr.Time = timestamppb.New(t)
+		}
+		out = append(out, pr)
+	}
+	return connect.NewResponse(&forgev1.ListDeployHistoryResponse{Records: out}), nil
 }
 
-func (d *Deploys) RollbackDeploy(context.Context, *connect.Request[forgev1.RollbackDeployRequest]) (*connect.Response[forgev1.RollbackDeployResponse], error) {
-	if err := d.ready(); err != nil {
-		return nil, err
+// history returns Forge's records of svc/env, newest first.
+func (d *Deploys) history(ctx context.Context, svc, env string, limit int) ([]deployRecord, error) {
+	commits, err := d.o.Repo.History(ctx, valuesPath(svc, env), limit)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("deploy repo history: %w", err))
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("RollbackDeploy is not implemented yet"))
+	var out []deployRecord
+	for _, c := range commits {
+		if r, ok := parseRecord(c.SHA, c.Message, c.Time); ok {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
-func (d *Deploys) PromoteDeploy(context.Context, *connect.Request[forgev1.PromoteDeployRequest]) (*connect.Response[forgev1.PromoteDeployResponse], error) {
+func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forgev1.RollbackDeployRequest]) (*connect.Response[forgev1.RollbackDeployResponse], error) {
 	if err := d.ready(); err != nil {
 		return nil, err
 	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("PromoteDeploy is not implemented yet"))
+	svc, env, err := parseDeployName(req.Msg.GetName())
+	if err != nil {
+		return nil, err
+	}
+	if err := require(ctx, PermServicesWrite); err != nil {
+		return nil, err
+	}
+	recs, err := d.history(ctx, svc, env, 50)
+	if err != nil {
+		return nil, err
+	}
+	var target *deployRecord
+	switch to := req.Msg.GetTo(); {
+	case to == "" && len(recs) < 2:
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s/%s has no earlier deploy to roll back to", deployNamePrefix, svc, env))
+	case to == "":
+		target = &recs[1]
+	default:
+		for i := range recs {
+			if recs[i].DeployCommit == to || (len(to) >= 7 && strings.HasPrefix(recs[i].DeployCommit, to)) {
+				target = &recs[i]
+				break
+			}
+		}
+		if target == nil {
+			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no deploy %s in the last 50 of %s%s/%s", to, deployNamePrefix, svc, env))
+		}
+	}
+	data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), target.DeployCommit)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read %s: %w", shortSHA(target.DeployCommit), err))
+	}
+	v, err := parseValues(data)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	v.Forge.Kind, v.Forge.Actor = kindRollback, actorOf(ctx)
+	preview := d.deploymentFrom(svc, env, v, "", AppStatus{})
+	if req.Msg.GetValidateOnly() {
+		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
+	}
+	op, err := d.startMutation(ctx, kindRollback, svc, env, v)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&forgev1.RollbackDeployResponse{Operation: op, Deployment: preview}), nil
+}
+
+func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev1.PromoteDeployRequest]) (*connect.Response[forgev1.PromoteDeployResponse], error) {
+	if err := d.ready(); err != nil {
+		return nil, err
+	}
+	from, to := req.Msg.GetFrom(), req.Msg.GetTo()
+	if from == "" {
+		from = "staging"
+	}
+	if to == "" {
+		to = "production"
+	}
+	if err := validEnv(from); err != nil {
+		return nil, err
+	}
+	if err := validEnv(to); err != nil {
+		return nil, err
+	}
+	if slices.Index(deployEnvs, to) != slices.Index(deployEnvs, from)+1 {
+		return nil, invalidArg("promote goes one step forward: staging to production")
+	}
+	svc, ok := strings.CutPrefix(req.Msg.GetService(), servicePrefix)
+	if !ok || svc == "" {
+		return nil, invalidArg("service %q must be services/<name>", req.Msg.GetService())
+	}
+	if err := require(ctx, PermServicesWrite); err != nil {
+		return nil, err
+	}
+	src, _, err := d.current(ctx, svc, from)
+	if connect.CodeOf(err) == connect.CodeNotFound {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s has nothing in %s to promote", req.Msg.GetService(), from))
+	}
+	if err != nil {
+		return nil, err
+	}
+	v := src
+	v.Env, v.Host = to, d.host(svc, to)
+	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
+	preview := d.deploymentFrom(svc, to, v, "", AppStatus{})
+	if req.Msg.GetValidateOnly() {
+		return connect.NewResponse(&forgev1.PromoteDeployResponse{Deployment: preview}), nil
+	}
+	op, err := d.startMutation(ctx, kindPromote, svc, to, v)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&forgev1.PromoteDeployResponse{Operation: op, Deployment: preview}), nil
+}
+
+// startMutation locks svc/env and starts an operation that applies v.
+func (d *Deploys) startMutation(ctx context.Context, kind, svc, env string, v deployValues) (*forgev1.Operation, error) {
+	target := svc + "/" + env
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.lock(target, "an operation"); err != nil {
+		return nil, err
+	}
+	op := d.o.Operations.Start(ctx, kind, deployNamePrefix+target, v.Forge.Actor, func(ctx context.Context, emit func(string, string)) error {
+		defer d.unlock(target)
+		return d.apply(ctx, svc, env, v, emit)
+	})
+	d.running[target] = op.GetName()
+	return op, nil
 }
