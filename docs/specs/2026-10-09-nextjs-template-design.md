@@ -50,10 +50,10 @@ This also closes the Phase 3 backlog item "no `/tmp` emptyDir".
 | --- | --- |
 | `app/layout.tsx`, `app/page.tsx` | Root layout and a Tailwind-styled starter page showing the service name, its team, and pointers to `forge deploy status` and the README. |
 | `app/api/healthz/route.ts` | `GET` returns `200 ok` as text; `export const dynamic = "force-dynamic"` so it is never cached. |
-| `app/globals.css`, `postcss.config.mjs` | Tailwind 4 (`@import "tailwindcss"`, `@tailwindcss/postcss`). |
-| `lib/greeting.ts`, `lib/greeting.test.ts` | A small function the page uses, and its Vitest test, so `npm test` tests something real. |
-| `next.config.ts` | `output: "standalone"`. |
-| `tsconfig.json`, `eslint.config.mjs`, `vitest.config.ts` | Strict TypeScript; Next's ESLint config; Vitest. |
+| `app/globals.css` | Tailwind 4 (`@import "tailwindcss"`) through `@tailwindcss/turbopack`, configured in `next.config.ts`; there is no `postcss.config.mjs`. |
+| `lib/display-name.ts`, `lib/display-name.test.ts` | A small function the page uses, and its Vitest test, so `npm test` tests something real. |
+| `next.config.ts` | `output: "standalone"`, `experimental.isrFlushToDisk: false` (the root filesystem is read-only, so revalidated pages stay in memory), and the Turbopack Tailwind loader. |
+| `tsconfig.json`, `eslint.config.mjs`, `vitest.config.mts` | Strict TypeScript; Next's ESLint config; Vitest. |
 | `package.json` | `name` is the service name. Scripts: `dev`, `build`, `start`, `lint`, `typecheck` (`tsc --noEmit`), `test` (`vitest run`). `engines.node` `>=24`. |
 | `package-lock.json` | Committed for reproducible `npm ci`. Its `name` fields are templated with the service name. Generated with npm from the rendered `package.json`. |
 | `forge.yaml` | Service, team, owners and repo, as go-grpc renders them. `run.port` is the parameter; `run.health: /api/healthz`. |
