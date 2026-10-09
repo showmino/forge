@@ -76,13 +76,13 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - The Actions token request ignores the command's context (30s cap).
   - The streaming client interceptor drops token errors.
   - A ValidatingAdmissionPolicy binding forge-api's secret create and namespace patch/delete to Forge-labelled namespaces (today a compromised forge-api could write Argo `repository` secrets in `argocd`).
-  - Dex still has the demo password and `FORGE_WRITER_GROUPS` is empty, so any LAN user who logs in can deploy and promote to production.
+  - Resolved by the groundwork: Dex uses GitHub login, and writes need the `showmino:platform-engineering` group (`FORGE_WRITER_GROUPS`).
   - Database backups: `forge-db` (CloudNativePG) has none yet.
   - The GoReleaser image's `COPY ${TARGETPLATFORM}/forge` is unbuilt until the first release snapshot.
 - **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
 - **Groundwork (done):** k3s login through GitHub (writer group `showmino:platform-engineering`), and CloudNativePG `forge-db` holds the catalog and Dex's logins (spec docs/specs/2026-10-09-groundwork-auth-storage-design.md).
 - **Later:** environments, resources (OpenTofu jobs).
-- **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP with Dex's demo password.
+- **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP. The demo Dex password is resolved by the groundwork (GitHub login).
 
 ## Common mistakes
 
