@@ -1,0 +1,173 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "forge/v1/operation.proto";
+import "google/protobuf/timestamp.proto";
+
+// DeployService ships catalog services to the staging and production
+// environments. Every change is a commit to Forge's GitOps repo, which Argo CD
+// applies; mutations return an Operation that ends when Argo CD reports the
+// new version Synced and Healthy. Names: "deployments/{service}/{env}".
+service DeployService {
+  // StartDeploy deploys ref (default main) of service to env.
+  rpc StartDeploy(StartDeployRequest) returns (StartDeployResponse) {}
+
+  // GetDeployment returns what runs in one environment.
+  rpc GetDeployment(GetDeploymentRequest) returns (GetDeploymentResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListDeployments returns every deployment, by service then environment.
+  rpc ListDeployments(ListDeploymentsRequest) returns (ListDeploymentsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListDeployHistory returns one environment's changes, newest first.
+  rpc ListDeployHistory(ListDeployHistoryRequest) returns (ListDeployHistoryResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // RollbackDeploy restores an earlier deploy of one environment.
+  rpc RollbackDeploy(RollbackDeployRequest) returns (RollbackDeployResponse) {}
+
+  // PromoteDeploy copies what runs in one environment to the next.
+  rpc PromoteDeploy(PromoteDeployRequest) returns (PromoteDeployResponse) {}
+}
+
+// Deployment is what runs for one service in one environment.
+message Deployment {
+  // SyncStatus is Argo CD's sync status.
+  enum SyncStatus {
+    SYNC_STATUS_UNSPECIFIED = 0;
+    SYNC_STATUS_SYNCED = 1;
+    SYNC_STATUS_OUT_OF_SYNC = 2;
+    SYNC_STATUS_UNKNOWN = 3;
+  }
+  // Health is Argo CD's health status.
+  enum Health {
+    HEALTH_UNSPECIFIED = 0;
+    HEALTH_HEALTHY = 1;
+    HEALTH_PROGRESSING = 2;
+    HEALTH_DEGRADED = 3;
+    HEALTH_MISSING = 4;
+    HEALTH_SUSPENDED = 5;
+    HEALTH_UNKNOWN = 6;
+  }
+
+  // "deployments/{service}/{env}".
+  string name = 1;
+  // "services/{service}".
+  string service = 2;
+  // "staging" or "production".
+  string env = 3;
+  string image = 4;
+  string ref = 5;
+  // The service commit that runs.
+  string commit = 6;
+  string url = 7;
+  SyncStatus sync = 8;
+  Health health = 9;
+  // Argo CD's condition or health message, when there is one.
+  string message = 10;
+  // The deploy repo commit that set this version.
+  string deploy_commit = 11;
+  string deployed_by = 12;
+  google.protobuf.Timestamp deploy_time = 13;
+  // The newest operation on it, while forge-api still has it in memory.
+  string operation = 14;
+}
+
+// DeployRecord is one change of one environment.
+message DeployRecord {
+  string deploy_commit = 1;
+  // "deploy", "rollback" or "promote".
+  string kind = 2;
+  string image = 3;
+  string ref = 4;
+  string commit = 5;
+  string actor = 6;
+  google.protobuf.Timestamp time = 7;
+  string operation = 8;
+}
+
+message StartDeployRequest {
+  // "services/{service}".
+  string service = 1;
+  // "staging" or "production".
+  string env = 2;
+  // Branch, tag or commit; default main.
+  string ref = 3;
+  // Retries with the same request_id return the same operation.
+  string request_id = 4;
+  // Check and resolve only; change nothing.
+  bool validate_only = 5;
+}
+
+message StartDeployResponse {
+  // Unset when validate_only.
+  Operation operation = 1;
+  // What will run (or, with validate_only, would run).
+  Deployment deployment = 2;
+}
+
+message GetDeploymentRequest {
+  // "deployments/{service}/{env}".
+  string name = 1;
+}
+
+message GetDeploymentResponse {
+  Deployment deployment = 1;
+}
+
+message ListDeploymentsRequest {
+  // Only this service, "services/{service}".
+  string service = 1;
+  // Only this environment.
+  string env = 2;
+}
+
+message ListDeploymentsResponse {
+  repeated Deployment deployments = 1;
+}
+
+message ListDeployHistoryRequest {
+  // "deployments/{service}/{env}".
+  string name = 1;
+  // At most this many records (default 20, at most 50).
+  int32 limit = 2;
+}
+
+message ListDeployHistoryResponse {
+  repeated DeployRecord records = 1;
+}
+
+message RollbackDeployRequest {
+  // "deployments/{service}/{env}".
+  string name = 1;
+  // The deploy commit to restore; default the one before the current.
+  string to = 2;
+  bool validate_only = 3;
+}
+
+message RollbackDeployResponse {
+  Operation operation = 1;
+  // What will run after the rollback.
+  Deployment deployment = 2;
+}
+
+message PromoteDeployRequest {
+  // "services/{service}".
+  string service = 1;
+  // Default "staging".
+  string from = 2;
+  // Default "production".
+  string to = 3;
+  bool validate_only = 4;
+}
+
+message PromoteDeployResponse {
+  Operation operation = 1;
+  // What will run in the target environment.
+  Deployment deployment = 2;
+}
