@@ -106,6 +106,14 @@ case $writer_groups in
   '') echo "FORGE_WRITER_GROUPS must not be empty: every login could deploy to production" >&2; exit 2 ;;
   *[!A-Za-z0-9:,_.-]*) echo "invalid FORGE_WRITER_GROUPS: $writer_groups" >&2; exit 2 ;;
 esac
+# A value without a group (",", "a,", "a,,b") would reach forge-api as an empty list.
+case $writer_groups in
+  ,*|*,|*,,*) echo "FORGE_WRITER_GROUPS must not be empty: every login could deploy to production" >&2; exit 2 ;;
+esac
+case $writer_groups in
+  *[A-Za-z0-9]*) ;;
+  *) echo "FORGE_WRITER_GROUPS must not be empty: every login could deploy to production" >&2; exit 2 ;;
+esac
 dex_onepassword_item=${FORGE_DEX_ONEPASSWORD_ITEM:-}
 case $dex_onepassword_item in
   *[!A-Za-z0-9./_-]*) echo "invalid FORGE_DEX_ONEPASSWORD_ITEM: $dex_onepassword_item" >&2; exit 2 ;;

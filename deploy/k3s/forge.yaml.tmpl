@@ -4,7 +4,7 @@
 #   ${DEX_HOST}         host name of Dex, the same for you and for pods
 #   ${FORGE_API_IMAGE}  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:0.1.0
 #   The GitHub App settings (ID, org, template repo): see render.sh.
-#   ${FORGE_DEX_GITHUB_ORG}, ${FORGE_WRITER_GROUPS}: GitHub login; see render.sh.
+#   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who may write.
 #   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
 apiVersion: v1
 kind: Namespace
