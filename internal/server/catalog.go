@@ -58,6 +58,18 @@ func (c *Catalog) has(name string) bool {
 	return ok
 }
 
+// ids returns the registered service ids, sorted.
+func (c *Catalog) ids() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.services))
+	for name := range c.services {
+		out = append(out, strings.TrimPrefix(name, servicePrefix))
+	}
+	slices.Sort(out)
+	return out
+}
+
 // get returns a copy of the service registered under name.
 func (c *Catalog) get(name string) (*forgev1.Service, bool) {
 	c.mu.Lock()

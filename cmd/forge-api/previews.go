@@ -28,36 +28,37 @@ type previewFlags struct {
 	imageTimeout, readyTimeout  string
 }
 
-// previews returns the environment service, or nil when previews are off.
+// previews returns the environment service, or nil when previews are off. It
+// also returns the cluster connection and image checker, which deploys share.
 // cluster connects to Kubernetes (kubeClients outside tests).
 func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *server.Operations, org string, log *slog.Logger,
-	cluster func() (kubernetes.Interface, dynamic.Interface, error)) (*server.Environments, error) {
+	cluster func() (kubernetes.Interface, dynamic.Interface, error)) (*server.Environments, *server.Cluster, server.ImageChecker, error) {
 	if !f.on {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	switch {
 	case app == nil:
-		return nil, errors.New("--previews needs the GitHub App (--github-app-id and --github-app-key-file)")
+		return nil, nil, nil, errors.New("--previews needs the GitHub App (--github-app-id and --github-app-key-file)")
 	case f.domain == "":
-		return nil, errors.New("--previews needs --preview-domain (FORGE_PREVIEW_DOMAIN)")
+		return nil, nil, nil, errors.New("--previews needs --preview-domain (FORGE_PREVIEW_DOMAIN)")
 	case !strings.Contains(f.gateway, "/"):
-		return nil, fmt.Errorf("--preview-gateway %q must be namespace/name", f.gateway)
+		return nil, nil, nil, fmt.Errorf("--preview-gateway %q must be namespace/name", f.gateway)
 	case !strings.Contains(f.pullSecret, "/"):
-		return nil, fmt.Errorf("--preview-pull-secret %q must be namespace/name", f.pullSecret)
+		return nil, nil, nil, fmt.Errorf("--preview-pull-secret %q must be namespace/name", f.pullSecret)
 	case f.max < 1:
-		return nil, fmt.Errorf("--preview-max %d must be at least 1", f.max)
+		return nil, nil, nil, fmt.Errorf("--preview-max %d must be at least 1", f.max)
 	}
 	imageTimeout, err := positiveDuration("FORGE_PREVIEW_IMAGE_TIMEOUT", f.imageTimeout)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	readyTimeout, err := positiveDuration("FORGE_PREVIEW_READY_TIMEOUT", f.readyTimeout)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	kube, dyn, err := cluster()
 	if err != nil {
-		return nil, fmt.Errorf("previews: connect to Kubernetes: %w", err)
+		return nil, nil, nil, fmt.Errorf("previews: connect to Kubernetes: %w", err)
 	}
 	c := &server.Cluster{Kube: kube, Dynamic: dyn, Gateway: f.gateway, PullSecret: f.pullSecret}
 	images := &registry.Client{Creds: func(ctx context.Context, host string) (string, string, error) {
@@ -67,11 +68,12 @@ func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *ser
 		}
 		return registry.CredsFromDockerConfig(data, host)
 	}}
-	return server.NewEnvironments(server.EnvOptions{
+	envs := server.NewEnvironments(server.EnvOptions{
 		Cluster: c, GitHub: &github.Client{Token: app.Token}, Images: images,
 		Catalog: catalog, Operations: ops, Org: org, Domain: f.domain, Max: f.max,
 		ImageTimeout: imageTimeout, ReadyTimeout: readyTimeout, Log: log,
-	}), nil
+	})
+	return envs, c, images, nil
 }
 
 func positiveDuration(name, v string) (time.Duration, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -12,17 +11,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
-	"github.com/showmino/forge/internal/github"
-	"github.com/showmino/forge/internal/manifest"
 )
 
 // envPlan is a checked, resolved create.
 type envPlan struct {
-	id, serviceID, owner, repo  string
-	ref, commit, image, creator string
-	port                        int32
-	health                      string
-	ttl                         time.Duration
+	source
+	id, creator string
+	ttl         time.Duration
 }
 
 func (e *Environments) CreateEnvironment(ctx context.Context, req *connect.Request[forgev1.CreateEnvironmentRequest]) (*connect.Response[forgev1.CreateEnvironmentResponse], error) {
@@ -84,9 +79,9 @@ func slicesContainsEnv(nss []corev1.Namespace, id string) bool {
 	return false
 }
 
-// plan checks the request and resolves the ref, forge.yaml and image.
+// plan checks the request and resolves the service, ref, forge.yaml and image.
 func (e *Environments) plan(ctx context.Context, m *forgev1.CreateEnvironmentRequest) (envPlan, error) {
-	p := envPlan{id: m.GetEnvironmentId(), ref: m.GetRef()}
+	p := envPlan{id: m.GetEnvironmentId()}
 	if !envIDRE.MatchString(p.id) {
 		return p, invalidArg("%q is not a valid environment name (lowercase letters, digits and '-', at most 40)", p.id)
 	}
@@ -95,49 +90,14 @@ func (e *Environments) plan(ctx context.Context, m *forgev1.CreateEnvironmentReq
 		return p, err
 	}
 	p.ttl = ttl
-	if p.ref == "" {
-		p.ref = "main"
+	src, err := resolveSource(ctx, e.o.Catalog, e.o.GitHub, e.o.Org, m.GetService(), m.GetRef())
+	if err != nil {
+		return p, err
 	}
-	if !refRE.MatchString(p.ref) || strings.Contains(p.ref, "..") {
-		return p, invalidArg("%q is not a valid Git ref", p.ref)
-	}
-	sid, ok := strings.CutPrefix(m.GetService(), servicePrefix)
-	if !ok || sid == "" {
-		return p, invalidArg("service %q must be services/<name>", m.GetService())
-	}
-	p.serviceID = sid
-	svc, ok := e.o.Catalog.get(servicePrefix + sid)
-	if !ok {
-		return p, connect.NewError(connect.CodeNotFound, fmt.Errorf("%s%s not found", servicePrefix, sid))
-	}
-	if p.owner, p.repo, ok = repoOf(svc.GetRepoUrl(), e.o.Org); !ok {
-		return p, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Errorf("%s%s has no GitHub repo in %s (repo_url %q)", servicePrefix, sid, e.o.Org, svc.GetRepoUrl()))
-	}
+	p.source = src
 	if pr, ok := PrincipalFrom(ctx); ok {
 		p.creator = pr.Subject
 	}
-	p.commit, err = e.o.GitHub.ResolveRef(ctx, p.owner, p.repo, p.ref)
-	if errors.Is(err, github.ErrNotFound) {
-		return p, connect.NewError(connect.CodeNotFound, fmt.Errorf("ref %q not found in github.com/%s/%s", p.ref, p.owner, p.repo))
-	}
-	if err != nil {
-		return p, connect.NewError(connect.CodeUnavailable, fmt.Errorf("resolve %s in github.com/%s/%s: %w", p.ref, p.owner, p.repo, err))
-	}
-	p.port, p.health = manifest.DefaultRunPort, manifest.DefaultRunHealth
-	data, err := e.o.GitHub.FileAt(ctx, p.owner, p.repo, manifest.FileName, p.commit)
-	switch {
-	case errors.Is(err, github.ErrNotFound): // no forge.yaml: defaults
-	case err != nil:
-		return p, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read forge.yaml at %s: %w", shortSHA(p.commit), err))
-	default:
-		mf, err := manifest.Parse(data)
-		if err != nil {
-			return p, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("forge.yaml at %s is invalid: %w", shortSHA(p.commit), err))
-		}
-		p.port, p.health = int32(mf.RunPort()), mf.RunHealth() //nolint:gosec // Parse checks run.port is 1-65535
-	}
-	p.image = "ghcr.io/" + strings.ToLower(p.owner) + "/" + p.serviceID + ":" + shortSHA(p.commit)
 	return p, nil
 }
 
@@ -152,7 +112,7 @@ func (e *Environments) createWork(p envPlan) Work {
 	return func(ctx context.Context, emit func(string, string)) error {
 		defer e.donePending(p.id)
 		emit("resolve", fmt.Sprintf("%s is %s", p.ref, shortSHA(p.commit)))
-		if err := e.waitForImage(ctx, p, emit); err != nil {
+		if err := waitForImage(ctx, e.o.GitHub, e.o.Images, p.source, e.o.ImageTimeout, e.o.ImagePoll, emit); err != nil {
 			return err
 		}
 		ann := map[string]string{
@@ -186,63 +146,6 @@ func (e *Environments) createWork(p envPlan) Work {
 		}
 		return oe
 	}
-}
-
-// waitForImage polls the registry until the image exists, failing fast when
-// a CI run for the commit finished without success.
-func (e *Environments) waitForImage(ctx context.Context, p envPlan, emit func(string, string)) error {
-	timeout := time.NewTimer(e.o.ImageTimeout)
-	defer timeout.Stop()
-	last := ""
-	for {
-		ok, err := e.o.Images.Exists(ctx, p.image)
-		if err == nil && ok {
-			emit("image", "found "+p.image)
-			return nil
-		}
-		status := "unknown"
-		if runs, rerr := e.o.GitHub.RunsFor(ctx, p.owner, p.repo, p.commit); rerr == nil {
-			if r := failedRun(runs); r != nil {
-				return &OpError{Code: "ci_failed", Message: fmt.Sprintf("CI %q for %s finished with %s: %s", r.Name, shortSHA(p.commit), r.Conclusion, r.HTMLURL)}
-			}
-			status = "not started"
-			if len(runs) > 0 {
-				status = runs[0].Status
-			}
-		}
-		msg := fmt.Sprintf("waiting for %s (CI: %s)", p.image, status)
-		if err != nil {
-			msg += "; registry: " + clip(err.Error())
-		}
-		if msg != last {
-			emit("image", msg)
-			last = msg
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout.C:
-			return &OpError{Code: "image_timeout", Message: fmt.Sprintf("%s did not appear within %s", p.image, e.o.ImageTimeout)}
-		case <-time.After(e.o.ImagePoll):
-		}
-	}
-}
-
-// failedRun returns the newest run of a workflow when it finished without
-// success; older runs of the same workflow do not count.
-func failedRun(runs []github.WorkflowRun) *github.WorkflowRun {
-	seen := map[string]bool{}
-	for i := range runs {
-		r := &runs[i]
-		if seen[r.Name] {
-			continue
-		}
-		seen[r.Name] = true
-		if r.Status == "completed" && r.Conclusion != "success" && r.Conclusion != "skipped" && r.Conclusion != "neutral" {
-			return r
-		}
-	}
-	return nil
 }
 
 // deployAndWait creates the workload and waits until it is available.

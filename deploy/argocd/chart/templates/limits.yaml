@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: forge
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 1Gi
+    limits.cpu: "2"
+    limits.memory: 2Gi
+    pods: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: forge
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {cpu: 500m, memory: 512Mi}

@@ -1,0 +1,7 @@
+name: ""
+env: ""
+image: ""
+port: 8080
+health: /healthz
+replicas: 1
+host: ""

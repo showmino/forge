@@ -45,7 +45,10 @@ type Options struct {
 	// Environments serves EnvironmentService; nil answers FAILED_PRECONDITION.
 	// It must share Catalog and Operations with these Options.
 	Environments *Environments
-	Logger       *slog.Logger
+	// Deploys serves DeployService; nil answers FAILED_PRECONDITION. It must
+	// share Catalog and Operations with these Options.
+	Deploys *Deploys
+	Logger  *slog.Logger
 }
 
 // New returns the API's HTTP handler.
@@ -89,6 +92,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger}, opts))
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
+	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("ok\n"))

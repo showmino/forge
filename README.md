@@ -162,6 +162,11 @@ see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
 24h) runs out; `forge env list / get / extend / destroy` manage them. forge-api
 serves them with `--previews` (see the k3s section).
 
+`forge deploy start <service> --env staging|production` commits the service's
+version to the deploy repo, which Argo CD then rolls out; `forge deploy status`,
+`history`, `rollback` and `promote` follow and change it. forge-api serves them
+with `--deploys`.
+
 ## The API
 
 One Protobuf contract served with [ConnectRPC](https://connectrpc.com): gRPC,
