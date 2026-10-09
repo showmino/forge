@@ -53,6 +53,10 @@ spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
+      # The root filesystem is read-only; /tmp is the one writable path.
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
       containers:
         - name: payments
           image: ghcr.io/showmino/payments:1a2b3c4
@@ -71,6 +75,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
 ---
 # Source: forge-service/templates/httproute.yaml
 apiVersion: gateway.networking.k8s.io/v1

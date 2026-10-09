@@ -263,6 +263,7 @@ func deployment(w EnvWorkload) *appsv1.Deployment {
 			PeriodSeconds:       5,
 		}
 	}
+	tmpLimit := resource.MustParse("256Mi")
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: w.Service, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
@@ -277,6 +278,11 @@ func deployment(w EnvWorkload) *appsv1.Deployment {
 						RunAsNonRoot:   &yes,
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
+					// The root filesystem is read-only; /tmp is the one writable path.
+					Volumes: []corev1.Volume{{
+						Name:         "tmp",
+						VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &tmpLimit}},
+					}},
 					Containers: []corev1.Container{{
 						Name:           w.Service,
 						Image:          w.Image,
@@ -289,6 +295,7 @@ func deployment(w EnvWorkload) *appsv1.Deployment {
 							ReadOnlyRootFilesystem:   &yes,
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 						},
+						VolumeMounts: []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}},
 					}},
 				},
 			},
