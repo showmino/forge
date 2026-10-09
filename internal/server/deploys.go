@@ -51,7 +51,7 @@ type DeployOptions struct {
 	Domain string
 	// ArgoNamespace holds the Applications (default argocd).
 	ArgoNamespace string
-	// Defaults: 10m, 10m, 2m.
+	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
 	ImageTimeout, SyncTimeout, NamespaceTimeout time.Duration
 	// Defaults: 10s, 2s.
 	ImagePoll, Poll time.Duration
@@ -78,7 +78,7 @@ func NewDeploys(o DeployOptions) *Deploys {
 	for _, d := range []struct {
 		v   *time.Duration
 		def time.Duration
-	}{{&o.ImageTimeout, 10 * time.Minute}, {&o.SyncTimeout, 10 * time.Minute}, {&o.NamespaceTimeout, 2 * time.Minute}, {&o.ImagePoll, 10 * time.Second}, {&o.Poll, 2 * time.Second}} {
+	}{{&o.ImageTimeout, 10 * time.Minute}, {&o.SyncTimeout, 10 * time.Minute}, {&o.NamespaceTimeout, 5 * time.Minute}, {&o.ImagePoll, 10 * time.Second}, {&o.Poll, 2 * time.Second}} {
 		if *d.v == 0 {
 			*d.v = d.def
 		}
@@ -257,8 +257,11 @@ func (d *Deploys) current(ctx context.Context, svc, env string) (deployValues, s
 		return v, "", connect.NewError(connect.CodeInternal, err)
 	}
 	hist, err := d.o.Repo.History(ctx, valuesPath(svc, env), 1)
-	if err != nil || len(hist) == 0 {
+	if err != nil {
 		return v, "", connect.NewError(connect.CodeUnavailable, fmt.Errorf("deploy repo history: %w", err))
+	}
+	if len(hist) == 0 {
+		return v, "", connect.NewError(connect.CodeInternal, fmt.Errorf("no history for %s", valuesPath(svc, env)))
 	}
 	return v, hist[0].SHA, nil
 }

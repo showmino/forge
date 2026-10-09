@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"connectrpc.com/connect"
@@ -160,20 +161,28 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 	timeout := time.NewTimer(d.o.SyncTimeout)
 	defer timeout.Stop()
 	last := ""
-	checked := map[string]bool{} // revision -> holds our values
+	// checked caches, per reported revision, whether it holds our values.
+	// Reported SHAs are immutable, and the chart revision is never in the
+	// deploy repo, so a NotFound is final ("not ours"). Other errors are not
+	// cached: they may pass.
+	checked := map[string]bool{}
 	atRevision := func(revs []string) bool {
+		if slices.Contains(revs, deployCommit) {
+			return true
+		}
 		for _, rev := range revs {
-			if rev == deployCommit {
-				return true
-			}
 			same, done := checked[rev]
 			if !done {
 				data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), rev)
-				if err != nil {
-					continue // not there yet (or the chart revision): try again
+				switch {
+				case errors.Is(err, github.ErrNotFound):
+					checked[rev] = false
+				case err != nil:
+					continue // try again
+				default:
+					same = bytes.Equal(data, content)
+					checked[rev] = same
 				}
-				same = bytes.Equal(data, content)
-				checked[rev] = same
 			}
 			if same {
 				return true

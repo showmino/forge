@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,13 @@ func TestWritePullSecretGuard(t *testing.T) {
 	defer cancel()
 	if err := c.WaitServiceNamespace(wctx, "ledger", "staging", 5*time.Millisecond); err == nil {
 		t.Error("waited successfully for an unlabelled namespace")
+	} else if !strings.Contains(err.Error(), "ledger-staging exists without Forge's labels") {
+		t.Errorf("unlabelled: %v", err)
+	}
+	wctx2, cancel2 := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel2()
+	if err := c.WaitServiceNamespace(wctx2, "nope", "staging", 5*time.Millisecond); err == nil || !strings.Contains(err.Error(), "did not appear") {
+		t.Errorf("missing: %v", err)
 	}
 	if err := c.WaitServiceNamespace(ctx, "payments", "staging", 5*time.Millisecond); err != nil {
 		t.Errorf("wait: %v", err)

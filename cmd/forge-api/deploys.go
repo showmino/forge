@@ -12,8 +12,8 @@ import (
 
 // deployFlags are forge-api's deploy settings.
 type deployFlags struct {
-	on                        bool
-	repo, domain, syncTimeout string
+	on                                          bool
+	repo, domain, syncTimeout, namespaceTimeout string
 }
 
 // deploys returns the deploy service, or nil when deploys are off. It reuses
@@ -39,6 +39,10 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	if err != nil {
 		return nil, err
 	}
+	nsTimeout, err := positiveDuration("FORGE_DEPLOY_NAMESPACE_TIMEOUT", f.namespaceTimeout)
+	if err != nil {
+		return nil, err
+	}
 	domain := f.domain
 	if domain == "" {
 		var found bool
@@ -50,6 +54,6 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	return server.NewDeploys(server.DeployOptions{
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
-		Catalog: catalog, Operations: ops, Org: org, Domain: domain, SyncTimeout: sync, Log: log,
+		Catalog: catalog, Operations: ops, Org: org, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,
 	}), nil
 }

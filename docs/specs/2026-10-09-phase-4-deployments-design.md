@@ -81,7 +81,7 @@ It renders, into the Application's namespace, the same shape previews use (`inte
   - `clusterResourceWhitelist: [{group: "", kind: Namespace}]`, for `CreateNamespace`;
   - namespace resources: only the kinds the chart renders;
   - no other cluster-scoped kinds.
-- **ApplicationSet `forge-services`:** a git directory generator over `forge-deploys` `services/*/*`, which produces Application `<service>-<env>`:
+- **ApplicationSet `forge-services`:** a git directory generator over `forge-deploys` `services/*/*`, which produces Application `<service>-<env>`. The generator sets `requeueAfterSeconds: 30` (Argo's default is 180s, which would make a first deploy wait about 3 minutes for its namespace; there are no webhooks because the cluster is LAN-only):
   - project `forge-services`;
   - sources: the chart (forge repo, path `deploy/argocd/chart`, a pinned revision), plus `$values` from `forge-deploys` `services/<service>/<env>/values.yaml`;
   - destination namespace `<service>-<env>`;
@@ -131,7 +131,7 @@ Each step is an operation event.
    - When the ref update is rejected because `main` moved, rebuild on the new head and retry, at most 3 times (`git_conflict`).
    - **Rollback** commits the chosen earlier `values.yaml` content, with a new `forge:` record.
    - **Promote** copies `image`, `port` and `health` from the source environment, sets `host` for the target, and writes a new record.
-5. **namespace:** wait (2m) for `<service>-<env>` to exist, then write `forge-pull` into it on the first deploy.
+5. **namespace:** wait (5m, `FORGE_DEPLOY_NAMESPACE_TIMEOUT`) for `<service>-<env>` to exist, then write `forge-pull` into it on the first deploy.
 6. **sync:**
    - Watch the Application `<service>-<env>` in `argocd` (`applications.argoproj.io`, read only).
    - Done when its synced revision is the new `forge-deploys` commit, `sync=Synced` and `health=Healthy`.
@@ -169,13 +169,15 @@ The issuer in the token picks the verifier. A token whose `iss` matches neither 
 | `ref` | the repo's default branch, `refs/heads/main`, read through the App and cached for 10 minutes |
 | `sha` | the deploy's commit: a CI deploy always deploys exactly this commit, and its `ref` field is ignored |
 
-The Principal has subject `github:<org>/<repo>` and a single permission, `deploy:<service>:staging`. Every other RPC returns `PermissionDenied`, including reads. A failed check names the claim that didn't match. Token values are never logged.
+The Principal has subject `github:<org>/<repo>` and a single permission, `deploy:<service>:staging`. A CI principal may also call `GetOperation` and `WatchOperation` on operations it started, and `GetDeployment` for its own service's staging deployment, so `forge deploy start` can wait and print. Every other RPC returns `PermissionDenied`, including all other reads. A failed check names the claim that didn't match. Token values are never logged.
 
 ### Permissions per RPC
 
 | RPC | Human (Dex) | CI (GitHub) |
 | --- | --- | --- |
-| `GetDeployment`, `ListDeployments`, `ListDeployHistory` | `services.read` | no |
+| `GetDeployment` | `services.read` | its own service's staging deployment only |
+| `ListDeployments`, `ListDeployHistory` | `services.read` | no |
+| `GetOperation`, `WatchOperation` | `services.read` | only operations it started |
 | `StartDeploy` | `services.write` | `deploy:<service>:staging` for its own service; the commit is the token's `sha` |
 | `RollbackDeploy`, `PromoteDeploy` | `services.write` | no |
 
@@ -212,6 +214,7 @@ forge deploy promote [<service>] [--from staging] [--to production] [--yes] [--d
 | `--deploy-domain-suffix` | from `FORGE_PREVIEW_DOMAIN`'s IP: `<env>.<ip>.nip.io` | Hosts are `<service>.<env>.<ip>.nip.io`. |
 | `FORGE_GITHUB_OIDC_AUDIENCE` | `forge` | Audience for CI tokens. |
 | `FORGE_DEPLOY_SYNC_TIMEOUT` | `10m` | The sync step's timeout. |
+| `FORGE_DEPLOY_NAMESPACE_TIMEOUT` | `5m` | The namespace step's timeout. |
 
 **`render.sh` with `FORGE_DEPLOYS=1`** (requires `FORGE_PREVIEW_IP`) adds:
 - the AppProject and ApplicationSet;
@@ -288,7 +291,7 @@ Three milestones, each a PR:
 
 | When | What |
 | --- | --- |
-| Milestone 3 | Create `showmino/forge-deploys` (private, empty, `main`), or let me create it with the App. |
+| Milestone 3 | Create `showmino/forge-deploys` (private) with an initial commit on `main` (e.g. `auto_init` with a README): the git data API cannot commit to an empty repo. Or let me create it with the App. |
 | Milestone 3 | Confirm the App behind `argocd-repo-kubernetes` can read `forge` and `forge-deploys`. Argo must fetch the chart from the private forge repo. |
 | Milestone 3 | Org variable `FORGE_API_URL` = `http://forge.10.150.1.221.nip.io`. |
 | Milestone 3 | **A runner on the LAN.** GitHub-hosted runners cannot reach the LAN-only API, so the skeleton's `deploy` job uses `runs-on: action-runner-set`. That is the org's actions-runner-controller scale set (Argo app `action-runner-set`, chart `gha-runner-scale-set` 0.14.2, `githubConfigUrl: https://github.com/showmino`). On 2026-10-09 no `AutoscalingRunnerSet` existed in the cluster and the app was OutOfSync, so the owner fixes or confirms it before the gate. The `test` and `image` jobs stay on `ubuntu-latest`. |

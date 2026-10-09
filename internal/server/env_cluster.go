@@ -49,8 +49,10 @@ const (
 var httpRoutes = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
 
 var (
-	errNoEnv     = errors.New("no such environment")
-	errEnvExists = errors.New("environment already exists")
+	errNoEnv = errors.New("no such environment")
+	// errUnlabelled is errNoEnv for a namespace that exists but is not Forge's.
+	errUnlabelled = fmt.Errorf("%w: namespace lacks Forge's labels", errNoEnv)
+	errEnvExists  = errors.New("environment already exists")
 )
 
 func envNamespace(id string) string { return envPrefix + id }
@@ -443,7 +445,7 @@ func (c *Cluster) checkServiceNamespace(ctx context.Context, service, env string
 	}
 	l := ns.Labels
 	if l[labelManagedBy] != "forge" || l[labelService] != service || l[labelDeployEnv] != env {
-		return errNoEnv
+		return errUnlabelled
 	}
 	return nil
 }
@@ -457,7 +459,14 @@ func (c *Cluster) WaitServiceNamespace(ctx context.Context, service, env string,
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("namespace %s-%s: %w", service, env, ctx.Err())
+			ns := service + "-" + env
+			switch {
+			case errors.Is(err, errUnlabelled):
+				return fmt.Errorf("namespace %s exists without Forge's labels: %w", ns, ctx.Err())
+			case !errors.Is(err, errNoEnv):
+				return fmt.Errorf("namespace %s: %w (%w)", ns, err, ctx.Err())
+			}
+			return fmt.Errorf("namespace %s did not appear: %w", ns, ctx.Err())
 		case <-time.After(poll):
 		}
 	}

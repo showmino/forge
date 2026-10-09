@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/envtest"
+	"github.com/showmino/forge/internal/github"
 )
 
 // deployFixture is forge-api with deploys on fakes: service "payments"
@@ -220,6 +222,87 @@ func TestStartDeploySyncWaitsForRevision(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("no sync event containing %q in %v", want, op.GetEvents())
+	}
+}
+
+// countingRepo counts reads at each ref.
+type countingRepo struct {
+	DeployRepo
+	mu    sync.Mutex
+	reads map[string]int
+}
+
+func (r *countingRepo) Read(ctx context.Context, path, ref string) ([]byte, error) {
+	r.mu.Lock()
+	r.reads[ref]++
+	r.mu.Unlock()
+	return r.DeployRepo.Read(ctx, path, ref)
+}
+
+func (r *countingRepo) count(ref string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reads[ref]
+}
+
+func TestAwaitSyncReadsChartRevisionOnce(t *testing.T) {
+	t.Parallel()
+	var cr *countingRepo
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		cr = &countingRepo{DeployRepo: o.Repo, reads: map[string]int{}}
+		o.Repo = cr
+	})
+	first, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, first.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatalf("first deploy: %v", op.GetError())
+	}
+	f.argo.SetLag(300 * time.Millisecond) // many polls at 5ms while Argo reports the old head
+	second, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, second.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatalf("second deploy: %v", op.GetError())
+	}
+	if n := cr.count("chart"); n > 1 {
+		t.Errorf("chart revision read %d times, want at most 1", n)
+	}
+}
+
+// blankHistoryRepo reports no history once blank is set.
+type blankHistoryRepo struct {
+	DeployRepo
+	blank atomic.Bool
+}
+
+func (r *blankHistoryRepo) History(ctx context.Context, path string, limit int) ([]github.CommitInfo, error) {
+	if r.blank.Load() {
+		return nil, nil
+	}
+	return r.DeployRepo.History(ctx, path, limit)
+}
+
+func TestGetDeploymentEmptyHistory(t *testing.T) {
+	t.Parallel()
+	var br *blankHistoryRepo
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		br = &blankHistoryRepo{DeployRepo: o.Repo}
+		o.Repo = br
+	})
+	resp, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, resp.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatalf("deploy: %v", op.GetError())
+	}
+	br.blank.Store(true)
+	_, err = f.client.GetDeployment(context.Background(), as("reader", &forgev1.GetDeploymentRequest{Name: "deployments/payments/staging"}))
+	if connect.CodeOf(err) != connect.CodeInternal || !strings.Contains(err.Error(), "no history for services/payments/staging/values.yaml") || strings.Contains(err.Error(), "%!w") {
+		t.Errorf("got %v", err)
 	}
 }
 

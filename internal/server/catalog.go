@@ -58,7 +58,6 @@ func (c *Catalog) has(name string) bool {
 	return ok
 }
 
-// get returns a copy of the service registered under name.
 // ids returns the registered service ids, sorted.
 func (c *Catalog) ids() []string {
 	c.mu.Lock()
@@ -71,6 +70,7 @@ func (c *Catalog) ids() []string {
 	return out
 }
 
+// get returns a copy of the service registered under name.
 func (c *Catalog) get(name string) (*forgev1.Service, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

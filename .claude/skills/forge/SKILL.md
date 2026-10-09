@@ -65,7 +65,7 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - go-grpc still targets Go 1.24 and golangci-lint v2.5.0 in the services it generates.
 - **Phase 4 (in progress):** spec docs/specs/2026-10-09-phase-4-deployments-design.md. Milestone 1: deploy engine (DeployService, internal/server/deploy*.go, github.RepoFiles, deploy/argocd/chart with make chart-test, forge deploy) per docs/plans/2026-10-09-phase-4-m1-deploy-engine.md. Then milestone 2 (CI workload identity) and 3 (k3s and the exit gate).
 - **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
-- **Later:** environments, deploys (Argo CD), resources (OpenTofu jobs).
+- **Later:** environments, resources (OpenTofu jobs).
 - **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP with Dex's demo password.
 
 ## Common mistakes

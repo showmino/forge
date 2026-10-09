@@ -146,6 +146,7 @@ func run() error {
 	}
 	deps, err := deploys(deployFlags{
 		on: *deploysOn, repo: *deployRepo, domain: *deployDomain, syncTimeout: env("FORGE_DEPLOY_SYNC_TIMEOUT", "10m"),
+		namespaceTimeout: env("FORGE_DEPLOY_NAMESPACE_TIMEOUT", "5m"),
 	}, app, *previewDomain, cluster, images, catalog, ops, *githubOrg, log)
 	if err != nil {
 		return err
