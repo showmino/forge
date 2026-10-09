@@ -468,6 +468,24 @@ func (c *Cluster) ServiceNamespaceFree(ctx context.Context, service, env string)
 	}
 }
 
+// ApplicationFree reports whether Forge may use the Argo CD Application name:
+// it must not exist yet, or be one the ApplicationSet made (labelled
+// managed-by forge). Otherwise forge-api would report a foreign
+// Application's status and time out waiting for its own.
+func (c *Cluster) ApplicationFree(ctx context.Context, argoNamespace, name string) error {
+	u, err := c.Dynamic.Resource(applications).Namespace(argoNamespace).Get(ctx, name, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("check Argo CD Application %s/%s: %w", argoNamespace, name, err))
+	case u.GetLabels()[labelManagedBy] == "forge":
+		return nil
+	}
+	return connect.NewError(connect.CodeFailedPrecondition,
+		fmt.Errorf("Argo CD Application %s/%s exists and is not Forge's", argoNamespace, name))
+}
+
 // WaitServiceNamespace waits until Argo CD has created <service>-<env>.
 func (c *Cluster) WaitServiceNamespace(ctx context.Context, service, env string, poll time.Duration) error {
 	for {

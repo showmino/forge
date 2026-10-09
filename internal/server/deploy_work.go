@@ -69,6 +69,9 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, src.serviceID, m.GetEnv()); err != nil {
 		return nil, err
 	}
+	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, src.serviceID+"-"+m.GetEnv()); err != nil {
+		return nil, err
+	}
 	preview := d.deploymentFrom(src.serviceID, env, v, "", AppStatus{})
 	if m.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.StartDeployResponse{Deployment: preview}), nil

@@ -42,7 +42,8 @@ spec:
         repoURL: https://github.com/showmino/forge-deploys.git
         revision: main
         directories:
-          - path: services/*/*
+          - path: services/*/staging
+          - path: services/*/production
         # LAN-only, so no webhooks; Argo's default is 180s.
         requeueAfterSeconds: 30
   template:
@@ -73,6 +74,12 @@ spec:
         automated:
           prune: true
           selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
         syncOptions:
           - CreateNamespace=true
         managedNamespaceMetadata:

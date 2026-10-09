@@ -423,6 +423,9 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
 		return nil, err
 	}
+	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, svc+"-"+env); err != nil {
+		return nil, err
+	}
 	preview := d.deploymentFrom(svc, env, v, "", AppStatus{})
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
@@ -472,6 +475,9 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	v.Env, v.Host = to, d.host(svc, to)
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, to); err != nil {
+		return nil, err
+	}
+	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, svc+"-"+to); err != nil {
 		return nil, err
 	}
 	preview := d.deploymentFrom(svc, to, v, "", AppStatus{})

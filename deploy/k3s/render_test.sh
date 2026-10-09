@@ -71,6 +71,13 @@ gateway_listeners() {
     printf '%s\n' "$dep" | grep -qF 'hostname: "*.staging.10.150.1.222.nip.io"' &&
     printf '%s\n' "$dep" | grep -qF 'hostname: "*.production.10.150.1.222.nip.io"'
 }
+# gateway_of <render>: the Gateway section of a render.
+gateway_of() { printf '%s\n' "$1" | awk '$0 == "kind: Gateway" {on=1} on && /^---/ {on=0} on'; }
+listener_selectors() {
+  gateway_of "$dep" | grep -qF 'forge.dev/deploy-env: staging' &&
+    gateway_of "$dep" | grep -qF 'forge.dev/deploy-env: production'
+}
+no_listener_selectors() { ! gateway_of "$prev" | grep -qF 'forge.dev/deploy-env'; }
 deploys_exact() { deploys_section | cmp -s - "$dir/testdata/deploys.golden"; }
 # previews.golden is the render at 9bcbeff, before deploys existed.
 prev_unchanged() { printf '%s\n' "$prev" | cmp -s - "$dir/testdata/previews.golden"; }
@@ -79,6 +86,8 @@ deny_destination() { printf '%s\n' "$dep" | grep -qF 'namespace: "!docs-dev-stag
 check "deploys: forge-api setting"          sh -c "printf '%s' \"\$1\" | grep -qF 'FORGE_DEPLOYS, value: \"1\"'" _ "$dep"
 check "deploys: no FORGE_DEPLOYS without it" sh -c "! printf '%s' \"\$1\" | grep -qF FORGE_DEPLOYS" _ "$prev"
 check "deploys: gateway listeners"          gateway_listeners
+check "deploys: listeners select the staging and production namespaces" listener_selectors
+check "deploys: no env selectors without it" no_listener_selectors
 check "deploys: no listeners without it"    sh -c "! printf '%s' \"\$1\" | grep -qF '.staging.'" _ "$prev"
 check "deploys: Argo objects and RBAC exactly as reviewed" deploys_exact
 check "deploys: deny destination for docs-dev-staging" deny_destination
