@@ -18,6 +18,10 @@ import (
 // ActionsAudience is the audience forge-api expects on GitHub Actions tokens.
 const ActionsAudience = "forge"
 
+// ErrActionsTokenRefused is returned when GitHub answers the token request
+// with 401 or 403: the job's request token was refused.
+var ErrActionsTokenRefused = errors.New("GitHub refused the Actions OIDC token request")
+
 // ActionsToken returns GitHub Actions OIDC tokens for audience, requested
 // from requestURL (ACTIONS_ID_TOKEN_REQUEST_URL) with requestToken
 // (ACTIONS_ID_TOKEN_REQUEST_TOKEN). A token is reused until a minute before
@@ -55,6 +59,9 @@ func (s *actionsSource) Token() (*oauth2.Token, error) {
 		return nil, fmt.Errorf("request a GitHub Actions OIDC token: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("%w: %s", ErrActionsTokenRefused, resp.Status)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("request a GitHub Actions OIDC token: %s", resp.Status)
 	}

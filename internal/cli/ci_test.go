@@ -25,6 +25,12 @@ func actionsJWT() string {
 // (and drops FORGE_TOKEN), returning the request counter.
 func (h *harness) inActions(token string, status int) *atomic.Int32 {
 	h.t.Helper()
+	return h.inActionsBody(status, fmt.Sprintf(`{"value":%q}`, token))
+}
+
+// inActionsBody is inActions answering a 200 with body.
+func (h *harness) inActionsBody(status int, body string) *atomic.Int32 {
+	h.t.Helper()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -36,7 +42,7 @@ func (h *harness) inActions(token string, status int) *atomic.Int32 {
 			http.Error(w, "no", status)
 			return
 		}
-		fmt.Fprintf(w, `{"value":%q}`, token)
+		fmt.Fprint(w, body)
 	}))
 	h.t.Cleanup(srv.Close)
 	delete(h.env, "FORGE_TOKEN")
@@ -87,12 +93,28 @@ func TestActionsTokenHints(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 
-	// The endpoint refuses: exit 4, the hint names the permission, no token echoed.
+	// The endpoint refuses: exit 4, the hint says re-run, no token echoed.
 	h.inActions("unused", http.StatusForbidden)
 	r := h.fails(4, "deploy", "status", "payments", "--env", "staging")
-	if !strings.Contains(r.err, "id-token: write") || strings.Contains(r.err, "req-token") {
+	if !strings.Contains(r.err, "refused") || strings.Contains(r.err, "id-token") || strings.Contains(r.err, "req-token") {
 		t.Errorf("refused token request:\n%s", r.err)
 	}
+
+	// GitHub fails: exit 1, retry.
+	h.inActions("unused", http.StatusInternalServerError)
+	r = h.fails(1, "deploy", "status", "payments", "--env", "staging")
+	if !strings.Contains(r.err, "retry the job") || strings.Contains(r.err, "req-token") {
+		t.Errorf("GitHub 500:\n%s", r.err)
+	}
+
+	// A response that isn't a token: exit 1 too.
+	h.inActionsBody(http.StatusOK, "not json")
+	r = h.fails(1, "deploy", "status", "payments", "--env", "staging")
+	if !strings.Contains(r.err, "retry the job") {
+		t.Errorf("invalid JSON:\n%s", r.err)
+	}
+	h.inActionsBody(http.StatusOK, `{"value":""}`)
+	h.fails(1, "deploy", "status", "payments", "--env", "staging")
 
 	// No id-token permission: the runner sets no Actions variables.
 	delete(h.env, "ACTIONS_ID_TOKEN_REQUEST_URL")

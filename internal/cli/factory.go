@@ -241,13 +241,17 @@ func (l *loginHint) Token() (*oauth2.Token, error) {
 	return t, err
 }
 
-// actionsHint turns a failed GitHub Actions token request into exit code 4.
+// actionsHint turns a failed GitHub Actions token request into an exit code:
+// 4 when GitHub refused the job's request token, 1 when it could not be asked.
 type actionsHint struct{ ts oauth2.TokenSource }
 
 func (a *actionsHint) Token() (*oauth2.Token, error) {
 	t, err := a.ts.Token()
+	if errors.Is(err, auth.ErrActionsTokenRefused) {
+		return nil, exitcode.New(exitcode.Unauthenticated, "%v", err).WithHint("the job's OIDC request token was refused; re-run the job")
+	}
 	if err != nil {
-		return nil, exitcode.New(exitcode.Unauthenticated, "%v", err).WithHint("the job needs 'permissions: id-token: write'")
+		return nil, exitcode.New(exitcode.Unexpected, "%v", err).WithHint("forge could not get the job's OIDC token from GitHub; retry the job")
 	}
 	return t, nil
 }

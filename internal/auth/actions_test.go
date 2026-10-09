@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -93,6 +94,16 @@ func TestActionsTokenErrors(t *testing.T) {
 	_, err := ActionsToken(srv.Client(), srv.URL+"/token?api-version=2.0", "wrong", ActionsAudience).Token()
 	if err == nil || !strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "wrong") {
 		t.Errorf("403: %v", err)
+	}
+	if !errors.Is(err, ErrActionsTokenRefused) {
+		t.Errorf("403 should be ErrActionsTokenRefused: %v", err)
+	}
+	// A server error is not a refusal.
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) }))
+	t.Cleanup(down.Close)
+	_, err = ActionsToken(down.Client(), down.URL+"/token", "req-token", ActionsAudience).Token()
+	if err == nil || errors.Is(err, ErrActionsTokenRefused) || !strings.Contains(err.Error(), "500") {
+		t.Errorf("500: %v", err)
 	}
 	// An empty value.
 	_, err = ActionsToken(srv.Client(), srv.URL+"/token?api-version=2.0", "req-token", ActionsAudience).Token()
