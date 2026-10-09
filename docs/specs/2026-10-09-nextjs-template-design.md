@@ -89,7 +89,7 @@ This also closes the Phase 3 backlog item "no `/tmp` emptyDir".
 **Template, before tagging:**
 - `forge template lint` reports no problems.
 - The skeleton renders with sample values; then `npm ci && npm run lint && npm run typecheck && npm test && npm run build` passes.
-- Run the image with `--read-only --tmpfs /tmp --user 65532 -e PORT=3000`. The page and `/api/healthz` must answer, and a response that triggers a cache write must work. The image optimiser on a `public/` image does that: it writes under `.next/cache/images`.
+- Run the image with `--read-only --user 65532 -e PORT=3000` and only `/tmp` writable. The page, `/api/healthz`, an optimised image and a page with `revalidate` must all work, and the logs must show no EROFS, ENOENT, read-only or prerender-cache errors. Any cache write lands in `/tmp` (`.next/cache` links there); revalidated pages stay in memory (`experimental.isrFlushToDisk: false`).
 
 **Live on k3s, after v1.3.0:**
 1. `forge create web-<date> --template nextjs`.
