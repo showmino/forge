@@ -64,6 +64,16 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - Tests: some timing-based tests (TestCreateNotReady's 100ms) and a near-tautological malformed-expiry test; the slash-in-ref test cannot see escaping.
   - go-grpc still targets Go 1.24 and golangci-lint v2.5.0 in the services it generates.
 - **Phase 4 (in progress):** spec docs/specs/2026-10-09-phase-4-deployments-design.md. Milestone 1 (done, PR #14): deploy engine (DeployService, internal/server/deploy*.go, github.RepoFiles, deploy/argocd/chart with make chart-test, forge deploy) per docs/plans/2026-10-09-phase-4-m1-deploy-engine.md. Milestone 2: CI workload identity (internal/server/ci_auth.go verifies GitHub Actions tokens, ByIssuer routes by iss, ci_scope.go confines workloads; internal/auth/actions.go and the CLI's Actions token pick-up) per docs/plans/2026-10-09-phase-4-m2-ci-identity.md. Then milestone 3 (k3s and the exit gate).
+
+  Phase 4 follow-up backlog:
+  - Any workflow or event on the default branch (pull_request_target, workflow_dispatch, schedule) gets a deploy principal; consider pinning `event_name` / `job_workflow_ref`.
+  - A bad-signature token carrying GitHub's iss makes forge-api refetch GitHub's JWKS; rate-limit the refetches.
+  - A JWKS fetch failure is reported as an invalid token (exit 4) rather than Unavailable.
+  - A DefaultBranch 404 maps to Unavailable.
+  - Raw GitHub text appears in Unavailable messages.
+  - `forge auth token` prints the Actions token unmasked.
+  - The Actions token request ignores the command's context (30s cap).
+  - The streaming client interceptor drops token errors.
 - **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
 - **Later:** environments, resources (OpenTofu jobs).
 - **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP with Dex's demo password.

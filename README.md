@@ -173,7 +173,8 @@ From GitHub Actions, `forge deploy start --env staging` needs no secret: with
 only lets the job deploy its own repo's service to staging, at the commit it
 runs at (`GITHUB_SHA`), from the default branch, and follow that deploy.
 Production stays with humans (`forge deploy promote`). The runner must reach
-the API (`FORGE_API_URL`).
+the API (`FORGE_API_URL`). forge-api checks the token's audience against
+`FORGE_GITHUB_OIDC_AUDIENCE` (default `forge`).
 
 ## The API
 
