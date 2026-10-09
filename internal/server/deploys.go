@@ -420,6 +420,9 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	v.Forge.Kind, v.Forge.Actor = kindRollback, actorOf(ctx)
+	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
+		return nil, err
+	}
 	preview := d.deploymentFrom(svc, env, v, "", AppStatus{})
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
@@ -468,6 +471,9 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	v := src
 	v.Env, v.Host = to, d.host(svc, to)
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
+	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, to); err != nil {
+		return nil, err
+	}
 	preview := d.deploymentFrom(svc, to, v, "", AppStatus{})
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.PromoteDeployResponse{Deployment: preview}), nil
