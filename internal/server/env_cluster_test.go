@@ -66,6 +66,11 @@ func TestClusterLifecycle(t *testing.T) {
 		t.Error("service account token mounted")
 	case ctr.SecurityContext == nil || !*ctr.SecurityContext.ReadOnlyRootFilesystem || *ctr.SecurityContext.AllowPrivilegeEscalation || ctr.SecurityContext.Capabilities.Drop[0] != "ALL":
 		t.Errorf("container security: %+v", ctr.SecurityContext)
+	case len(pod.Volumes) != 1 || pod.Volumes[0].Name != "tmp" || pod.Volumes[0].EmptyDir == nil ||
+		pod.Volumes[0].EmptyDir.SizeLimit == nil || pod.Volumes[0].EmptyDir.SizeLimit.String() != "256Mi" || pod.Volumes[0].EmptyDir.Medium != "":
+		t.Errorf("volumes: %+v", pod.Volumes)
+	case len(ctr.VolumeMounts) != 1 || ctr.VolumeMounts[0].Name != "tmp" || ctr.VolumeMounts[0].MountPath != "/tmp" || ctr.VolumeMounts[0].ReadOnly:
+		t.Errorf("volume mounts: %+v", ctr.VolumeMounts)
 	case len(pod.ImagePullSecrets) != 1 || pod.ImagePullSecrets[0].Name != "forge-pull":
 		t.Errorf("pull secrets: %+v", pod.ImagePullSecrets)
 	}

@@ -17,6 +17,10 @@ spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
+      # The root filesystem is read-only; /tmp is the one writable path.
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
       containers:
         - name: {{ .Values.name }}
           image: {{ required "image" .Values.image }}
@@ -35,3 +39,5 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
