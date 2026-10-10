@@ -9,6 +9,7 @@ import (
 
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/server"
+	"github.com/showmino/forge/internal/store"
 )
 
 // withCITokens makes forge-api accept GitHub Actions OIDC tokens next to
@@ -25,6 +26,8 @@ func withCITokens(ctx context.Context, base server.Authenticator, audience strin
 type deployFlags struct {
 	on                                          bool
 	repo, domain, syncTimeout, namespaceTimeout string
+	// resources says which database a service has, for DATABASE_URL.
+	resources store.ResourceStore
 }
 
 // deploys returns the deploy service, or nil when deploys are off. It reuses
@@ -65,6 +68,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	return server.NewDeploys(server.DeployOptions{
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
-		Catalog: catalog, Operations: ops, Org: org, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,
+		Catalog: catalog, Operations: ops, Resources: f.resources,
+		Org: org, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,
 	}), nil
 }

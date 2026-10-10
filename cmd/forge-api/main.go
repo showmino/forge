@@ -75,6 +75,13 @@ func run() error {
 		deployRepo   = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", "showmino/forge-deploys"), "GitOps repo (owner/name) Forge commits deploys to")
 		deployDomain = flag.String("deploy-domain", env("FORGE_DEPLOY_DOMAIN", ""), "deploy hosts are <service>.<env>.<domain> (default: the preview domain without 'preview.')")
 
+		resourcesOn  = flag.Bool("resources", env("FORGE_RESOURCES", "") == "1" || env("FORGE_RESOURCES", "") == "true", "serve resources (forge resource): databases made by OpenTofu runs in Kubernetes Jobs (needs --deploys and --runner-image)")
+		runnerImage  = flag.String("runner-image", env("FORGE_RUNNER_IMAGE", ""), "image of the resource runner Job")
+		runnerAddr   = flag.String("runner-addr", env("FORGE_RUNNER_ADDR", ":8081"), "listen address of the runner API; reachable from the runner Jobs only, never public")
+		runnerNS     = flag.String("runner-namespace", env("FORGE_RUNNER_NAMESPACE", "forge-runner"), "namespace the runner Jobs run in")
+		runnerSA     = flag.String("runner-service-account", env("FORGE_RUNNER_SERVICE_ACCOUNT", "forge-runner"), "service account the runner Jobs run as")
+		runnerAPIURL = flag.String("runner-api-url", env("FORGE_RUNNER_API_URL", "http://forge-api-runner.forge.svc:8081"), "URL at which the runner Jobs reach --runner-addr")
+
 		cliDir = flag.String("cli-dir", env("FORGE_CLI_DIR", ""), "directory of forge CLI builds served at /cli/forge-linux-<arch> for CI jobs")
 	)
 	flag.Parse()
@@ -148,6 +155,8 @@ func run() error {
 	}
 	defer st.Close()
 	catalog, ops := server.NewCatalogWithStore(st, nil), server.NewOperations(nil)
+	// Also with resources off: records made while they were on keep their service.
+	catalog.GuardResources(st)
 	envs, cluster, images, err := previews(previewFlags{
 		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, max: *previewMax,
 		imageTimeout: env("FORGE_PREVIEW_IMAGE_TIMEOUT", "10m"), readyTimeout: env("FORGE_PREVIEW_READY_TIMEOUT", "5m"),
@@ -162,7 +171,7 @@ func run() error {
 	}
 	deps, err := deploys(deployFlags{
 		on: *deploysOn, repo: *deployRepo, domain: *deployDomain, syncTimeout: env("FORGE_DEPLOY_SYNC_TIMEOUT", "10m"),
-		namespaceTimeout: env("FORGE_DEPLOY_NAMESPACE_TIMEOUT", "5m"),
+		namespaceTimeout: env("FORGE_DEPLOY_NAMESPACE_TIMEOUT", "5m"), resources: st,
 	}, app, *previewDomain, cluster, images, catalog, ops, *githubOrg, log)
 	if err != nil {
 		return err
@@ -174,11 +183,24 @@ func run() error {
 		authn = withCITokens(ctx, authn, audience, &github.Client{Token: app.Token}, catalog, *githubOrg)
 		log.Info("accepting GitHub Actions OIDC tokens for staging deploys", "issuer", server.GitHubIssuer, "audience", audience)
 	}
+	res, runnerAPI, err := resources(ctx, resourceFlags{
+		on: *resourcesOn, runnerImage: *runnerImage, runnerNamespace: *runnerNS, runnerServiceAccount: *runnerSA, runnerAPIURL: *runnerAPIURL,
+	}, st, cluster, deps != nil, catalog, ops, log)
+	if err != nil {
+		return err
+	}
+	if res == nil {
+		log.Info("resources are off; set --resources")
+	} else {
+		// Ends runs nobody watches any more (a restart) and expires old plans.
+		go res.RunSweeper(ctx, time.Minute)
+	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,
 		Environments:     envs,
 		Deploys:          deps,
+		Resources:        res,
 		CLIDir:           *cliDir,
 		Templates:        templates,
 		Repos:            repoHost(app),
@@ -201,12 +223,22 @@ func run() error {
 	defer endRequests()
 	srv.BaseContext = func(net.Listener) context.Context { return reqCtx }
 	srv.RegisterOnShutdown(endRequests)
+	servers := []*http.Server{srv}
 
-	errc := make(chan error, 1)
+	errc := make(chan error, 2)
 	go func() {
 		log.Info("forge-api listening", "addr", *addr, "version", version.Get().Version, "issuer", *issuer)
 		errc <- srv.ListenAndServe()
 	}()
+	if runnerAPI != nil {
+		// The runner API has its own listener: the public one never serves it.
+		runnerSrv := server.HTTPServer(*runnerAddr, runnerAPI)
+		servers = append(servers, runnerSrv)
+		go func() {
+			log.Info("runner API listening", "addr", *runnerAddr)
+			errc <- runnerSrv.ListenAndServe()
+		}()
+	}
 	select {
 	case err := <-errc:
 		if !errors.Is(err, http.ErrServerClosed) {
@@ -216,7 +248,11 @@ func run() error {
 		log.Info("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		var errs []error
+		for _, s := range servers {
+			errs = append(errs, s.Shutdown(shutdownCtx))
+		}
+		return errors.Join(errs...)
 	}
 	return nil
 }
