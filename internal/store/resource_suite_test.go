@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -299,6 +300,32 @@ func runResourceSuite(t *testing.T, open func(t *testing.T) ResourceStore) {
 		// Keys are separate.
 		if st, _ := s.GetResourceState(ctx, "payments/production"); st.Version != 0 {
 			t.Errorf("another key: %+v", st)
+		}
+	})
+
+	t.Run("a first write does not get past a lock taken just before it", func(t *testing.T) {
+		s := open(t)
+		for i := range 20 {
+			key := fmt.Sprintf("race/%d", i)
+			var lockErr, putErr error
+			var wg sync.WaitGroup
+			wg.Go(func() { _, lockErr = s.LockResourceState(ctx, key, "lock-A", []byte(`{"ID":"lock-A"}`)) })
+			wg.Go(func() { _, putErr = s.PutResourceState(ctx, key, "lock-B", []byte("x")) })
+			wg.Wait()
+			if lockErr != nil {
+				t.Fatalf("round %d: lock: %v", i, lockErr)
+			}
+			if putErr != nil && !errors.Is(putErr, ErrStateLocked) {
+				t.Fatalf("round %d: put: %v", i, putErr)
+			}
+			st, err := s.GetResourceState(ctx, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wrote := putErr == nil
+			if wrote != (st.Version == 1) || wrote != (string(st.Data) == "x") {
+				t.Errorf("round %d: put err %v, state version %d data %q", i, putErr, st.Version, st.Data)
+			}
 		}
 	})
 }

@@ -226,19 +226,15 @@ func (p *Postgres) GetResourceState(ctx context.Context, key string) (ResourceSt
 
 func (p *Postgres) PutResourceState(ctx context.Context, key, lockID string, data []byte) (int64, error) {
 	var version int64
-	err := pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
-		var held string
-		err := tx.QueryRow(ctx, "SELECT lock_id FROM resource_states WHERE key = $1 FOR UPDATE", key).Scan(&held)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if held != "" && held != lockID {
-			return ErrStateLocked
-		}
-		return tx.QueryRow(ctx, `INSERT INTO resource_states (key, data, version) VALUES ($1, $2, 1)
-			ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, version = resource_states.version + 1
-			RETURNING version`, key, data).Scan(&version)
-	})
+	// One statement: the lock condition is checked by the same row lock that
+	// writes, also when another session inserts the row first.
+	err := p.pool.QueryRow(ctx, `INSERT INTO resource_states (key, data, version) VALUES ($1, $2, 1)
+		ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, version = resource_states.version + 1
+		WHERE resource_states.lock_id = '' OR resource_states.lock_id = $3
+		RETURNING version`, key, data, lockID).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrStateLocked // the row exists and another id holds its lock
+	}
 	return version, err
 }
 
