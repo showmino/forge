@@ -27,6 +27,9 @@ CREATE TABLE resource_plans (
 );
 CREATE INDEX resource_plans_target ON resource_plans (service, env, seq);
 CREATE UNIQUE INDEX resource_plans_token ON resource_plans (token_hash) WHERE token_hash <> '';
+-- The sweep and the "one run per target" check read only open plans.
+CREATE INDEX resource_plans_open ON resource_plans (seq)
+    WHERE state IN ('STATE_PLANNING', 'STATE_APPLYING', 'STATE_PLANNED');
 
 CREATE TABLE resource_states (
     key       text PRIMARY KEY,

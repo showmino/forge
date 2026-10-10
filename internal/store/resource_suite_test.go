@@ -139,6 +139,28 @@ func runResourceSuite(t *testing.T, open func(t *testing.T) ResourceStore) {
 		}
 	})
 
+	t.Run("a list carries no plan files", func(t *testing.T) {
+		s := open(t)
+		p := plan("aaaaaaaaaaaa", "services/payments", "staging", forgev1.ResourcePlan_STATE_PLANNED, "ana")
+		p.PlanFile, p.PlanJSON, p.Audit, p.StateVersion = []byte{0, 1, 2}, []byte(`{"a":1}`), []byte(`{"action":"resource.plan"}`), 7
+		p.TokenHash, p.Deadline = "hash-a", at.Add(15*time.Minute)
+		put(t, s, p)
+		got, err := s.ListResourcePlans(ctx, PlanQuery{Limit: 10})
+		if err != nil || len(got) != 1 {
+			t.Fatalf("list: %v (%v)", got, err)
+		}
+		if len(got[0].PlanFile) != 0 || len(got[0].PlanJSON) != 0 || len(got[0].Audit) != 0 {
+			t.Errorf("a listed plan has files: %d %d %d bytes", len(got[0].PlanFile), len(got[0].PlanJSON), len(got[0].Audit))
+		}
+		if got[0].Digest != p.Digest || got[0].StateVersion != 7 || got[0].TokenHash != "hash-a" || !got[0].Deadline.Equal(p.Deadline) || got[0].CreatorSubject != "ana" {
+			t.Errorf("a listed plan lost its other fields: %+v", got[0])
+		}
+		one, err := s.GetResourcePlan(ctx, "resourcePlans/aaaaaaaaaaaa")
+		if err != nil || !bytes.Equal(one.PlanFile, p.PlanFile) || !bytes.Equal(one.PlanJSON, p.PlanJSON) || !bytes.Equal(one.Audit, p.Audit) {
+			t.Errorf("a read plan lost its files: %+v (%v)", one, err)
+		}
+	})
+
 	t.Run("a failed transaction writes nothing", func(t *testing.T) {
 		s := open(t)
 		boom := errors.New("boom")

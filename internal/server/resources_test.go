@@ -490,6 +490,10 @@ func TestRunTokens(t *testing.T) {
 		t.Errorf("read state: %s %v", data, err)
 	}
 	wantCode(t, "a plan run writing state", f.res.WriteState(ctx, spec.Token, "lock-1", []byte("x")), connect.CodeFailedPrecondition, "a plan run may not write the state")
+	wantCode(t, "an unlock with no lock id", f.res.UnlockState(ctx, spec.Token, ""), connect.CodeInvalidArgument, "needs the lock id")
+	if _, err := f.res.LockState(ctx, spec.Token, "lock-2", []byte(`{"ID":"lock-2"}`)); !errors.Is(err, run.ErrLocked) {
+		t.Errorf("the lock was released by an unlock with no id: %v", err)
+	}
 	if err := f.res.UnlockState(ctx, spec.Token, "lock-1"); err != nil {
 		t.Errorf("unlock: %v", err)
 	}
@@ -1007,6 +1011,24 @@ func TestApplyRefusals(t *testing.T) {
 	wantCode(t, "an expired plan", err, connect.CodeFailedPrecondition, "expired; run 'forge resource plan' again")
 }
 
+func TestApplyRefusedForAReaderIsAudited(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	_, err := f.client.ApplyResourcePlan(context.Background(), as("reader", &forgev1.ApplyResourcePlanRequest{Name: p.GetName()}))
+	wantCode(t, "a reader", err, connect.CodePermissionDenied, "services.write")
+	var req *forgev1.AuditEvent
+	for _, e := range allEvents(t, f.store) {
+		if e.GetKind() == "request" && e.GetAction() == "resource.apply" {
+			req = e
+		}
+	}
+	if req == nil || req.GetService() != "services/payments" || req.GetTarget() != "resources/payments/staging" ||
+		req.GetDetails()["plan"] != p.GetName() || req.GetActor().GetEmail() != "bo@example.com" || req.GetResult().GetCode() != "permission_denied" {
+		t.Errorf("request event: %v", req)
+	}
+}
+
 func TestApplyChecksPolicyAgain(t *testing.T) {
 	t.Parallel()
 	f := newResourceFixture(t, nil)
@@ -1506,13 +1528,9 @@ func TestApplyKeepsSecretNames(t *testing.T) {
 		if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_READY || res.GetSecret() != "" {
 			t.Fatalf("record: %v", res)
 		}
-		again, op := f.plan(t, "writer", "staging", database("5Gi", 0), false)
 		// The fake has no database (the hand-played run made none), so it plans a
-		// create; either way the apply must leave the Secret name.
-		t.Logf("same settings planned %d change(s); records event: %v", len(again.GetChanges()), hasStep(op, "records"))
-		if len(again.GetChanges()) == 0 && !hasStep(op, "records") {
-			t.Error("a record without a Secret counted as in sync")
-		}
+		// create; the apply must leave the Secret name.
+		again, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
 		if op := f.apply(t, again.GetName()); op.GetError() != nil {
 			t.Fatalf("repair: %v", op.GetError())
 		}
@@ -1548,6 +1566,32 @@ func TestApplyKeepsSecretNames(t *testing.T) {
 		})
 		if got, _ := st.GetResource(ctx, existing.GetName()); err != nil || !proto.Equal(got, existing) {
 			t.Errorf("record changed by an empty result: %v %v", got, err)
+		}
+	})
+	t.Run("only a ready record with a Secret and the declared settings is in sync", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		ctx := context.Background()
+		settings := &forgev1.ResourceSettings{Name: "main", Type: "postgres", StorageGi: 5, Instances: 1}
+		plan := &forgev1.ResourcePlan{Name: "resourcePlans/new", Service: "services/payments", Env: "staging", Resources: []*forgev1.ResourceSettings{settings}}
+		for name, tc := range map[string]struct {
+			state  forgev1.Resource_State
+			secret string
+			want   bool
+		}{
+			"ready with a Secret":    {forgev1.Resource_STATE_READY, "main-app", true},
+			"ready without a Secret": {forgev1.Resource_STATE_READY, "", false},
+			"failed with a Secret":   {forgev1.Resource_STATE_FAILED, "main-app", false},
+		} {
+			rec := &forgev1.Resource{Name: "resources/payments/staging/main", Service: "services/payments", Env: "staging", Type: "postgres",
+				Settings: settings, State: tc.state, Secret: tc.secret}
+			err := f.store.WriteResources(ctx, func(tx store.ResourceTx) error { return tx.PutResource(ctx, rec) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := f.res.recordsInSync(ctx, plan); err != nil || got != tc.want {
+				t.Errorf("%s: in sync %v (%v), want %v", name, got, err, tc.want)
+			}
 		}
 	})
 	t.Run("a plan without a target", func(t *testing.T) {

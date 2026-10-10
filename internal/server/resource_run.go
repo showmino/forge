@@ -497,24 +497,28 @@ func (r *Resources) appendOutcome(ctx context.Context, p *forgev1.ResourcePlan, 
 
 // The runner's API. Every call carries the run's token.
 
-var errRunToken = connect.NewError(connect.CodeUnauthenticated, errors.New("the run token is not valid"))
+// runTokenError returns a new error each time: a *connect.Error is mutated
+// lazily (Meta), so one shared value would race between handlers.
+func runTokenError() error {
+	return connect.NewError(connect.CodeUnauthenticated, errors.New("the run token is not valid"))
+}
 
 // authRun returns the plan and mode of the run token belongs to. A token
 // works only while its run is going and before the run's deadline.
 func (r *Resources) authRun(ctx context.Context, token string) (*store.PlanRecord, string, error) {
 	if token == "" {
-		return nil, "", errRunToken
+		return nil, "", runTokenError()
 	}
 	rec, err := r.o.Store.ResourcePlanByToken(ctx, hashToken(token))
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, "", errRunToken
+		return nil, "", runTokenError()
 	}
 	if err != nil {
 		return nil, "", storeErr(err)
 	}
 	mode := modeOf(rec.Plan.GetState())
 	if mode == "" || !r.o.Now().Before(rec.Deadline) {
-		return nil, "", errRunToken
+		return nil, "", runTokenError()
 	}
 	return rec, mode, nil
 }
@@ -567,7 +571,7 @@ func (r *Resources) Complete(ctx context.Context, token string, res run.Result) 
 		return storeErr(err)
 	}
 	if !won {
-		return errRunToken
+		return runTokenError()
 	}
 	return nil
 }
@@ -619,6 +623,9 @@ func (r *Resources) UnlockState(ctx context.Context, token, lockID string) error
 	rec, _, err := r.authRun(ctx, token)
 	if err != nil {
 		return err
+	}
+	if lockID == "" {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("a state unlock needs the lock id"))
 	}
 	_, target := planTarget(rec.Plan)
 	err = r.o.Store.UnlockResourceState(ctx, target, lockID)

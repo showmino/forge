@@ -15,13 +15,22 @@ import (
 
 const planColumns = `seq, data, creator_subject, digest, state_version, token_hash, deadline, plan_file, plan_json, audit`
 
-func scanPlan(row pgx.Row) (*PlanRecord, error) {
+// listColumns is planColumns without the plan files and the audit template,
+// which can be megabytes each.
+const listColumns = `seq, data, creator_subject, digest, state_version, token_hash, deadline`
+
+// scanPlan reads a row of planColumns; with files false, of listColumns.
+func scanPlan(row pgx.Row, files bool) (*PlanRecord, error) {
 	var (
 		p        PlanRecord
 		data     []byte
 		deadline *time.Time
 	)
-	if err := row.Scan(&p.Seq, &data, &p.CreatorSubject, &p.Digest, &p.StateVersion, &p.TokenHash, &deadline, &p.PlanFile, &p.PlanJSON, &p.Audit); err != nil {
+	dest := []any{&p.Seq, &data, &p.CreatorSubject, &p.Digest, &p.StateVersion, &p.TokenHash, &deadline}
+	if files {
+		dest = append(dest, &p.PlanFile, &p.PlanJSON, &p.Audit)
+	}
+	if err := row.Scan(dest...); err != nil {
 		return nil, err
 	}
 	p.Plan = &forgev1.ResourcePlan{}
@@ -35,7 +44,7 @@ func scanPlan(row pgx.Row) (*PlanRecord, error) {
 }
 
 func getPlan(ctx context.Context, q querier, where string, arg any) (*PlanRecord, error) {
-	p, err := scanPlan(q.QueryRow(ctx, "SELECT "+planColumns+" FROM resource_plans WHERE "+where, arg))
+	p, err := scanPlan(q.QueryRow(ctx, "SELECT "+planColumns+" FROM resource_plans WHERE "+where, arg), true)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -122,14 +131,14 @@ func (p *Postgres) ListResourcePlans(ctx context.Context, q PlanQuery) ([]*PlanR
 	}
 	args = append(args, q.Limit)
 	rows, err := p.pool.Query(ctx, fmt.Sprintf("SELECT %s FROM resource_plans WHERE %s ORDER BY seq DESC LIMIT $%d",
-		planColumns, strings.Join(where, " AND "), len(args)), args...)
+		listColumns, strings.Join(where, " AND "), len(args)), args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*PlanRecord
 	for rows.Next() {
-		rec, err := scanPlan(rows)
+		rec, err := scanPlan(rows, false)
 		if err != nil {
 			return nil, err
 		}

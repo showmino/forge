@@ -159,7 +159,9 @@ func (r *Resources) ApplyResourcePlan(ctx context.Context, req *connect.Request[
 	if err := r.ready(); err != nil {
 		return nil, err
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
+	// Whoever may read plans learns whether this one exists; the audit event of
+	// a refused apply then names its service and target.
+	if err := require(ctx, PermServicesRead); err != nil {
 		return nil, err
 	}
 	m := req.Msg
@@ -179,6 +181,9 @@ func (r *Resources) ApplyResourcePlan(ctx context.Context, req *connect.Request[
 	noteAuditTarget(ctx, resourceNamePrefix+target)
 	noteAuditDetail(ctx, "plan", planName)
 	noteAuditDetail(ctx, "environment", rec.Plan.GetEnv())
+	if err := require(ctx, PermServicesWrite); err != nil {
+		return nil, err
+	}
 	if err := r.applicable(ctx, rec, m); err != nil {
 		return nil, err
 	}

@@ -69,7 +69,9 @@ func (m *Memory) ListResourcePlans(_ context.Context, q PlanQuery) ([]*PlanRecor
 			q.BeforeSeq > 0 && p.Seq >= q.BeforeSeq:
 			continue
 		}
-		out = append(out, clonePlan(p))
+		c := clonePlan(p)
+		c.PlanFile, c.PlanJSON, c.Audit = nil, nil, nil
+		out = append(out, c)
 	}
 	slices.SortFunc(out, func(a, b *PlanRecord) int { return int(b.Seq - a.Seq) })
 	if len(out) > q.Limit {

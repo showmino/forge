@@ -63,6 +63,7 @@ type ResourceStore interface {
 	// ResourcePlanByToken returns the plan whose TokenHash is tokenHash, or ErrNotFound.
 	ResourcePlanByToken(ctx context.Context, tokenHash string) (*PlanRecord, error)
 	// ListResourcePlans returns up to q.Limit matching plans, newest first.
+	// The records it returns carry no PlanFile, PlanJSON or Audit: read one plan with GetResourcePlan for those.
 	ListResourcePlans(ctx context.Context, q PlanQuery) ([]*PlanRecord, error)
 	// GetResource returns the resource called name, or ErrNotFound.
 	GetResource(ctx context.Context, name string) (*forgev1.Resource, error)
