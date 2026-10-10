@@ -70,7 +70,7 @@ Service: for the catalog calls, from the target. For environments and deploys, f
 1. **Reads pass through.** For a procedure not in the table, it calls `next` and records nothing.
 2. **Setup.** For a write, it puts an empty event in the request context and calls `next`. The auth interceptor fills in the actor when it authenticates: a user (subject, email), a workload (subject, repository), or nothing. If nothing is filled in, the actor is `anonymous` with no subject.
 3. **Handlers add the operation.** A handler that starts long-running work names its operation in the event. `Operations.Start` does this itself from the context, so no handler changes.
-4. **Append.** After `next` returns, the interceptor sets `result` from the returned error (`ok` when there is none), adds `service`, `target` and `details` from the request message, and appends the event.
+4. **Append.** After `next` returns, the interceptor sets `result` from the returned error (`ok` when there is none), adds `service`, `target` and `details` from the request message, and appends the event. If the handler panics, the event is recorded as `internal` (message `panic: <value>`) and the panic is then raised again.
 
 Streaming: `CreateService` is server-streaming. The interceptor wraps the stream to read its request message, and records the code the stream ends with. A create that fails after the repo was made ends the stream without an error, so the creator notes the failure on the event: it is recorded as `failed`, with the step in the message (`push: ... (rolled back: true)`).
 
@@ -145,7 +145,7 @@ Streaming: `CreateService` is server-streaming. The interceptor wraps the stream
 
 **Docs:**
 - README: an audit section.
-- `docs/index.md`: Phase 5 milestone 1 done.
+- `docs/index.md`: Phase 5 milestone 1 built; exit gate pending.
 - `.claude/skills/forge/SKILL.md`: the status.
 
 ## Risks

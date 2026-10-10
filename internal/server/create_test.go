@@ -523,22 +523,29 @@ func TestAuditFailedCreateIsNotOK(t *testing.T) {
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	c := forgev1connect.NewServiceCatalogServiceClient(srv.Client(), srv.URL)
-	stream, err := c.CreateService(context.Background(), as("writer", validRequest()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for stream.Receive() {
-	}
-	if err := stream.Err(); err != nil {
-		t.Fatal(err)
+	// The second call replays the first one's stored failure (same request_id).
+	for range 2 {
+		req := validRequest()
+		req.RequestId = "req-replay"
+		stream, err := c.CreateService(context.Background(), as("writer", req))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for stream.Receive() {
+		}
+		if err := stream.Err(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	evs := allEvents(t, audit)
-	if len(evs) != 1 {
-		t.Fatalf("got %d events, want 1", len(evs))
+	if len(evs) != 2 {
+		t.Fatalf("got %d events, want 2", len(evs))
 	}
-	r := evs[0].GetResult()
-	if evs[0].GetAction() != "service.create" || r.GetCode() != "failed" ||
-		!strings.HasPrefix(r.GetMessage(), "push: ") || !strings.Contains(r.GetMessage(), "boom") || !strings.Contains(r.GetMessage(), "rolled back: true") {
-		t.Fatalf("event %v", evs[0])
+	for _, e := range evs {
+		r := e.GetResult()
+		if e.GetAction() != "service.create" || r.GetCode() != "failed" ||
+			!strings.HasPrefix(r.GetMessage(), "push: ") || !strings.Contains(r.GetMessage(), "boom") || !strings.Contains(r.GetMessage(), "rolled back: true") {
+			t.Fatalf("event %v", e)
+		}
 	}
 }
