@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
@@ -41,8 +43,22 @@ func (r *Resources) applicable(ctx context.Context, rec *store.PlanRecord, m *fo
 	default:
 		return precondition("%s is in state %s", name, planStateWord(p.GetState()))
 	}
+	if ok, err := r.o.Catalog.has(ctx, p.GetService()); err != nil {
+		return err
+	} else if !ok {
+		return precondition("%s is no longer in the catalog, so %s cannot be applied", p.GetService(), name)
+	}
 	if len(p.GetChanges()) == 0 {
-		return precondition("%s has no changes: nothing to apply", name)
+		// Nothing would change on the cluster. That is nothing to apply, unless
+		// Forge's own records are out of line with it (an apply that failed or
+		// was cut short): applying the empty plan then puts the records right.
+		inSync, err := r.recordsInSync(ctx, p)
+		if err != nil {
+			return err
+		}
+		if inSync {
+			return precondition("%s has no changes: nothing to apply", name)
+		}
 	}
 	if m.GetCheckResources() {
 		settings, err := resource.Resolve(m.GetResources(), p.GetEnv())
@@ -62,6 +78,27 @@ func (r *Resources) applicable(ctx context.Context, rec *store.PlanRecord, m *fo
 		return precondition("the resources changed since %s was made; run 'forge resource plan' again", name)
 	}
 	return nil
+}
+
+// recordsInSync reports whether Forge's records of the plan's target say
+// exactly what the plan declares: one ready record per declared resource,
+// with the declared settings, and no other record.
+func (r *Resources) recordsInSync(ctx context.Context, p *forgev1.ResourcePlan) (bool, error) {
+	recs, err := r.o.Store.ListResources(ctx, p.GetService(), p.GetEnv())
+	if err != nil {
+		return false, storeErr(err)
+	}
+	if len(recs) != len(p.GetResources()) {
+		return false, nil
+	}
+	for _, want := range p.GetResources() {
+		if !slices.ContainsFunc(recs, func(res *forgev1.Resource) bool {
+			return res.GetName() == resourceName(p, want.GetName()) && res.GetState() == forgev1.Resource_STATE_READY && proto.Equal(res.GetSettings(), want)
+		}) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // deny marks a ready plan as denied by pol: rules that changed since the
@@ -147,8 +184,10 @@ func (r *Resources) ApplyResourcePlan(ctx context.Context, req *connect.Request[
 	noteAuditDetail(ctx, "policy_rules", pol.GetRules())
 	if pol.GetDenied() {
 		noteAuditDetail(ctx, "policy", "denied")
-		if err := r.deny(ctx, planName, pol); err != nil {
-			return nil, storeErr(err)
+		if !m.GetValidateOnly() {
+			if err := r.deny(ctx, planName, pol); err != nil {
+				return nil, storeErr(err)
+			}
 		}
 		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("%s is denied by policy: %s", planName, strings.Join(pol.GetDeny(), "; ")))
 	}
@@ -166,6 +205,18 @@ func (r *Resources) ApplyResourcePlan(ctx context.Context, req *connect.Request[
 		return nil, err
 	} else if other != "" {
 		return nil, precondition("%s is still running for %s%s; it ends within %s", other, resourceNamePrefix, target, r.o.RunTimeout)
+	}
+	// Under the lock, with no run on the target, neither the plan nor the
+	// state can move in this process: read the plan again and repeat the checks.
+	rec, err = r.o.Store.GetResourcePlan(ctx, planName)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, notFound(planName)
+	}
+	if err != nil {
+		return nil, storeErr(err)
+	}
+	if err := r.applicable(ctx, rec, m); err != nil {
+		return nil, err
 	}
 	now := r.o.Now()
 	token, hash := newRunToken()

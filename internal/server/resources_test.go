@@ -1023,6 +1023,12 @@ func TestApplyChecksPolicyAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := len(f.runner.Started())
+	// A dry run says no, but leaves the plan alone.
+	_, err = other.ApplyResourcePlan(writerCtx(), connect.NewRequest(&forgev1.ApplyResourcePlanRequest{Name: p.GetName(), ValidateOnly: true}))
+	wantCode(t, "a dry run under newer rules", err, connect.CodePermissionDenied, "is denied by policy: frozen: no changes this week")
+	if rec, err := f.store.GetResourcePlan(ctx, p.GetName()); err != nil || rec.Plan.GetState() != forgev1.ResourcePlan_STATE_PLANNED || len(rec.PlanFile) == 0 {
+		t.Fatalf("a dry run changed the plan: %v %v", rec, err)
+	}
 	_, err = other.ApplyResourcePlan(writerCtx(), connect.NewRequest(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()}))
 	wantCode(t, "newer rules deny", err, connect.CodePermissionDenied, "is denied by policy: frozen: no changes this week")
 	if len(f.runner.Started()) != started {
@@ -1290,5 +1296,160 @@ func TestApplyRefusedWhileStoredRunLives(t *testing.T) {
 	mu.Unlock()
 	if _, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()}); err != nil {
 		t.Errorf("after the deadline: %v", err)
+	}
+}
+
+// movingStore moves the real state of payments/staging while an apply is
+// being checked: on the second read of that key it writes a new state first.
+type movingStore struct {
+	store.ResourceStore
+	mu    sync.Mutex
+	armed bool
+	reads int
+}
+
+func (s *movingStore) GetResourceState(ctx context.Context, key string) (store.ResourceState, error) {
+	s.mu.Lock()
+	move := false
+	if s.armed && key == "payments/staging" {
+		s.reads++
+		move = s.reads == 2
+	}
+	s.mu.Unlock()
+	if move {
+		if _, err := s.PutResourceState(ctx, key, "", []byte("moved")); err != nil {
+			return store.ResourceState{}, err
+		}
+	}
+	return s.ResourceStore.GetResourceState(ctx, key)
+}
+
+func TestApplyRechecksUnderLock(t *testing.T) {
+	t.Parallel()
+	ms := &movingStore{}
+	f := newResourceFixture(t, func(o *ResourceOptions) { ms.ResourceStore = o.Store; o.Store = ms })
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	ms.mu.Lock()
+	ms.armed = true
+	ms.mu.Unlock()
+	started := len(f.runner.Started())
+	_, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()})
+	wantCode(t, "a state that moved", err, connect.CodeFailedPrecondition, "the resources changed since")
+	if len(f.runner.Started()) != started {
+		t.Error("a stale apply started a run")
+	}
+	if got := f.getPlan(t, p.GetName()); got.GetState() != forgev1.ResourcePlan_STATE_PLANNED {
+		t.Errorf("plan: %v", got.GetState())
+	}
+}
+
+func hasStep(op *forgev1.Operation, step string) bool {
+	return slices.ContainsFunc(op.GetEvents(), func(e *forgev1.OperationEvent) bool { return e.GetStep() == step })
+}
+
+func TestApplyRepairsRecords(t *testing.T) {
+	t.Parallel()
+	del := func(f *resourceFixture, svc string) error {
+		_, err := f.cat.DeleteService(writerCtx(), connect.NewRequest(&forgev1.DeleteServiceRequest{Name: svc}))
+		return err
+	}
+	t.Run("a failed first apply", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		f.runner.FailApply = "tofu: boom"
+		p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		f.apply(t, p.GetName())
+		f.runner.FailApply = ""
+		if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_FAILED {
+			t.Fatalf("record: %v", res)
+		}
+		if err := del(f, "services/payments"); err == nil {
+			t.Fatal("a service with a failed record was deleted")
+		}
+		gone, op := f.plan(t, "writer", "staging", nil, true)
+		if len(gone.GetChanges()) != 0 || !hasStep(op, "records") {
+			t.Fatalf("plan: %v events %s", gone.GetChanges(), eventSteps(op))
+		}
+		if op := f.apply(t, gone.GetName()); op.GetError() != nil {
+			t.Fatalf("repair: %v", op.GetError())
+		}
+		if _, err := f.client.GetResource(context.Background(), as("reader", &forgev1.GetResourceRequest{Name: "resources/payments/staging/main"})); connect.CodeOf(err) != connect.CodeNotFound {
+			t.Errorf("the record is still there: %v", err)
+		}
+		if err := del(f, "services/payments"); err != nil {
+			t.Errorf("delete: %v", err)
+		}
+	})
+	t.Run("a cut short update", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		f.apply(t, p.GetName())
+		first := f.getResource(t, "resources/payments/staging/main")
+		grow, _ := f.plan(t, "writer", "staging", database("10Gi", 0), false)
+		f.runner.StartErr = errors.New("no nodes")
+		f.apply(t, grow.GetName())
+		f.runner.StartErr = nil
+		if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_FAILED {
+			t.Fatalf("record: %v", res)
+		}
+		again, op := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		if len(again.GetChanges()) != 0 || !hasStep(op, "records") {
+			t.Fatalf("plan: %v events %s", again.GetChanges(), eventSteps(op))
+		}
+		op = f.apply(t, again.GetName())
+		if op.GetError() != nil {
+			t.Fatalf("repair: %v", op.GetError())
+		}
+		res := f.getResource(t, "resources/payments/staging/main")
+		if res.GetState() != forgev1.Resource_STATE_READY || res.GetSecret() != "main-app" || !res.GetCreateTime().AsTime().Equal(first.GetCreateTime().AsTime()) {
+			t.Errorf("record: %v", res)
+		}
+		if last := op.GetEvents()[len(op.GetEvents())-1]; last.GetMessage() != "Deploy to give the app DATABASE_URL." {
+			t.Errorf("last event: %q", last.GetMessage())
+		}
+	})
+	t.Run("records in sync", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		f.apply(t, p.GetName())
+		same, op := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		if len(same.GetChanges()) != 0 || hasStep(op, "records") {
+			t.Errorf("events %s", eventSteps(op))
+		}
+		_, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: same.GetName()})
+		wantCode(t, "nothing to apply", err, connect.CodeFailedPrecondition, "nothing to apply")
+	})
+}
+
+func TestSecretName(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	for _, ok := range []string{"main-app", "a", "db.v1-x"} {
+		if got := f.res.secretName("r", ok); got != ok {
+			t.Errorf("%q gave %q", ok, got)
+		}
+	}
+	for _, bad := range []string{"", "Bad_Name", "a\\x01b", strings.Repeat("a", 300), "-a", "a-"} {
+		if got := f.res.secretName("r", bad); got != "" {
+			t.Errorf("%q gave %q", bad, got)
+		}
+	}
+}
+
+func TestApplyAfterServiceDeleted(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	resp := f.startPlan(t, "writer", "services/billing", "staging", database("5Gi", 0), false)
+	waitCIOp(t, f.ops, resp.GetOperation().GetName())
+	if _, err := f.cat.DeleteService(writerCtx(), connect.NewRequest(&forgev1.DeleteServiceRequest{Name: "services/billing"})); err != nil {
+		t.Fatal(err)
+	}
+	started := len(f.runner.Started())
+	_, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: resp.GetPlan().GetName()})
+	wantCode(t, "a deleted service", err, connect.CodeFailedPrecondition, "is no longer in the catalog")
+	if len(f.runner.Started()) != started {
+		t.Error("an apply started a run")
 	}
 }

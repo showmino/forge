@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -342,7 +343,7 @@ func (r *Resources) endRun(ctx context.Context, planName, mode string, end runEn
 			}
 		default:
 			p.State, p.ApplyTime = forgev1.ResourcePlan_STATE_APPLIED, now
-			if err := applyResources(ctx, tx, p, end.res.Secrets, now); err != nil {
+			if err := r.applyResources(ctx, tx, p, end.res.Secrets, now); err != nil {
 				return err
 			}
 		}
@@ -356,21 +357,24 @@ func (r *Resources) endRun(ctx context.Context, planName, mode string, end runEn
 	switch p := final.Plan; p.GetState() {
 	case forgev1.ResourcePlan_STATE_PLANNED:
 		r.liveEmit(planName, "policy", "passed; "+resource.Count(p.GetChanges()))
+		if len(p.GetChanges()) == 0 {
+			if inSync, err := r.recordsInSync(ctx, p); err == nil && !inSync {
+				r.liveEmit(planName, "records", "Forge's records differ from what exists; apply this plan to put them right.")
+			}
+		}
 	case forgev1.ResourcePlan_STATE_DENIED:
 		r.liveEmit(planName, "policy", "denied: "+deniedMessage(p.GetPolicy()))
 	case forgev1.ResourcePlan_STATE_APPLIED:
-		r.liveEmit(planName, "apply", appliedHint(p.GetChanges()))
+		r.liveEmit(planName, "apply", appliedHint(p))
 	}
 	r.signal(planName)
 	return true, nil
 }
 
 // appliedHint tells the caller what an apply means for the app.
-func appliedHint(changes []*forgev1.ResourceChange) string {
-	for _, c := range changes {
-		if c.GetAction() != "delete" {
-			return "Deploy to give the app DATABASE_URL."
-		}
+func appliedHint(p *forgev1.ResourcePlan) string {
+	if len(p.GetResources()) > 0 {
+		return "Deploy to give the app DATABASE_URL."
 	}
 	return "The next deploy drops DATABASE_URL."
 }
@@ -381,27 +385,39 @@ func resourceName(p *forgev1.ResourcePlan, name string) string {
 	return resourceNamePrefix + target + "/" + name
 }
 
-// applyResources records what an applied plan left behind.
-func applyResources(ctx context.Context, tx store.ResourceTx, p *forgev1.ResourcePlan, secrets map[string]string, now *timestamppb.Timestamp) error {
-	for _, c := range p.GetChanges() {
-		name := resourceName(p, c.GetResource())
-		if c.GetAction() == "delete" {
-			if err := tx.DeleteResource(ctx, name); err != nil {
+// applyResources makes Forge's records say what an applied plan declared:
+// one ready record per declared resource, and no record for anything else in
+// the target. It works from the declared resources, not from the plan's
+// changes, so an apply also repairs records that a failed or interrupted
+// apply left behind.
+func (r *Resources) applyResources(ctx context.Context, tx store.ResourceTx, p *forgev1.ResourcePlan, secrets map[string]string, now *timestamppb.Timestamp) error {
+	old, err := tx.ListResources(ctx, p.GetService(), p.GetEnv())
+	if err != nil {
+		return err
+	}
+	declared := map[string]bool{}
+	for _, s := range p.GetResources() {
+		declared[resourceName(p, s.GetName())] = true
+	}
+	created := map[string]*timestamppb.Timestamp{}
+	for _, res := range old {
+		created[res.GetName()] = res.GetCreateTime()
+		if !declared[res.GetName()] {
+			if err := tx.DeleteResource(ctx, res.GetName()); err != nil {
 				return err
 			}
-			continue
 		}
-		if c.GetAfter() == nil {
-			continue
+	}
+	for _, s := range p.GetResources() {
+		name := resourceName(p, s.GetName())
+		res := &forgev1.Resource{
+			Name: name, Service: p.GetService(), Env: p.GetEnv(), Type: s.GetType(), Settings: s,
+			State: forgev1.Resource_STATE_READY, Secret: r.secretName(name, secrets[s.GetName()]),
+			LastPlan: p.GetName(), CreateTime: now, UpdateTime: now,
 		}
-		res := &forgev1.Resource{Name: name, Service: p.GetService(), Env: p.GetEnv(), CreateTime: now}
-		if old, err := tx.GetResource(ctx, name); err == nil {
-			res.CreateTime = old.GetCreateTime()
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return err
+		if t := created[name]; t != nil {
+			res.CreateTime = t
 		}
-		res.Type, res.Settings, res.State = c.GetAfter().GetType(), c.GetAfter(), forgev1.Resource_STATE_READY
-		res.Secret, res.LastPlan, res.UpdateTime = secrets[c.GetResource()], p.GetName(), now
 		if err := tx.PutResource(ctx, res); err != nil {
 			return err
 		}
@@ -607,4 +623,17 @@ func cleanChanges(changes []*forgev1.ResourceChange) {
 			}
 		}
 	}
+}
+
+var secretNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$`)
+
+// secretName is the Secret name a runner returned for resource, when it is
+// a valid Kubernetes name; otherwise "" and a log line. Forge stores the
+// name only and never reads the Secret.
+func (r *Resources) secretName(resource, name string) string {
+	if secretNameRE.MatchString(name) {
+		return name
+	}
+	r.o.Log.Warn("a resource run returned no usable Secret name", "resource", resource)
+	return ""
 }
