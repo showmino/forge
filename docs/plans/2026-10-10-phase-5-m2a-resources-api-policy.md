@@ -19,6 +19,16 @@
 
 **Not in this plan (Plan 2):** the Kubernetes Job launcher, the runner HTTP API and second listener, the `forge-runner` program and image, the OpenTofu module, `database.secret` in deploy values and the chart, the k3s manifests, `forge-api` flags for resources. Plan 3 is the rollout and exit gate. In this plan `cmd/forge-api` does not turn resources on.
 
+## As built
+
+Reviews during execution changed the code in these places. Where the task text below differs, the code and this list are right.
+
+- **Task 3:** `PutResourceState` in PostgreSQL is one `INSERT ... ON CONFLICT DO UPDATE ... WHERE` statement, so a write cannot get past a lock taken just before it.
+- **Task 4:** the Rego rules were rewritten to fail closed (a total `field` helper; refusals for unreadable actions, an unknown environment, a non-list of changes, fewer than 1 instance; both ends of a replace checked). `Evaluate` returns an error for a plan that is not a JSON object. The namespace refusal quotes the namespace.
+- **Task 6:** runner text is cleaned before it is stored (`cleanChanges`, and policy messages in `evaluate`); launcher `Stop` and `Status` errors are logged; `PlanResources` also refuses while the store shows a run still going for the target (`storedRun`).
+- **Task 7:** `ApplyResourcePlan` repeats its checks under the lock, refuses a plan whose service left the catalog, uses `storedRun`, and a dry run never denies a plan. After an apply, records are made to match the plan's declared resources (`applyResources`), so a plan with no changes can be applied when records are out of line (`recordsInSync`). A record keeps its Secret name when a run reports none.
+- **Task 8:** the sweep pages through plans (`ResourceOptions.SweepPage`) and stops the runner of a run it ends.
+
 ## Global Constraints
 
 - **Exact names:**

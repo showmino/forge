@@ -45,7 +45,7 @@ The v1 CLI has ten command groups; each maps one-to-one to an API resource so th
 | `create` (shortcut) | scaffold from a template | `forge create payments --template go-grpc --team billing` | 2 |
 | `env` | `list`, `create`, `get`, `destroy`, `extend` | `forge env create pr-142 --service payments --ttl 48h` | 3 |
 | `deploy` | `start`, `status`, `history`, `rollback`, `promote` | `forge deploy start payments --env staging --ref v1.4.2` | 4 |
-| `resource` | `plan`, `apply`, `list`, `get` | `forge resource plan -f forge.yaml` | 5 |
+| `resource` | `plan`, `apply`, `list`, `get` | `forge resource plan --env staging` | 5 |
 | `audit` | `list`, `get` | `forge audit list --service payments --since 7d` | 5 |
 | `op` | `list`, `watch`, `cancel` | `forge op watch op_9f2c` | 3 |
 
@@ -61,6 +61,21 @@ Utility commands ship in Phase 1: `forge version`, `forge completion <shell>`, `
 - `--timeout`, `--wait`: for long-running operations.
 
 **The `forge.yaml` manifest** lives in each service repo and is the declarative source of truth for the service's catalog entry, environments and resources. Commands run inside a repo read it, so `forge deploy start --env staging` needs no service name there.
+
+A service declares its resources there. This version has one type, a Postgres database, at most one per service:
+
+```yaml
+resources:
+  - name: main
+    type: postgres
+    storage: 5Gi            # default 1Gi
+    environments:           # optional, per environment
+      production:
+        storage: 20Gi
+        instances: 2        # default: 1 in staging, 2 in production
+```
+
+`forge resource plan --env <env>` saves a plan and checks it against policy; `forge resource apply` runs exactly that plan. See `docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`.
 
 ## Configuration and authentication
 
@@ -225,7 +240,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy: its API, policy rules and CLI are built and tested against a fake runner (`docs/plans/2026-10-10-phase-5-m2a-resources-api-policy.md`); the runner that makes real databases, and the exit gate on k3s, are next. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |

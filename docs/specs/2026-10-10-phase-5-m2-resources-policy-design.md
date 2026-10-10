@@ -1,6 +1,6 @@
 # Phase 5, milestone 2: resources and policy
 
-Oct 10, 2026 · Showmino · Draft for review
+Oct 10, 2026 · Showmino · Approved; amended as built on Oct 10, 2026
 
 Phase 5 is "resources and audit". Milestone 1 built the audit log. Milestone 2 lets a service ask for a resource in `forge.yaml` and get it through `forge resource plan` and `forge resource apply`. Forge API runs OpenTofu for it, checks every plan against policy, and records every plan and apply in the audit log.
 
@@ -73,7 +73,7 @@ Policy: passed
 Apply it with: forge resource apply resourcePlans/7f3a91c2b04e
 ```
 
-A plan with nothing to change prints "No changes" and cannot be applied.
+A plan with nothing to change prints "No changes". It cannot be applied, with one exception: when Forge's own records are out of line with what exists (an apply failed or was cut short), applying the empty plan puts the records right, and the plan's operation says so.
 
 For a service that has previews, the plan output adds one line: previews get no database and no `DATABASE_URL`.
 
@@ -132,9 +132,9 @@ The Operation kinds are `resource.plan` and `resource.apply`. Their target is `r
 2. If the namespace `<service>-<env>` does not exist, forge-api creates it with the three labels Argo CD's ApplicationSet gives it (`app.kubernetes.io/managed-by: forge`, `forge.dev/service`, `forge.dev/deploy-env`). A production database can then exist before the first promote.
 3. The runner fetches its work, which now includes the saved plan file, and runs `tofu init` and `tofu apply` on that file. The module waits until CloudNativePG reports the cluster healthy.
 4. The runner hands back the outputs (the cluster name and the name of its connection Secret).
-5. forge-api saves the resource record as `ready` and the plan as `applied`. The Operation's last event is: "Deploy to give the app `DATABASE_URL`."
+5. forge-api marks the plan `applied` and makes its resource records match what the plan declared: one `ready` record per declared resource, and no record for anything else in that service and environment. A record keeps its Secret name when a run reports none. The Operation's last event is: "Deploy to give the app `DATABASE_URL`."
 
-For a plan that deletes the database, step 5 removes the resource record instead.
+So after a plan that deletes the database, its record is gone.
 
 ### When apply refuses a plan
 
@@ -142,12 +142,16 @@ For a plan that deletes the database, step 5 removes the resource record instead
 | --- | --- |
 | The plan is not in state `planned` | "plan was denied by policy", "plan was already applied", "plan failed" or "plan expired" |
 | The plan is older than 24 hours | "plan expired; run `forge resource plan` again" |
-| The plan has no changes | "nothing to apply" |
+| The plan has no changes and Forge's records already match what it declares | "nothing to apply" |
+| The service is no longer in the catalog | "is no longer in the catalog" |
+| Another run for the same service and environment is still going, also one started before a forge-api restart | "is still running for resources/<service>/<env>" |
 | The CLI sent the manifest's resources and their digest differs from the plan's | "forge.yaml changed since this plan was made" |
 | The stored state's serial differs from the one the plan was made on | "the resources changed since this plan was made" |
 | Policy, run again on the saved plan, now denies it | the policy messages |
 
 All are `failed_precondition`, except the policy refusal, which is `permission_denied`. OpenTofu's own check of a saved plan against the state stays as a second guard.
+
+The checks run twice: once when the call arrives, and again once forge-api holds the lock for the target, so a plan that went stale in between is not started. A dry run (`validate_only`) that policy denies answers `permission_denied` and leaves the plan as it was.
 
 ### Plan and resource states
 
@@ -233,10 +237,11 @@ The plan file and plan JSON are cleared when a plan is applied or expires. The s
 
 ### Failure and restart
 
-- A sweep, at start and then every minute, marks a `planning` or `applying` plan whose deadline passed as `failed` or `apply_failed`, and marks an unused `planned` plan older than 24 hours as `expired`.
+- A sweep, at start and then every minute, marks a `planning` or `applying` plan whose deadline passed as `failed` or `apply_failed`, and marks an unused `planned` plan older than 24 hours as `expired`. It reads every page of plans, and it asks the launcher to stop the runner of a run it ends.
+- After a restart forge-api does not know which runs are still going, so it also asks the store: while a plan for a service and environment is `planning` or `applying` and its deadline has not passed, a new plan or apply for that target is refused.
 - Tokens, plans and state are in Postgres. If forge-api restarts during a run, the runner can still write state and complete the run, so Forge never loses track of a database it created.
 - The Operation itself is lost on a restart, as with deploys. The audit outcome is not: every run that ends gets exactly one outcome event, whether it ends through a live Operation, through a completion after a restart, or through the sweep.
-- A failed apply can leave a half-made database. The state records what exists, the resource shows `failed`, and a new plan and apply repair it.
+- A failed apply can leave a half-made database. The state records what exists, the resource shows `failed`, and a new plan and apply repair it. If that new plan has nothing to change, applying it still puts Forge's records right.
 
 ## 3. Policy
 
@@ -245,6 +250,8 @@ The plan file and plan JSON are cleared when a plan is applied or expires. The s
 forge-api evaluates Rego in process with `github.com/open-policy-agent/opa/v1/rego`. The rules live in `policy/` in this repo, in package `forge.resources`, and are embedded in the binary. Changing a rule is a pull request and a forge-api release.
 
 A rule set that does not compile stops forge-api from starting. An error while evaluating refuses the plan. Forge never applies a plan it could not check.
+
+The rules are written to fail closed. In Rego a rule that reads a missing field, or a field of the wrong type, does not fire, so every rule reads optional fields through one helper with a fallback, and a change the rules cannot read is refused by a rule of its own: a change with no readable actions, a database with no readable size or instance count, an environment the limits do not know, or a list of changes that is not a list. A plan that is not a JSON object is an evaluation error.
 
 ### What a rule sees
 
@@ -273,7 +280,9 @@ A rule adds a message to `deny` to refuse the plan or to `warn` to comment on it
 | Production with fewer than 2 instances | deny |
 | More than 3 instances | deny |
 | A storage class other than `longhorn-retain` | deny |
-| The plan touches anything but a CloudNativePG cluster in `<service>-<env>` | deny |
+| The plan touches anything but a CloudNativePG cluster in `<service>-<env>`; on a replace both the old and the new object are checked | deny |
+| An environment other than staging or production | deny |
+| Fewer than 1 instance | deny |
 | Staging with more than 1 instance | warn |
 
 The last deny rule guards the platform: if the module or the runner ever tried to change something else, policy stops it.
@@ -411,6 +420,8 @@ With a throwaway service on k3s:
 - Previews get no database.
 - Service databases have no backups in this version.
 - Recovering a deleted database from its retained volumes is manual.
+- The rules check `spec.storage` only. The module does not use CloudNativePG's separate WAL storage or tablespaces; if it ever does, the rules must cover them.
+- Text from a runner (change names, actions, error messages) is cleaned and cut to 256 or 500 characters before it is stored or shown.
 
 ## Out of scope
 
