@@ -62,7 +62,7 @@ An audit event is an API resource named `auditEvents/{id}`. `id` comes from a Po
 | PromoteDeploy | `deploy.promote` | `deployments/<service>/production` | `from`, `to`, `validate_only` |
 | CancelOperation | `operation.cancel` | `operations/<id>` | |
 
-The plan fills in the exact field names from the protos. The rule: only identifiers and settings, never free text from the caller. Text that comes from the caller (identifiers, client headers, error messages) is cleaned to valid UTF-8, stripped of NUL bytes and cut to 256 characters (500 for the result message) before it is stored.
+The plan fills in the exact field names from the protos. The rule: only identifiers and settings, never free text from the caller. Text that comes from the caller (identifiers, client headers, error messages) is cleaned to valid UTF-8, stripped of NUL bytes, stripped of control and bidi characters (each replaced by U+FFFD) and cut to 256 characters (500 for the result message) before it is stored.
 
 Service: for the catalog calls, from the target. For environments and deploys, from the request's `service` field when it has one, otherwise from the environment or deployment name. For `operation.cancel`, from the operation's stored service.
 
@@ -72,7 +72,7 @@ Service: for the catalog calls, from the target. For environments and deploys, f
 3. **Handlers add the operation.** A handler that starts long-running work names its operation in the event. `Operations.Start` does this itself from the context, so no handler changes.
 4. **Append.** After `next` returns, the interceptor sets `result` from the returned error (`ok` when there is none), adds `service`, `target` and `details` from the request message, and appends the event.
 
-Streaming: `CreateService` is server-streaming. The interceptor wraps the stream to read its request message, and records the code the stream ends with.
+Streaming: `CreateService` is server-streaming. The interceptor wraps the stream to read its request message, and records the code the stream ends with. A create that fails after the repo was made ends the stream without an error, so the creator notes the failure on the event: it is recorded as `failed`, with the step in the message (`push: ... (rolled back: true)`).
 
 **Outcomes.**
 - **At start:** `Operations.Start` copies the actor, action and service of the event in its context onto the operation.
@@ -154,6 +154,14 @@ Streaming: `CreateService` is server-streaming. The interceptor wraps the stream
 - **Integrity:** the trigger makes the table append-only for the API and for mistakes, not against a database administrator. Shipping events to a separate sink would close that gap, and is out of scope.
 - **Database down:** events are then only in forge-api's logs, as described in section 2.
 - **Overlap at rollout:** a few seconds of unaudited writes on the old pod.
+
+## Known limits
+
+- **Undecodable calls:** a write call whose body Connect cannot decode (malformed JSON, a wrong content type) is rejected before the interceptors, so it is not recorded. Nothing can change on that path.
+- **Missing service:** some refused calls carry no service, because the lookup comes after the checks: a permission-denied destroy or extend of an environment, a cancel of an operation, and a refused `CreateService`. So `--service` can miss them.
+- **Restarts:** an operation interrupted by a forge-api restart gets no outcome row.
+- **Anonymous flood:** stored events from anonymous callers are limited to 60 a minute; the rest are only logged (a warning with the running count).
+- **Refused CI token:** a CI token that is valid but refused (a feature branch, say) is recorded as `anonymous`, with the repository in the message.
 
 ## Out of scope
 

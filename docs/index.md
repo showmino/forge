@@ -225,7 +225,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (`docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is built; exit gate pending (`docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |
@@ -233,7 +233,7 @@ Build in six phases, sequenced rather than dated, and move on only when a phase'
 | 2 · Templates and scaffolding (done) | template list / get / lint; `forge create` from a Git template repo; first golden path: Go gRPC service | A scaffolded service passes its own CI and appears in the catalog |
 | 3 · Environments (done) | env create / list / destroy / extend with a TTL; operations: op watch, streamed progress; one Kubernetes namespace per preview | `forge create` to a running preview environment in under 10 minutes |
 | 4 · Deployments (done) | deploy start / status / history; rollback and promote through Argo CD; deploys from CI with workload identity | A team ships to staging from CI without kubectl or Argo access |
-| 5 · Resources and audit (audit log done) | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
+| 5 · Resources and audit (audit log built; gate pending) | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
 | 6 · Web dashboard | a browser UI on the same Forge API: GitHub login through Dex; catalog and service pages; templates and create; environments; deploys with promote and rollback; operations with live progress; audit log | A writer creates, previews and promotes a service from the browser, and a reader sees the same data, all without a terminal |
 
 Each phase grows the API and the CLI together, so the CLI never ships a command the server cannot back. The command table above tags every group with its phase.
