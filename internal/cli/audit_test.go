@@ -68,9 +68,9 @@ func TestAuditListSinceDuration(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.seedAudit() // all in 2025-10-10 09:14–09:17 UTC
-	// 1000 days back covers them; 1h back from now does not (now is the real clock).
-	if r := h.ok("audit", "list", "--since", "1000d", "-o", "name"); strings.Count(r.out, "\n") != 4 {
-		t.Errorf("--since 1000d: %q", r.out)
+	// 36500 days (100 years) back covers them; 1h back from now does not (now is the real clock).
+	if r := h.ok("audit", "list", "--since", "36500d", "-o", "name"); strings.Count(r.out, "\n") != 4 {
+		t.Errorf("--since 36500d: %q", r.out)
 	}
 	if r := h.ok("audit", "list", "--since", "1h", "-o", "name"); strings.Contains(r.out, "auditEvents/") {
 		t.Errorf("--since 1h: %q", r.out)
