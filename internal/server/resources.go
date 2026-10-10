@@ -257,6 +257,11 @@ func (r *Resources) PlanResources(ctx context.Context, req *connect.Request[forg
 	if running, ok := r.running[target]; ok {
 		return nil, precondition("%s is already running for %s%s", running, resourceNamePrefix, target)
 	}
+	if other, err := r.storedRun(ctx, name, env); err != nil {
+		return nil, err
+	} else if other != "" {
+		return nil, precondition("%s is still running for %s%s; it ends within %s", other, resourceNamePrefix, target, r.o.RunTimeout)
+	}
 	now := r.o.Now()
 	token, hash := newRunToken()
 	rec := &store.PlanRecord{
@@ -414,4 +419,23 @@ func (r *Resources) GetResource(ctx context.Context, req *connect.Request[forgev
 		return nil, err
 	}
 	return nil, notFound(req.Msg.GetName())
+}
+
+// storedRun returns the plan of a run the store says is still going for
+// service ("services/<id>") and env: one this process does not watch, such
+// as a run started before a restart. Its deadline has not passed, so its
+// runner may still be alive and writing state.
+func (r *Resources) storedRun(ctx context.Context, service, env string) (string, error) {
+	recs, err := r.o.Store.ListResourcePlans(ctx, store.PlanQuery{Service: service, Env: env, Limit: 10,
+		States: []forgev1.ResourcePlan_State{forgev1.ResourcePlan_STATE_PLANNING, forgev1.ResourcePlan_STATE_APPLYING}})
+	if err != nil {
+		return "", storeErr(err)
+	}
+	now := r.o.Now()
+	for _, rec := range recs {
+		if now.Before(rec.Deadline) {
+			return rec.Plan.GetName(), nil
+		}
+	}
+	return "", nil
 }

@@ -135,7 +135,12 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 	defer deadline.Stop()
 	tick := time.NewTicker(r.o.Poll)
 	defer tick.Stop()
-	stop := func() { _ = r.o.Launcher.Stop(context.WithoutCancel(ctx), spec.Plan, spec.Mode) }
+	stop := func() {
+		if err := r.o.Launcher.Stop(context.WithoutCancel(ctx), spec.Plan, spec.Mode); err != nil {
+			r.o.Log.Warn("stopping a resource runner", "plan", spec.Plan, "mode", spec.Mode, "error", err)
+		}
+	}
+	statusErrs := 0      // consecutive failed status reads
 	var exited time.Time // when the runner was first seen to have ended cleanly
 	for {
 		select {
@@ -149,7 +154,14 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 			return r.failRun(ctx, spec, opCodeRunTimeout, fmt.Sprintf("the run did not finish within %s", r.o.RunTimeout))
 		case <-tick.C:
 			st, err := r.o.Launcher.Status(ctx, spec.Plan, spec.Mode)
-			if err != nil || !st.Done {
+			if err != nil {
+				if statusErrs++; statusErrs == 1 {
+					r.o.Log.Warn("reading a resource runner's status", "plan", spec.Plan, "mode", spec.Mode, "error", err)
+				}
+				continue
+			}
+			statusErrs = 0
+			if !st.Done {
 				continue
 			}
 			if st.Failed {
@@ -239,6 +251,11 @@ func (r *Resources) evaluate(ctx context.Context, rec *store.PlanRecord, planJSO
 	if err != nil {
 		return nil, err
 	}
+	for _, msgs := range [][]string{res.Deny, res.Warn} {
+		for i, m := range msgs {
+			msgs[i] = auditText(m, auditMessageMax)
+		}
+	}
 	return &forgev1.PolicyResult{Denied: res.Denied(), Deny: res.Deny, Warn: res.Warn, Rules: r.o.Policy.Fingerprint()}, nil
 }
 
@@ -267,6 +284,7 @@ func (r *Resources) checkPlan(ctx context.Context, rec *store.PlanRecord, end *r
 	if err != nil {
 		return fail("the plan could not be read: %v", err)
 	}
+	cleanChanges(changes)
 	pol, err := r.evaluate(ctx, rec, res.PlanJSON, templateActor(rec.Audit))
 	if err != nil {
 		return fail("policy could not be evaluated: %v", err)
@@ -576,4 +594,17 @@ func (r *Resources) UnlockState(ctx context.Context, token, lockID string) error
 		return run.ErrLocked
 	}
 	return storeErr(err)
+}
+
+// cleanChanges makes the text a runner's plan put into changes safe to store
+// and show: no control or bidi characters, and bounded.
+func cleanChanges(changes []*forgev1.ResourceChange) {
+	for _, c := range changes {
+		c.Resource, c.Type = auditText(c.Resource, auditFieldMax), auditText(c.Type, auditFieldMax)
+		for _, st := range []*forgev1.ResourceSettings{c.Before, c.After} {
+			if st != nil {
+				st.Name, st.Type = auditText(st.Name, auditFieldMax), auditText(st.Type, auditFieldMax)
+			}
+		}
+	}
 }

@@ -1,7 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -10,6 +14,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
@@ -618,4 +623,156 @@ func TestListAndViewPlans(t *testing.T) {
 	if got := list("writer", &forgev1.ListResourcePlansRequest{States: []forgev1.ResourcePlan_State{forgev1.ResourcePlan_STATE_PLANNED}}); len(got) != 0 {
 		t.Errorf("expired plans listed as planned: %v", got)
 	}
+}
+
+func TestPlanHostileText(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	addr := "evil\x1b[31m\u202e" + strings.Repeat("A", 5000)
+	body, err := json.Marshal(map[string]any{"format_version": "1.2", "resource_changes": []any{map[string]any{
+		"address": addr, "type": "null_resource",
+		"change": map[string]any{"actions": []string{"create"}, "before": nil, "after": map[string]any{"id": "1"}},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.runner.PlanJSON = body
+	p, op := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	bad := func(s string) bool { return strings.ContainsAny(s, "\x1b\u202e") }
+	if p.GetState() != forgev1.ResourcePlan_STATE_DENIED {
+		t.Fatalf("plan: %v", p)
+	}
+	if cs := p.GetChanges(); len(cs) != 1 || bad(cs[0].GetResource()) || len([]rune(cs[0].GetResource())) > 256 {
+		t.Errorf("changes: %q", p.GetChanges())
+	}
+	if len(p.GetPolicy().GetDeny()) == 0 {
+		t.Error("no deny messages")
+	}
+	for _, m := range append(slices.Clone(p.GetPolicy().GetDeny()), p.GetPolicy().GetWarn()...) {
+		if bad(m) || len([]rune(m)) > 500 {
+			t.Errorf("policy message %q", m)
+		}
+	}
+	if m := op.GetError().GetMessage(); bad(m) {
+		t.Errorf("operation error %q", m)
+	}
+	for _, ev := range op.GetEvents() {
+		if bad(ev.GetMessage()) {
+			t.Errorf("operation event %q", ev.GetMessage())
+		}
+	}
+	outs := f.outcomes(t, p.GetName())
+	if len(outs) != 1 || bad(outs[0].GetResult().GetMessage()) {
+		t.Errorf("outcomes: %v", outs)
+	}
+}
+
+// flakyLauncher wraps a launcher: Stop always fails, and so do the first
+// statusFails calls of Status.
+type flakyLauncher struct {
+	run.Launcher
+	mu          sync.Mutex
+	statusFails int
+}
+
+func (l *flakyLauncher) Status(ctx context.Context, plan, mode string) (run.Status, error) {
+	l.mu.Lock()
+	fail := l.statusFails > 0
+	if fail {
+		l.statusFails--
+	}
+	l.mu.Unlock()
+	if fail {
+		return run.Status{}, errors.New("status is down")
+	}
+	return l.Launcher.Status(ctx, plan, mode)
+}
+
+func (l *flakyLauncher) Stop(context.Context, string, string) error {
+	return errors.New("stop is down")
+}
+
+// lockedBuffer is a log sink safe for concurrent writes and reads.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+func (l *lockedBuffer) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+
+func (l *flakyLauncher) failsLeft() int { l.mu.Lock(); defer l.mu.Unlock(); return l.statusFails }
+
+func TestRunLogsLauncherErrors(t *testing.T) {
+	t.Parallel()
+	logs := &lockedBuffer{}
+	var fl *flakyLauncher
+	f := newResourceFixture(t, func(o *ResourceOptions) {
+		fl = &flakyLauncher{Launcher: o.Launcher, statusFails: 3}
+		o.Launcher = fl
+		o.Log = slog.New(slog.NewTextHandler(logs, nil))
+	})
+	// A run that hangs is polled until all three failures were read, then
+	// cancelled; its runner cannot be stopped.
+	f.runner.Hang = true
+	resp := f.startPlan(t, "writer", "services/payments", "staging", database("5Gi", 0), false)
+	deadline := time.Now().Add(5 * time.Second)
+	for fl.failsLeft() > 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := f.opc.CancelOperation(context.Background(), as("writer", &forgev1.CancelOperationRequest{Name: resp.GetOperation().GetName()})); err != nil {
+		t.Fatal(err)
+	}
+	waitCIOp(t, f.ops, resp.GetOperation().GetName())
+	out := logs.String()
+	if n := strings.Count(out, "reading a resource runner's status"); n != 1 {
+		t.Errorf("%d status lines, want 1:\n%s", n, out)
+	}
+	if !strings.Contains(out, "stopping a resource runner") {
+		t.Errorf("no stop line:\n%s", out)
+	}
+	if token := f.runner.Started()[0].Token; token == "" || strings.Contains(out, token) {
+		t.Error("the log must not hold the run token")
+	}
+
+	// Errors from the launcher do not end a run that is going well.
+	f.runner.Hang = false
+	fl.mu.Lock()
+	fl.statusFails = 3
+	fl.mu.Unlock()
+	if p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false); p.GetState() != forgev1.ResourcePlan_STATE_PLANNED {
+		t.Errorf("plan: %v", p)
+	}
+}
+
+func TestPlanRefusedWhileStoredRunLives(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	f := newResourceFixture(t, func(o *ResourceOptions) { o.Now = clock })
+	// What a forge-api that died mid-run leaves behind.
+	err := f.store.WriteResources(context.Background(), func(tx store.ResourceTx) error {
+		return tx.PutResourcePlan(context.Background(), &store.PlanRecord{
+			Plan: &forgev1.ResourcePlan{Name: "resourcePlans/ghost", Service: "services/payments", Env: "staging",
+				State: forgev1.ResourcePlan_STATE_PLANNING, CreateTime: timestamppb.New(now)},
+			TokenHash: "h", Deadline: now.Add(10 * time.Minute),
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.client.PlanResources(context.Background(), as("writer", &forgev1.PlanResourcesRequest{
+		Service: "services/payments", Env: "staging", Resources: database("5Gi", 0)}))
+	wantCode(t, "a stored run", err, connect.CodeFailedPrecondition, "resourcePlans/ghost is still running for resources/payments/staging")
+	f.startPlan(t, "writer", "services/payments", "production", database("5Gi", 0), false)
+
+	mu.Lock()
+	now = now.Add(11 * time.Minute)
+	mu.Unlock()
+	f.startPlan(t, "writer", "services/payments", "staging", database("5Gi", 0), false)
 }
