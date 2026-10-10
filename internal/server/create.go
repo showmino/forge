@@ -287,6 +287,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Failure{Failure: &forgev1.CreateFailure{
 			Step: step, Message: cause.Error(), RolledBack: delErr == nil,
 		}}}
+		noteAuditFailure(ctx, fmt.Sprintf("%s: %s (rolled back: %t)", step, cause.Error(), delErr == nil))
 		w.send(final)
 		return final, nil
 	}

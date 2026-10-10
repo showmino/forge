@@ -16,6 +16,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/store"
 )
 
 // fakeRepos is an in-memory GitHub org.
@@ -502,4 +503,42 @@ func registered(t *testing.T, c *Catalog, name string) bool {
 		t.Fatal(err)
 	}
 	return ok
+}
+
+func TestAuditFailedCreateIsNotOK(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	repos := newFakeRepos()
+	repos.pushErr = errBoom
+	h, err := New(Options{
+		Authenticator: StaticAuthenticator{"writer": {Subject: "ana", Groups: []string{"platform"}}},
+		Authorizer:    Authorizer{WriterGroups: []string{"platform"}},
+		Templates:     createRelease,
+		Repos:         repos,
+		Audit:         audit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	c := forgev1connect.NewServiceCatalogServiceClient(srv.Client(), srv.URL)
+	stream, err := c.CreateService(context.Background(), as("writer", validRequest()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for stream.Receive() {
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatal(err)
+	}
+	evs := allEvents(t, audit)
+	if len(evs) != 1 {
+		t.Fatalf("got %d events, want 1", len(evs))
+	}
+	r := evs[0].GetResult()
+	if evs[0].GetAction() != "service.create" || r.GetCode() != "failed" ||
+		!strings.HasPrefix(r.GetMessage(), "push: ") || !strings.Contains(r.GetMessage(), "boom") || !strings.Contains(r.GetMessage(), "rolled back: true") {
+		t.Fatalf("event %v", evs[0])
+	}
 }

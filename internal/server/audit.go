@@ -46,6 +46,9 @@ const auditMessageMax = 500
 type auditRecord struct {
 	mu sync.Mutex
 	ev *forgev1.AuditEvent
+	// failure overrides an OK result: a stream that ends with a failure
+	// message instead of an error (forge create) did not succeed.
+	failure string
 }
 
 type auditKey struct{}
@@ -99,6 +102,16 @@ func noteAuditService(ctx context.Context, service string) {
 	}
 }
 
+// noteAuditFailure records that the call failed although it returns no error:
+// finish then stores result "failed" with message in place of "ok".
+func noteAuditFailure(ctx context.Context, message string) {
+	if r := auditFrom(ctx); r != nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.failure = message
+	}
+}
+
 // noteAuditOperation records the operation the call started.
 func noteAuditOperation(ctx context.Context, name string) {
 	if r := auditFrom(ctx); r != nil {
@@ -132,6 +145,9 @@ func (r *auditRecord) finish(h interface{ Get(string) string }, err error) *forg
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.ev.Result = &forgev1.AuditResult{Code: auditCode(err), Message: auditText(errMessage(err), auditMessageMax)}
+	if err == nil && r.failure != "" {
+		r.ev.Result = &forgev1.AuditResult{Code: "failed", Message: auditText(r.failure, auditMessageMax)}
+	}
 	if h != nil {
 		r.ev.Client = &forgev1.AuditClient{Version: auditText(h.Get(client.HeaderClientVersion), auditFieldMax), RequestId: auditText(h.Get(client.HeaderRequestID), auditFieldMax)}
 	}
