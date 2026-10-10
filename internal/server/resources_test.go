@@ -632,6 +632,9 @@ func TestPlanHostileText(t *testing.T) {
 	body, err := json.Marshal(map[string]any{"format_version": "1.2", "resource_changes": []any{map[string]any{
 		"address": addr, "type": "null_resource",
 		"change": map[string]any{"actions": []string{"create"}, "before": nil, "after": map[string]any{"id": "1"}},
+	}, map[string]any{
+		"address": "other", "type": "null_resource",
+		"change": map[string]any{"actions": []string{"\x1b[31m\u202e" + strings.Repeat("a", 5000)}, "before": nil, "after": map[string]any{"id": "2"}},
 	}}})
 	if err != nil {
 		t.Fatal(err)
@@ -642,8 +645,15 @@ func TestPlanHostileText(t *testing.T) {
 	if p.GetState() != forgev1.ResourcePlan_STATE_DENIED {
 		t.Fatalf("plan: %v", p)
 	}
-	if cs := p.GetChanges(); len(cs) != 1 || bad(cs[0].GetResource()) || len([]rune(cs[0].GetResource())) > 256 {
-		t.Errorf("changes: %q", p.GetChanges())
+	if len(p.GetChanges()) != 2 {
+		t.Fatalf("changes: %q", p.GetChanges())
+	}
+	for _, c := range p.GetChanges() {
+		for _, v := range []string{c.GetResource(), c.GetAction(), c.GetType()} {
+			if bad(v) || len([]rune(v)) > 256 {
+				t.Errorf("change field %q", v)
+			}
+		}
 	}
 	if len(p.GetPolicy().GetDeny()) == 0 {
 		t.Error("no deny messages")

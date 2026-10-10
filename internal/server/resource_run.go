@@ -600,7 +600,7 @@ func (r *Resources) UnlockState(ctx context.Context, token, lockID string) error
 // and show: no control or bidi characters, and bounded.
 func cleanChanges(changes []*forgev1.ResourceChange) {
 	for _, c := range changes {
-		c.Resource, c.Type = auditText(c.Resource, auditFieldMax), auditText(c.Type, auditFieldMax)
+		c.Action, c.Resource, c.Type = auditText(c.Action, auditFieldMax), auditText(c.Resource, auditFieldMax), auditText(c.Type, auditFieldMax)
 		for _, st := range []*forgev1.ResourceSettings{c.Before, c.After} {
 			if st != nil {
 				st.Name, st.Type = auditText(st.Name, auditFieldMax), auditText(st.Type, auditFieldMax)
