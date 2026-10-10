@@ -96,12 +96,15 @@ func require(ctx context.Context, perm string) error {
 var public = []string{forgev1connect.AuthServiceGetServerInfoProcedure}
 
 // workloadProcedures are the only RPCs a CI caller may make; their handlers
-// narrow each one to the caller's own service, staging and operations.
+// narrow each one to the caller's own service, staging deploys, resource
+// plans and operations.
 var workloadProcedures = []string{
 	forgev1connect.DeployServiceStartDeployProcedure,
 	forgev1connect.DeployServiceGetDeploymentProcedure,
 	forgev1connect.OperationServiceGetOperationProcedure,
 	forgev1connect.OperationServiceWatchOperationProcedure,
+	forgev1connect.ResourceServicePlanResourcesProcedure,
+	forgev1connect.ResourceServiceGetResourcePlanProcedure,
 }
 
 // authInterceptor authenticates every call except the public ones.
@@ -156,7 +159,7 @@ func (i *authInterceptor) authenticate(ctx context.Context, procedure, header st
 	if p.Workload != nil {
 		if !slices.Contains(workloadProcedures, procedure) {
 			return ctx, connect.NewError(connect.CodePermissionDenied,
-				fmt.Errorf("CI token %s may only start and follow its own staging deploy, not call %s", p.Subject, procedure))
+				fmt.Errorf("CI token %s may only start and follow its own staging deploy and plan its own resources, not call %s", p.Subject, procedure))
 		}
 	} else {
 		i.authz.Grant(p)

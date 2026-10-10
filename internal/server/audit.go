@@ -122,6 +122,19 @@ func noteAuditOperation(ctx context.Context, name string) {
 	}
 }
 
+// noteAuditDetail adds one detail to the call's event. Like the details of
+// describe, value must be an identifier or a setting, never free text.
+func noteAuditDetail(ctx context.Context, key, value string) {
+	if r := auditFrom(ctx); r != nil && value != "" {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.ev.Details == nil {
+			r.ev.Details = map[string]string{}
+		}
+		r.ev.Details[key] = auditText(value, auditFieldMax)
+	}
+}
+
 // describe fills service, target and details from the request message. The
 // interceptor calls it before the handler runs, so an operation the handler
 // starts copies them into its outcome template.
