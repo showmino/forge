@@ -225,7 +225,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in five phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done; Phase 5 is next. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done; Phase 5 is next. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |
@@ -234,8 +234,16 @@ Build in five phases, sequenced rather than dated, and move on only when a phase
 | 3 · Environments (done) | env create / list / destroy / extend with a TTL; operations: op watch, streamed progress; one Kubernetes namespace per preview | `forge create` to a running preview environment in under 10 minutes |
 | 4 · Deployments (done) | deploy start / status / history; rollback and promote through Argo CD; deploys from CI with workload identity | A team ships to staging from CI without kubectl or Argo access |
 | 5 · Resources and audit | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
+| 6 · Web dashboard | a browser UI on the same Forge API: GitHub login through Dex; catalog and service pages; templates and create; environments; deploys with promote and rollback; operations with live progress; audit log | A writer creates, previews and promotes a service from the browser, and a reader sees the same data, all without a terminal |
 
 Each phase grows the API and the CLI together, so the CLI never ships a command the server cannot back. The command table above tags every group with its phase.
+
+**Phase 6, the web dashboard,** is a second thin client, alongside the CLI:
+
+- **API:** it calls the same ConnectRPC services from the browser (Connect's web client). It needs no endpoints of its own, so permissions, policy and audit stay in the API, and the CLI and dashboard behave identically.
+- **Login:** the authorization code flow with PKCE against Dex, as a public client (`forge-web`). The ID token is the bearer, as for the CLI; readers and writers get the permissions they have in the CLI.
+- **Live updates:** long operations stream progress the way `forge op watch` does.
+- **Before Phase 6 starts:** the API needs CORS for the dashboard's origin, and a browser-friendly way to watch operations (server streaming over Connect).
 
 **Phase 1 starting point:**
 
@@ -259,3 +267,4 @@ Each has a working default in this draft; an answer changes the plan only where 
 - [x] **Distribution:** Decided: a Homebrew tap and GitHub Releases for now. apt, yum and Scoop packages can come later.
 - [x] **Local development:** Decided: Phase 1 targets the existing k3s cluster, so no `kind`-based local Forge stack is needed for demos.
 - [x] **Template format:** Decided: the Forge format, `template.yaml` with typed parameters plus a `skeleton/` folder rendered with Go `text/template`, versioned by repo-wide tags in one templates repo. No Backstage importer (see `docs/specs/2026-10-08-phase-2-templates-design.md`).
+- [ ] **Dashboard stack (Phase 6):** Default: a Next.js app built on Forge's own `nextjs` template and deployed by Forge itself. The alternative is a static single-page app that forge-api serves. Decide before Phase 6 starts.
