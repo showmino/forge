@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -110,12 +111,19 @@ func printTable(w io.Writer, v View) error {
 	return tw.Flush()
 }
 
-// sanitize keeps a cell on one line and stops tabs from breaking columns.
+// sanitize keeps a cell on one line, stops tabs from breaking columns and
+// replaces control and bidi characters, which could rewrite the terminal.
 func sanitize(s string) string {
 	if s == "" {
 		return "-"
 	}
-	return strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(s)
+	s = strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(s)
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
 }
 
 var protoJSON = protojson.MarshalOptions{Multiline: true, Indent: "  "}

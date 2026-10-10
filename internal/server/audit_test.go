@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
@@ -257,6 +258,9 @@ func TestAuditText(t *testing.T) {
 	if got := auditText(strings.Repeat("é", 300), 256); len([]rune(got)) != 256 {
 		t.Errorf("clipped to %d runes", len([]rune(got)))
 	}
+	if got := auditText("a\x1b[2Jb\ac\nd\u202ee\u2066f", 50); got != "a\uFFFD[2Jb\uFFFDc\uFFFDd\uFFFDe\uFFFDf" {
+		t.Errorf("control and bidi: %q", got)
+	}
 	if auditText("ok", 256) != "ok" {
 		t.Error("clean text changed")
 	}
@@ -315,5 +319,28 @@ func TestAuditBoundsLongIdentifiers(t *testing.T) {
 	}
 	if n := len([]rune(evs[0].GetTarget())); n == 0 || n > 256 {
 		t.Errorf("target has %d runes", n)
+	}
+}
+
+func TestAuditUnauthenticatedControlCharacters(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	c := auditAPI(t, audit, nil)
+	_, _ = c.RegisterService(context.Background(), connect.NewRequest(&forgev1.RegisterServiceRequest{
+		ServiceId: "x\u001b[2J\u202eevil\nline2", Service: &forgev1.Service{OwnerTeam: "billing"},
+	}))
+	evs := allEvents(t, audit)
+	if len(evs) != 1 {
+		t.Fatalf("got %d events, want 1", len(evs))
+	}
+	for _, s := range []string{evs[0].GetService(), evs[0].GetTarget()} {
+		if s == "" {
+			t.Error("empty field")
+		}
+		for _, r := range s {
+			if unicode.IsControl(r) || r == '\u202e' {
+				t.Errorf("%q holds %U", s, r)
+			}
+		}
 	}
 }

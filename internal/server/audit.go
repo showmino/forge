@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
@@ -190,11 +191,18 @@ func clipRunes(s string, max int) string {
 	return s
 }
 
-// auditText makes caller-derived text safe to store: valid UTF-8, no NUL
-// bytes, at most max characters.
+// auditText makes caller-derived text safe to store and to print: valid
+// UTF-8, no NUL bytes, control and bidi characters replaced by U+FFFD, at
+// most max characters.
 func auditText(s string, max int) string {
 	s = strings.ToValidUTF8(s, "\uFFFD")
 	s = strings.ReplaceAll(s, "\x00", "")
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || (r >= 0x202A && r <= 0x202E) || (r >= 0x2066 && r <= 0x2069) {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
 	return clipRunes(s, max)
 }
 
