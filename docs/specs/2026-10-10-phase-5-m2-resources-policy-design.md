@@ -84,9 +84,9 @@ For a service that has previews, the plan output adds one line: previews get no 
 | The plan was made and passed policy | 0 |
 | Policy denied the plan, at plan or at apply | 5 |
 | The caller lacks permission | 5 |
-| The plan is stale, expired, used, or has no changes while Forge's records already match | 6 (conflict), as for other `failed_precondition` answers |
-| The run failed (an OpenTofu error) | 7 (operation failed) |
-| The run or the wait timed out | 8 (timeout) |
+| The plan is stale, expired or used, or it has no changes and Forge's records already match | 6 (conflict), as for other `failed_precondition` answers |
+| The run failed: an OpenTofu error, or the run's own 15-minute limit | 7 (operation failed) |
+| The wait ran out (`--timeout`) while the run goes on | 8 (timeout) |
 
 ## 2. How a run works
 
@@ -240,7 +240,7 @@ The plan file and plan JSON are cleared when a plan is applied or expires. The s
 - A sweep, at start and then every minute, marks a `planning` or `applying` plan whose deadline passed as `failed` or `apply_failed`, and marks an unused `planned` plan older than 24 hours as `expired`. It reads every page of plans, and it asks the launcher to stop the runner of a run it ends.
 - After a restart forge-api does not know which runs are still going, so it also asks the store: while a plan for a service and environment is `planning` or `applying` and its deadline has not passed, a new plan or apply for that target is refused.
 - Tokens, plans and state are in Postgres. If forge-api restarts during a run, the runner can still write state and complete the run, so Forge never loses track of a database it created.
-- The Operation itself is lost on a restart, as with deploys. The audit outcome is not: every run that ends gets exactly one outcome event, whether it ends through a live Operation, through a completion after a restart, or through the sweep.
+- The Operation itself is lost on a restart, as with deploys. The audit outcome is not: a run that ends gets one outcome event, whether it ends through a live Operation, through a completion after a restart, or through the sweep, and never two. The event is appended right after the plan's state is saved; if forge-api dies or the audit store fails in between, the event is missing and the failure is logged.
 - A failed apply can leave a half-made database. The state records what exists, the resource shows `failed`, and a new plan and apply repair it. If that new plan has nothing to change, applying it still puts Forge's records right.
 
 ## 3. Policy
@@ -357,6 +357,8 @@ Two actions join the audit log: `resource.plan` and `resource.apply`. Each has a
 | `changes` | Counts, for example `create=1 update=0 delete=0`, on outcome events |
 
 The target is `resources/<service>/<env>`. A plan denied by policy has the outcome `failed` with the first message, so `forge audit list --failed` finds it. The four read calls join `auditReads`. The runner's calls are not events of their own; they belong to the run the plan or apply records.
+
+An apply refused for a caller without write permission is recorded with its service and target. A CI token's apply is refused before forge-api reads the plan, so that event names the plan as its target and has no service.
 
 ### Configuration
 

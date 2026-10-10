@@ -28,6 +28,7 @@ Reviews during execution changed the code in these places. Where the task text b
 - **Task 6:** runner text is cleaned before it is stored (`cleanChanges`, and policy messages in `evaluate`); launcher `Stop` and `Status` errors are logged; `PlanResources` also refuses while the store shows a run still going for the target (`storedRun`).
 - **Task 7:** `ApplyResourcePlan` repeats its checks under the lock, refuses a plan whose service left the catalog, uses `storedRun`, and a dry run never denies a plan. After an apply, records are made to match the plan's declared resources (`applyResources`), so a plan with no changes can be applied when records are out of line (`recordsInSync`). A record keeps its Secret name when a run reports none.
 - **Task 8:** the sweep pages through plans (`ResourceOptions.SweepPage`) and stops the runner of a run it ends.
+- **Final review:** plan lists carry no plan files (and migration 0003 has a partial index on open plans); a reader's refused apply is audited under its service; the runner API refuses an unlock with no lock id.
 
 ## Global Constraints
 
