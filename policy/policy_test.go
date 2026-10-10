@@ -192,6 +192,19 @@ func without(side map[string]any, path ...string) map[string]any {
 	return out
 }
 
+// with returns a copy of a cluster side with one nested field set to v.
+func with(side map[string]any, v any, path ...string) map[string]any {
+	b, _ := json.Marshal(side)
+	var out map[string]any
+	_ = json.Unmarshal(b, &out)
+	m := out
+	for _, k := range path[:len(path)-1] {
+		m = m[k].(map[string]any)
+	}
+	m[path[len(path)-1]] = v
+	return out
+}
+
 // raw builds a plan from one hand-written resource change.
 func raw(t *testing.T, rc map[string]any) []byte {
 	t.Helper()
@@ -245,6 +258,13 @@ func TestRulesFailClosed(t *testing.T) {
 		{"actions as a string", raw(t, change("create", nil, ok)), stg, "has no readable actions"},
 		{"no actions", raw(t, noActions), stg, "has no readable actions"},
 		{"empty actions", raw(t, change([]string{}, nil, ok)), stg, "has no readable actions"},
+		{"metadata that is not an object", raw(t, change([]string{"create"}, nil, with(ok, "main", "manifest", "metadata"))), stg, `in namespace "", not payments-staging`},
+		{"a namespace that is not a string", raw(t, change([]string{"create"}, nil, with(ok, 7, "manifest", "metadata", "namespace"))), stg, "in namespace 7, not payments-staging"},
+		{"a manifest that is not an object", raw(t, change([]string{"create"}, nil, map[string]any{"manifest": "cluster"})), stg, "which is not a CloudNativePG cluster"},
+		{"a spec that is not an object", raw(t, change([]string{"create"}, nil, with(ok, "big", "manifest", "spec"))), stg, "has no readable storage size or instance count"},
+		{"a storage that is not an object", raw(t, change([]string{"create"}, nil, with(ok, "5Gi", "manifest", "spec", "storage"))), stg, `storage class "" is not longhorn-retain`},
+		{"a change that is not an object", raw(t, map[string]any{"address": "x.y", "type": "kubernetes_manifest", "change": "create"}), stg, "the plan's change to x.y has no readable actions"},
+		{"a before that is not an object", raw(t, change([]string{"delete"}, "main", nil)), stg, "which is not a CloudNativePG cluster"},
 		{"zero instances", plan(t, []string{"create"}, nil, cluster("payments-staging", 5, 0, retain)), stg, "0 instances is below the minimum of 1"},
 		{"a database of another manifest type", raw(t, map[string]any{"address": "kubectl_manifest.x", "type": "kubectl_manifest",
 			"change": map[string]any{"actions": []string{"create"}, "before": nil, "after": ok}}), stg, "kubectl_manifest.x, which is not a CloudNativePG cluster"},
@@ -266,6 +286,19 @@ func TestRulesFailClosed(t *testing.T) {
 	odd := without(ok, "manifest", "spec")
 	if r, err := e.Evaluate(ctx, raw(t, change([]string{"delete"}, odd, nil)), destroy); err != nil || r.Denied() {
 		t.Errorf("an asked-for delete of an unreadable database: %v %v", r, err)
+	}
+	// Changes that are not a list of objects are refused too.
+	for body, want := range map[string]string{
+		`{"resource_changes":"x"}`:      "the plan's resource_changes is not a list",
+		`{"resource_changes":{"a":1}}`:  "the plan's resource_changes is not a list",
+		`{"resource_changes":[7]}`:      "the plan changes an unnamed resource, which is not a CloudNativePG cluster",
+		`{"resource_changes":[null]}`:   "the plan changes an unnamed resource, which is not a CloudNativePG cluster",
+		`{"resource_changes":["tofu"]}`: "has no readable actions",
+	} {
+		r, err := e.Evaluate(ctx, []byte(body), stg)
+		if err != nil || !strings.Contains(strings.Join(r.Deny, "|"), want) {
+			t.Errorf("%s: deny %q (%v), want it to contain %q", body, r.Deny, err, want)
+		}
 	}
 	// A plan that is not a JSON object could not be checked: an error.
 	for _, body := range []string{"null", "[]", `"tofu"`, "42"} {
