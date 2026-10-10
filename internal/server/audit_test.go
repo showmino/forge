@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -216,7 +217,9 @@ func TestAuditClip(t *testing.T) {
 func TestAuditCode(t *testing.T) {
 	t.Parallel()
 	if auditCode(nil) != "ok" || auditCode(connect.NewError(connect.CodePermissionDenied, errors.New("x"))) != "permission_denied" ||
-		auditCode(errors.New("plain")) != "unknown" {
+		auditCode(errors.New("plain")) != "unknown" ||
+		auditCode(context.Canceled) != "canceled" || auditCode(fmt.Errorf("wait: %w", context.DeadlineExceeded)) != "deadline_exceeded" ||
+		auditCode(connect.NewError(connect.CodeInternal, context.Canceled)) != "internal" {
 		t.Fatal("auditCode")
 	}
 }

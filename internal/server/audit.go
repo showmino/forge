@@ -167,6 +167,15 @@ func auditCode(err error) string {
 	if err == nil {
 		return "ok"
 	}
+	var ce *connect.Error
+	if !errors.As(err, &ce) {
+		switch {
+		case errors.Is(err, context.Canceled):
+			return connect.CodeCanceled.String()
+		case errors.Is(err, context.DeadlineExceeded):
+			return connect.CodeDeadlineExceeded.String()
+		}
+	}
 	return connect.CodeOf(err).String()
 }
 
