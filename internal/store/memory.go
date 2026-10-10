@@ -16,6 +16,9 @@ type Memory struct {
 	mu       sync.Mutex
 	services map[string]memEntry
 	requests map[string]*forgev1.Service
+
+	auditMu sync.Mutex
+	audit   []*forgev1.AuditEvent // index i holds id i+1
 }
 
 type memEntry struct {
