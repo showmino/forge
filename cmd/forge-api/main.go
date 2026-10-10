@@ -1,4 +1,4 @@
-// Command forge-api is the Forge API server: the service catalog (in memory),
+// Command forge-api is the Forge API server: the service catalog (in PostgreSQL with --database-url, else in memory),
 // templates and new services, operations and preview environments. Callers
 // authenticate with OIDC ID tokens from the configured issuer (Dex locally).
 package main
@@ -53,6 +53,7 @@ func run() error {
 		issuer       = flag.String("oidc-issuer", env("FORGE_OIDC_ISSUER", ""), "OIDC issuer URL, for example http://localhost:5556/dex")
 		clientID     = flag.String("oidc-client-id", env("FORGE_OIDC_CLIENT_ID", "forge-cli"), "OIDC client ID the CLI uses; tokens must carry it as audience")
 		writers      = flag.String("writer-groups", env("FORGE_WRITER_GROUPS", ""), "comma-separated groups allowed to change the catalog (empty = every authenticated user)")
+		dbURL        = flag.String("database-url", "", "PostgreSQL URL for the service catalog, or FORGE_DATABASE_URL (empty = in memory, lost on restart)")
 		minClient    = flag.String("min-client-version", env("FORGE_MIN_CLIENT_VERSION", "0.1.0"), "oldest CLI version accepted")
 		insecureDev  = flag.Bool("insecure-dev-token", false, "DEVELOPMENT ONLY: accept the token 'dev' as user dev@example.com instead of verifying OIDC tokens")
 		logJSON      = flag.Bool("log-json", env("FORGE_LOG_FORMAT", "") == "json", "log as JSON")
@@ -80,6 +81,10 @@ func run() error {
 	if *printVersion {
 		fmt.Println(version.Get().Version)
 		return nil
+	}
+	if *dbURL == "" {
+		// Not the flag's default: --help prints defaults, and the URL holds a password.
+		*dbURL = os.Getenv("FORGE_DATABASE_URL")
 	}
 
 	var handler slog.Handler = slog.NewTextHandler(os.Stderr, nil)
@@ -120,6 +125,9 @@ func run() error {
 			groups = append(groups, g)
 		}
 	}
+	if len(groups) == 0 && !*insecureDev {
+		log.Warn("no --writer-groups: every authenticated user may change the catalog, create services and deploy")
+	}
 	app, err := githubApp(*appID, *appKey, *githubOrg)
 	if err != nil {
 		return err
@@ -134,7 +142,12 @@ func run() error {
 	if app == nil {
 		log.Info("creating services is off; set --github-app-id and --github-app-key-file")
 	}
-	catalog, ops := server.NewCatalog(nil), server.NewOperations(nil)
+	st, err := openStore(ctx, *dbURL, log)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	catalog, ops := server.NewCatalogWithStore(st, nil), server.NewOperations(nil)
 	envs, cluster, images, err := previews(previewFlags{
 		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, max: *previewMax,
 		imageTimeout: env("FORGE_PREVIEW_IMAGE_TIMEOUT", "10m"), readyTimeout: env("FORGE_PREVIEW_READY_TIMEOUT", "5m"),

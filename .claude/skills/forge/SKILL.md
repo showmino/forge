@@ -76,16 +76,18 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - The Actions token request ignores the command's context (30s cap).
   - The streaming client interceptor drops token errors.
   - A ValidatingAdmissionPolicy binding forge-api's secret create and namespace patch/delete to Forge-labelled namespaces (today a compromised forge-api could write Argo `repository` secrets in `argocd`).
-  - Dex still has the demo password and `FORGE_WRITER_GROUPS` is empty, so any LAN user who logs in can deploy and promote to production.
+  - Resolved by the groundwork: Dex uses GitHub login, and writes need the `showmino:platform-engineering` group (`FORGE_WRITER_GROUPS`).
+  - Database backups: `forge-db` (CloudNativePG) has none yet.
   - The GoReleaser image's `COPY ${TARGETPLATFORM}/forge` is unbuilt until the first release snapshot.
 - **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
+- **Groundwork (done):** k3s login through GitHub (writer group `showmino:platform-engineering`), and CloudNativePG `forge-db` holds the catalog and Dex's logins (spec docs/specs/2026-10-09-groundwork-auth-storage-design.md).
 - **Later:** environments, resources (OpenTofu jobs).
-- **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP with Dex's demo password.
+- **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP. The demo Dex password is resolved by the groundwork (GitHub login).
 
 ## Common mistakes
 
 - Running lint with an older golangci-lint than CI's v2.14.0 (it cannot read Go 1.27 export data), or "fixing" the two `G117` nolints in `internal/auth/store.go`: storing the refresh token is intended; encrypting the file fallback is the real follow-up.
 - Following the README's `k3s ctr images import` path on the demo cluster: the dev machine is not a node.
-- Exposing Dex through Istio `*.showmino.com`: it is public, and Dex still has the demo password.
+- Exposing Dex through Istio `*.showmino.com`: it is public, and its GitHub OAuth App callback must match that host.
 - Adding a package-level variable or calling `os.Exit` outside `main`.
 - Giving a CI workload a new RPC by adding a permission: workloads pass the interceptor only for the procedures in `workloadProcedures` (`authn.go`), and each of those handlers must call its `ci_scope.go` check.

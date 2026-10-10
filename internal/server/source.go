@@ -36,15 +36,14 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
 		return s, invalidArg("service %q must be services/<name>", service)
 	}
 	s.serviceID = sid
-	svc, ok := cat.get(servicePrefix + sid)
-	if !ok {
-		return s, connect.NewError(connect.CodeNotFound, fmt.Errorf("%s%s not found", servicePrefix, sid))
+	svc, err := cat.get(ctx, servicePrefix+sid)
+	if err != nil {
+		return s, err // NotFound "services/<id> not found", or Unavailable
 	}
 	if s.owner, s.repo, ok = repoOf(svc.GetRepoUrl(), org); !ok {
 		return s, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Errorf("%s%s has no GitHub repo in %s (repo_url %q)", servicePrefix, sid, org, svc.GetRepoUrl()))
 	}
-	var err error
 	s.commit, err = gh.ResolveRef(ctx, s.owner, s.repo, s.ref)
 	if errors.Is(err, github.ErrNotFound) {
 		return s, connect.NewError(connect.CodeNotFound, fmt.Errorf("ref %q not found in github.com/%s/%s", s.ref, s.owner, s.repo))

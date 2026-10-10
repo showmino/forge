@@ -306,7 +306,11 @@ func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forg
 		}
 	}
 	var out []*forgev1.Deployment
-	for _, svc := range d.o.Catalog.ids() {
+	ids, err := d.o.Catalog.ids(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, svc := range ids {
 		if s := req.Msg.GetService(); s != "" && s != servicePrefix+svc {
 			continue
 		}

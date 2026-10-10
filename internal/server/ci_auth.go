@@ -108,7 +108,10 @@ func (a *GitHubOIDCAuthenticator) Authenticate(ctx context.Context, token string
 	if !ok || !strings.EqualFold(owner, a.o.Org) || repo == "" || strings.Contains(repo, "/") {
 		return nil, ciDenied("repository %q is not a repository of %s", c.Repository, a.o.Org)
 	}
-	ids := a.o.Catalog.servicesForRepo(a.o.Org, repo)
+	ids, err := a.o.Catalog.servicesForRepo(ctx, a.o.Org, repo)
+	if err != nil {
+		return nil, err
+	}
 	switch {
 	case len(ids) == 0:
 		return nil, ciDenied("repository %q is not a Forge service: no catalog entry has repo_url https://github.com/%s/%s", c.Repository, a.o.Org, repo)

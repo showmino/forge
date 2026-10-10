@@ -279,7 +279,7 @@ func TestCreateService(t *testing.T) {
 	if string(byPath["main.go"].Content) != "package main // 8080 gold\n" || !byPath["run.sh"].Executable || byPath["main.go"].Executable {
 		t.Errorf("pushed files: %+v", files)
 	}
-	if !e.catalog.has("services/payments") {
+	if !registered(t, e.catalog, "services/payments") {
 		t.Error("service not registered")
 	}
 }
@@ -301,7 +301,7 @@ func TestCreateValidateOnly(t *testing.T) {
 	if p.GetTemplateVersion() != "v1.0.0" || p.GetRepoUrl() != "https://github.com/showmino/payments" || strings.Join(p.GetFiles(), ",") != "forge.yaml,main.go,run.sh" {
 		t.Errorf("plan: %v", p)
 	}
-	if _, ok := e.repos.files("payments"); ok || e.catalog.has("services/payments") {
+	if _, ok := e.repos.files("payments"); ok || registered(t, e.catalog, "services/payments") {
 		t.Error("validate_only must not create anything")
 	}
 }
@@ -483,7 +483,7 @@ func TestCreateSurvivesDisconnect(t *testing.T) {
 	}
 	_, _ = e.create(ctx, "writer", validRequest())
 	// The server finishes in the background; wait for the registration.
-	for i := 0; !e.catalog.has("services/payments"); i++ {
+	for i := 0; !registered(t, e.catalog, "services/payments"); i++ {
 		if i > 200 {
 			t.Fatal("the create did not finish after the client left")
 		}
@@ -493,4 +493,13 @@ func TestCreateSurvivesDisconnect(t *testing.T) {
 	if err != nil || len(msgs) != 1 || msgs[0].GetService() == nil {
 		t.Errorf("retry after disconnect: %v %v", msgs, err)
 	}
+}
+
+func registered(t *testing.T, c *Catalog, name string) bool {
+	t.Helper()
+	ok, err := c.has(context.Background(), name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
 }

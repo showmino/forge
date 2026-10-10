@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := build
 BIN := bin
 
-.PHONY: build test lint chart-test generate update-golden tools dex api api-dev image clean
+.PHONY: build test lint chart-test generate update-golden tools dex db api api-dev image clean
 
 build: ## Build forge and forge-api into ./bin
 	CGO_ENABLED=0 go build -trimpath -o $(BIN)/ ./cmd/...
@@ -34,6 +34,9 @@ tools: ## Install buf and the protoc plugins at the versions CI uses
 
 dex: ## Start the local Dex identity provider on :5556
 	docker compose -f deploy/dex/compose.yaml up -d
+
+db: ## Start a local PostgreSQL on :55432 for the store tests (FORGE_TEST_DATABASE_URL)
+	docker run -d --name forge-test-db -p 55432:5432 -e POSTGRES_PASSWORD=forge mirror.gcr.io/library/postgres:18
 
 api: build ## Run forge-api against local Dex
 	$(BIN)/forge-api --oidc-issuer http://localhost:5556/dex

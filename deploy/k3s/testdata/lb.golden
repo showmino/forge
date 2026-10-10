@@ -4,6 +4,7 @@
 #   dex.10.150.1.220.nip.io         host name of Dex, the same for you and for pods
 #   forge-api:dev  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:0.1.0
 #   The GitHub App settings (ID, org, template repo): see render.sh.
+#   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who may write.
 #   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
 apiVersion: v1
 kind: Namespace
@@ -19,7 +20,15 @@ data:
   config.yaml: |
     issuer: http://dex.10.150.1.220.nip.io/dex
     storage:
-      type: memory # Phase 1: logins reset when Dex restarts
+      type: postgres
+      config:
+        host: forge-db-rw.forge.svc
+        port: 5432
+        database: dex
+        user: forge
+        password: $DEX_DB_PASSWORD # from the Secret forge-db-app
+        ssl:
+          mode: require
     web:
       http: 0.0.0.0:5556
     oauth2:
@@ -32,12 +41,20 @@ data:
         name: Forge CLI
         public: true
         redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
-    enablePasswordDB: true
-    staticPasswords:
-      - email: admin@example.com
-        hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W" # "password": change it
-        username: admin
-        userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+    # Only members of the org log in; groups are "<org>:<team-slug>", and
+    # forge-api's FORGE_WRITER_GROUPS picks the teams that may write. Dex
+    # expands $GITHUB_CLIENT_* from its environment (the Secret dex-github).
+    connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $GITHUB_CLIENT_ID
+          clientSecret: $GITHUB_CLIENT_SECRET
+          redirectURI: http://dex.10.150.1.220.nip.io/dex/callback
+          orgs:
+            - name: showmino
+          teamNameField: slug
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -56,6 +73,16 @@ spec:
         - name: dex
           image: ghcr.io/dexidp/dex:v2.41.1
           args: [dex, serve, /etc/dex/config.yaml]
+          env:
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef: {name: dex-github, key: client_id}
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: dex-github, key: client_secret}
+            - name: DEX_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: forge-db-app, key: password}
           ports:
             - {name: http, containerPort: 5556}
           readinessProbe:
@@ -75,7 +102,7 @@ metadata:
   name: forge-api
   namespace: forge
 spec:
-  replicas: 1 # the Phase 1 catalog is in memory; keep one replica
+  replicas: 1 # operations are in memory; keep one replica
   selector:
     matchLabels: {app: forge-api}
   template:
@@ -97,6 +124,10 @@ spec:
           env:
             - {name: FORGE_OIDC_ISSUER, value: "http://dex.10.150.1.220.nip.io/dex"}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
+            - {name: FORGE_WRITER_GROUPS, value: "showmino:platform-engineering"}
+            - name: FORGE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: forge-db-app, key: uri}
             - {name: FORGE_LOG_FORMAT, value: json}
           ports:
             - {name: http, containerPort: 8080}
@@ -143,3 +174,37 @@ spec:
   selector: {app: forge-api}
   ports:
     - {name: http, port: 80, targetPort: http}
+---
+# Forge's database: the service catalog (forge-api) and Dex's logins.
+# CloudNativePG creates the Secret forge-db-app (keys uri, password, ...)
+# for the owner forge. No backups yet: the catalog can be re-registered from
+# each repo's forge.yaml, and Dex's data is only sessions.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: forge-db
+  namespace: forge
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+  storage:
+    size: 5Gi
+    storageClass: longhorn-retain # the volumes outlive an accidental delete
+  bootstrap:
+    initdb:
+      database: forge
+      owner: forge
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {memory: 512Mi}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: forge-db-dex
+  namespace: forge
+spec:
+  name: dex
+  owner: forge
+  cluster:
+    name: forge-db

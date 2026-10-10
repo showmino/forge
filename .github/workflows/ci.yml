@@ -11,6 +11,19 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Docker Hub's official image through Google's mirror: Docker Hub
+        # rate-limits anonymous pulls from shared runner IPs.
+        image: mirror.gcr.io/library/postgres:18
+        env:
+          POSTGRES_PASSWORD: forge
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      FORGE_TEST_DATABASE_URL: postgres://postgres:forge@localhost:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
