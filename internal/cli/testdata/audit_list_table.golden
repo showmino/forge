@@ -1,0 +1,5 @@
+ID   TIME                  ACTOR               ACTION               SERVICE    TARGET                            RESULT
+4    2026-10-10 09:17:03   system              environment.expire   ledger     environments/pr-9                 ok
+3    2026-10-10 09:16:03   bo@example.com      deploy.promote       payments   deployments/payments/production   permission_denied
+2    2026-10-10 09:15:03   showmino/payments   ↳ deploy.start       payments   deployments/payments/staging      ok
+1    2026-10-10 09:14:03   showmino/payments   deploy.start         payments   deployments/payments/staging      ok
