@@ -54,15 +54,15 @@ An audit event is an API resource named `auditEvents/{id}`. `id` comes from a Po
 | UpdateService | `service.update` | `services/<id>` | `update_mask`, `validate_only` |
 | DeleteService | `service.delete` | `services/<id>` | `validate_only` |
 | CreateService | `service.create` | `services/<id>` | `template`, `template_version`, `validate_only` |
-| CreateEnvironment | `environment.create` | `environments/<id>` | `ref`, `ttl` |
+| CreateEnvironment | `environment.create` | `environments/<id>` | `ref`, `ttl`, `validate_only` |
 | ExtendEnvironment | `environment.extend` | `environments/<id>` | `ttl` |
-| DestroyEnvironment | `environment.destroy` | `environments/<id>` | |
-| StartDeploy | `deploy.start` | `deployments/<service>/<env>` | `env`, `ref` |
-| RollbackDeploy | `deploy.rollback` | `deployments/<service>/<env>` | `to_revision` |
-| PromoteDeploy | `deploy.promote` | `deployments/<service>/production` | `from_revision` |
+| DestroyEnvironment | `environment.destroy` | `environments/<id>` | `validate_only` |
+| StartDeploy | `deploy.start` | `deployments/<service>/<env>` | `env`, `ref`, `validate_only` |
+| RollbackDeploy | `deploy.rollback` | `deployments/<service>/<env>` | `to`, `validate_only` |
+| PromoteDeploy | `deploy.promote` | `deployments/<service>/production` | `from`, `to`, `validate_only` |
 | CancelOperation | `operation.cancel` | `operations/<id>` | |
 
-The plan fills in the exact field names from the protos. The rule: only identifiers and settings, never free text from the caller.
+The plan fills in the exact field names from the protos. The rule: only identifiers and settings, never free text from the caller. Text that comes from the caller (identifiers, client headers, error messages) is cleaned to valid UTF-8, stripped of NUL bytes, stripped of control and bidi characters (each replaced by U+FFFD) and cut to 256 characters (500 for the result message) before it is stored.
 
 Service: for the catalog calls, from the target. For environments and deploys, from the request's `service` field when it has one, otherwise from the environment or deployment name. For `operation.cancel`, from the operation's stored service.
 
@@ -70,16 +70,16 @@ Service: for the catalog calls, from the target. For environments and deploys, f
 1. **Reads pass through.** For a procedure not in the table, it calls `next` and records nothing.
 2. **Setup.** For a write, it puts an empty event in the request context and calls `next`. The auth interceptor fills in the actor when it authenticates: a user (subject, email), a workload (subject, repository), or nothing. If nothing is filled in, the actor is `anonymous` with no subject.
 3. **Handlers add the operation.** A handler that starts long-running work names its operation in the event. `Operations.Start` does this itself from the context, so no handler changes.
-4. **Append.** After `next` returns, the interceptor sets `result` from the returned error (`ok` when there is none), adds `service`, `target` and `details` from the request message, and appends the event.
+4. **Append.** After `next` returns, the interceptor sets `result` from the returned error (`ok` when there is none), adds `service`, `target` and `details` from the request message, and appends the event. If the handler panics, the event is recorded as `internal` (message `panic: <value>`) and the panic is then raised again.
 
-Streaming: `CreateService` is server-streaming. The interceptor wraps the stream to read its request message, and records the code the stream ends with.
+Streaming: `CreateService` is server-streaming. The interceptor wraps the stream to read its request message, and records the code the stream ends with. A create that fails after the repo was made ends the stream without an error, so the creator notes the failure on the event: it is recorded as `failed`, with the step in the message (`push: ... (rolled back: true)`).
 
 **Outcomes.**
 - **At start:** `Operations.Start` copies the actor, action and service of the event in its context onto the operation.
 - **At finish:** when the operation finishes (`finish`), the runner appends an `outcome` event with the same action, actor, service and target. `operation` is the operation's name, and `result` is `ok`, `failed` with the error message, or `cancelled`.
 - **No audit context:** an operation started without one, such as by the system, gets actor `system`.
 
-**System actions.** The preview reaper appends `environment.expire` with actor `system` when it destroys an expired environment. Its destroy operation's outcome follows, as for any operation.
+**System actions.** The preview reaper appends `environment.expire` with actor `system` only for a destroy it starts itself. Its destroy operation's outcome follows, as for any operation.
 
 **If the append fails** (the database is down), forge-api logs the full event at ERROR level as JSON, with the message "audit event not stored", and returns the call's own result unchanged. The catalog shares the database, so in that state nearly every write already fails with `Unavailable`, and the log still records the attempt.
 
@@ -138,14 +138,14 @@ Streaming: `CreateService` is server-streaming. The interceptor wraps the stream
 4. `forge audit list --service audit-gate-<date>` must show every step:
    - each with its actor: the owner's email, the CI repository, `anonymous`;
    - each with its result;
-   - an `outcome` row for the create, the deploys and the environment operations.
+   - an `outcome` row for the deploys and the environment operations.
 
-   `forge audit get` on the promote shows its details and operation.
+   `forge audit get` on the promote shows its details and operation. `CreateService` streams its result instead of starting an operation, so its request row carries its final result.
 5. Clean up as in earlier gates. The cleanup's own events are expected in the log.
 
 **Docs:**
 - README: an audit section.
-- `docs/index.md`: Phase 5 milestone 1 done.
+- `docs/index.md`: Phase 5 milestone 1 built; exit gate pending.
 - `.claude/skills/forge/SKILL.md`: the status.
 
 ## Risks
@@ -154,6 +154,14 @@ Streaming: `CreateService` is server-streaming. The interceptor wraps the stream
 - **Integrity:** the trigger makes the table append-only for the API and for mistakes, not against a database administrator. Shipping events to a separate sink would close that gap, and is out of scope.
 - **Database down:** events are then only in forge-api's logs, as described in section 2.
 - **Overlap at rollout:** a few seconds of unaudited writes on the old pod.
+
+## Known limits
+
+- **Undecodable calls:** a write call whose body Connect cannot decode (malformed JSON, a wrong content type) is rejected before the interceptors, so it is not recorded. Nothing can change on that path.
+- **Missing service:** some refused calls carry no service, because the lookup comes after the checks: a permission-denied destroy or extend of an environment, a cancel of an operation, and a refused `CreateService`. So `--service` can miss them.
+- **Restarts:** an operation interrupted by a forge-api restart gets no outcome row.
+- **Anonymous flood:** stored events from anonymous callers are limited to 60 a minute; the rest are only logged (a warning with the running count).
+- **Refused CI token:** a CI token that is valid but refused (a feature branch, say) is recorded as `anonymous`, with the repository in the message.
 
 ## Out of scope
 

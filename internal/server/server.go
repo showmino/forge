@@ -14,6 +14,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
+	"github.com/showmino/forge/internal/store"
 	"github.com/showmino/forge/internal/version"
 	"github.com/showmino/forge/pkg/client"
 )
@@ -51,6 +52,8 @@ type Options struct {
 	// CLIDir holds forge CLI builds (forge-linux-amd64, forge-linux-arm64)
 	// served at GET /cli/<name>; empty serves none.
 	CLIDir string
+	// Audit stores the audit log; nil keeps it in memory.
+	Audit  store.AuditStore
 	Logger *slog.Logger
 }
 
@@ -68,6 +71,9 @@ func New(o Options) (http.Handler, error) {
 	if o.Operations == nil {
 		o.Operations = NewOperations(nil)
 	}
+	if o.Audit == nil {
+		o.Audit = store.NewMemory()
+	}
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
 	}
@@ -81,8 +87,11 @@ func New(o Options) (http.Handler, error) {
 		o.OIDC.Scopes = []string{"openid", "email", "profile", "groups", "offline_access"}
 	}
 
+	aud := &auditor{store: o.Audit, log: o.Logger}
+	o.Operations.setAuditor(aud)
 	opts := connect.WithInterceptors(
 		&logInterceptor{log: o.Logger},
+		&auditInterceptor{a: aud},
 		&authInterceptor{authn: o.Authenticator, authz: o.Authorizer},
 	)
 	mux := http.NewServeMux()
@@ -96,6 +105,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))
+	mux.Handle(forgev1connect.NewAuditServiceHandler(&auditService{store: o.Audit}, opts))
 	mux.HandleFunc("GET /cli/{name}", cliDownload(o.CLIDir))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

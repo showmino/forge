@@ -16,6 +16,7 @@ import (
 
 	"github.com/showmino/forge/internal/auth"
 	"github.com/showmino/forge/internal/server"
+	"github.com/showmino/forge/internal/store"
 )
 
 // harness runs the real command tree against an in-process Forge API.
@@ -36,6 +37,7 @@ type harness struct {
 	catalog   *server.Catalog
 	envs      *server.Environments
 	deploys   *server.Deploys
+	audit     *store.Memory
 }
 
 const (
@@ -45,7 +47,7 @@ const (
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{t: t, dir: t.TempDir(), store: &auth.MemoryStore{}, ops: server.NewOperations(nil), catalog: server.NewCatalog(nil)}
+	h := &harness{t: t, dir: t.TempDir(), store: &auth.MemoryStore{}, ops: server.NewOperations(nil), catalog: server.NewCatalog(nil), audit: store.NewMemory()}
 	h.startAPI(server.StaticAuthenticator{
 		writerToken: {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}},
 		readerToken: {Subject: "bo", Email: "bo@example.com", Groups: []string{"dev"}},
@@ -74,6 +76,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Catalog:       h.catalog,
 		Environments:  h.envs,
 		Deploys:       h.deploys,
+		Audit:         h.audit,
 	})
 	if err != nil {
 		h.t.Fatal(err)

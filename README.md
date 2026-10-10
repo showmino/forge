@@ -157,6 +157,7 @@ Commands follow `forge <noun> <verb>`:
 | `create` | scaffold a service from a template: repo, first commit, catalog entry |
 | `context` | `list`, `use`, `current`, `set` |
 | `auth` | `login`, `logout`, `status`, `token` |
+| `audit` | `list`, `get` |
 | utilities | `init`, `doctor`, `version`, `completion` |
 
 Every command takes `-o table|json|yaml|name`. JSON is the API resource
@@ -208,6 +209,23 @@ the API (`FORGE_API_URL`). forge-api checks the token's audience against
 `FORGE_GITHUB_OIDC_AUDIENCE` (default `forge`).
 forge-api serves the matching CLI for Linux at `$FORGE_API_URL/cli/forge-linux-amd64`
 (and `-arm64`), so a job needs no token for the forge repo.
+
+### Audit log
+
+Every write call to the Forge API is recorded, refused calls included, with
+who made it (a user's email, a CI repository, `system` for forge-api itself,
+or `anonymous`), the service, the target and the result. Long-running work
+adds a second row with its outcome. Every member can read the log; nothing
+can change it.
+
+```sh
+forge audit list --service payments --since 7d
+forge audit list --actor ana@example.com --failed
+forge audit get 1234
+```
+
+Events live in PostgreSQL (`forge-db`) when forge-api has `--database-url`
+(or `FORGE_DATABASE_URL`); otherwise in memory.
 
 ## The API
 

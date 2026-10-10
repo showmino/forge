@@ -187,6 +187,7 @@ func run() error {
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID},
 		Authenticator:    authn,
 		Authorizer:       server.Authorizer{WriterGroups: groups},
+		Audit:            st,
 		Logger:           log,
 	})
 	if err != nil {

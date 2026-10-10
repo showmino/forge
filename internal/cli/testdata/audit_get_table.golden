@@ -1,0 +1,16 @@
+FIELD        VALUE
+name         auditEvents/1
+time         2025-10-10T09:14:03Z
+kind         request
+action       deploy.start
+actor        showmino/payments
+actor kind   workload
+subject      github:showmino/payments
+service      services/payments
+target       deployments/payments/staging
+result       ok
+message      -
+operation    operations/op_0123456789ab
+details      env=staging, ref=main
+client       0.3.0
+request id   req-1

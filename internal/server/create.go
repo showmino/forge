@@ -137,6 +137,7 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 			return connect.NewError(connect.CodeDeadlineExceeded, fmt.Errorf("waiting for the create with this request_id: %w", ctx.Err()))
 		}
 		if running.final != nil {
+			noteCreateFailure(ctx, running.final) // a replayed failure is a failure
 			return stream.Send(running.final)
 		}
 	}
@@ -287,6 +288,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Failure{Failure: &forgev1.CreateFailure{
 			Step: step, Message: cause.Error(), RolledBack: delErr == nil,
 		}}}
+		noteCreateFailure(ctx, final)
 		w.send(final)
 		return final, nil
 	}
@@ -314,6 +316,14 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Service{Service: resp.Msg.GetService()}}
 	w.send(final)
 	return final, nil
+}
+
+// noteCreateFailure notes a Failure message on the call's audit record, as
+// "<step>: <message> (rolled back: true|false)"; other messages are ignored.
+func noteCreateFailure(ctx context.Context, m *forgev1.CreateServiceResponse) {
+	if f := m.GetFailure(); f != nil {
+		noteAuditFailure(ctx, fmt.Sprintf("%s: %s (rolled back: %t)", f.GetStep(), f.GetMessage(), f.GetRolledBack()))
+	}
 }
 
 func shortSHA(sha string) string {

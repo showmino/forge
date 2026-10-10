@@ -90,6 +90,7 @@ func (s *operationService) CancelOperation(ctx context.Context, req *connect.Req
 	if err := validOpName(name); err != nil {
 		return nil, err
 	}
+	noteAuditService(ctx, s.ops.auditService(name))
 	op, ok := s.ops.Cancel(name)
 	if !ok {
 		return nil, opNotFound(name)

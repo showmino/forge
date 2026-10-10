@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -47,6 +48,8 @@ type Operations struct {
 	keep time.Duration // finished operations older than this are pruned
 	max  int           // most operations kept; running ones are never pruned
 
+	audit atomic.Pointer[auditor]
+
 	mu  sync.Mutex
 	ops map[string]*operation
 }
@@ -56,6 +59,8 @@ type operation struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	subs   map[*watcher]struct{} // guarded by Operations.mu
+
+	auditEv *forgev1.AuditEvent // the outcome event's template; set before the work starts
 }
 
 // watcher receives live messages. The publisher closes ch when the operation
@@ -86,6 +91,17 @@ func (s *Operations) Start(ctx context.Context, kind, target, creator string, w 
 		subs:   map[*watcher]struct{}{},
 	}
 	ctx = context.WithValue(ctx, opNameKey{}, o.pb.Name)
+	if r := auditFrom(ctx); r != nil {
+		noteAuditOperation(ctx, o.pb.Name)
+		o.auditEv = r.snapshot()
+	} else {
+		o.auditEv = &forgev1.AuditEvent{Action: kind, Actor: &forgev1.AuditActor{Kind: actorSystem}}
+	}
+	o.auditEv.Kind, o.auditEv.Operation = auditOutcome, o.pb.Name
+	if o.auditEv.Target == "" {
+		o.auditEv.Target = target
+	}
+	o.auditEv.Details, o.auditEv.Client, o.auditEv.Result, o.auditEv.Name, o.auditEv.Time = nil, nil, nil, "", nil
 	s.mu.Lock()
 	s.ops[o.pb.Name] = o
 	s.prune()
@@ -111,7 +127,38 @@ func (s *Operations) run(ctx context.Context, o *operation, w Work) {
 		}()
 		return w(ctx, func(step, message string) { s.emit(o, step, message) })
 	}()
-	s.finish(o, opError(ctx, err))
+	e := opError(ctx, err)
+	s.finish(o, e)
+	if o.auditEv != nil {
+		ev := proto.Clone(o.auditEv).(*forgev1.AuditEvent)
+		ev.Result = &forgev1.AuditResult{Code: "ok"}
+		switch {
+		case e == nil:
+		case e.GetCode() == OpCodeCancelled:
+			ev.Result = &forgev1.AuditResult{Code: "cancelled", Message: auditText(e.GetMessage(), auditMessageMax)}
+		default:
+			ev.Result = &forgev1.AuditResult{Code: "failed", Message: auditText(e.GetCode()+": "+e.GetMessage(), auditMessageMax)}
+		}
+		s.appendAudit(ctx, ev)
+	}
+}
+
+// setAuditor makes finished operations append their outcome to the audit log.
+func (s *Operations) setAuditor(a *auditor) { s.audit.Store(a) }
+
+// appendAudit appends ev when an auditor is set.
+func (s *Operations) appendAudit(ctx context.Context, ev *forgev1.AuditEvent) {
+	s.audit.Load().append(ctx, ev)
+}
+
+// auditService is the service an operation's audit events name, or "".
+func (s *Operations) auditService(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if o, ok := s.ops[name]; ok && o.auditEv != nil {
+		return o.auditEv.GetService()
+	}
+	return ""
 }
 
 // opError turns the work's result into the operation's error.
