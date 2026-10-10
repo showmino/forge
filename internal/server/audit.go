@@ -404,6 +404,18 @@ var auditActions = map[string]auditAction{
 	forgev1connect.OperationServiceCancelOperationProcedure: {"operation.cancel", func(m any) (string, string, map[string]string) {
 		return "", m.(*forgev1.CancelOperationRequest).GetName(), nil
 	}},
+	forgev1connect.ResourceServicePlanResourcesProcedure: {opResourcePlan, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.PlanResourcesRequest)
+		s := serviceName(r.GetService())
+		return s, resourceNamePrefix + strings.TrimPrefix(s, servicePrefix) + "/" + r.GetEnv(),
+			details("environment", r.GetEnv(), "allow_destroy", flag(r.GetAllowDestroy()))
+	}},
+	// The request names only the plan; the handler adds the service, the
+	// target and the environment once it has read the plan.
+	forgev1connect.ResourceServiceApplyResourcePlanProcedure: {opResourceApply, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.ApplyResourcePlanRequest)
+		return "", r.GetName(), details("plan", r.GetName(), "validate_only", flag(r.GetValidateOnly()))
+	}},
 }
 
 // auditReads lists every read procedure. A procedure in neither table fails
@@ -425,6 +437,10 @@ var auditReads = []string{
 	forgev1connect.DeployServiceListDeployHistoryProcedure,
 	forgev1connect.AuditServiceListAuditEventsProcedure,
 	forgev1connect.AuditServiceGetAuditEventProcedure,
+	forgev1connect.ResourceServiceGetResourcePlanProcedure,
+	forgev1connect.ResourceServiceListResourcePlansProcedure,
+	forgev1connect.ResourceServiceListResourcesProcedure,
+	forgev1connect.ResourceServiceGetResourceProcedure,
 }
 
 // auditInterceptor records every write call; it runs outside authentication
