@@ -267,4 +267,4 @@ Each has a working default in this draft; an answer changes the plan only where 
 - [x] **Distribution:** Decided: a Homebrew tap and GitHub Releases for now. apt, yum and Scoop packages can come later.
 - [x] **Local development:** Decided: Phase 1 targets the existing k3s cluster, so no `kind`-based local Forge stack is needed for demos.
 - [x] **Template format:** Decided: the Forge format, `template.yaml` with typed parameters plus a `skeleton/` folder rendered with Go `text/template`, versioned by repo-wide tags in one templates repo. No Backstage importer (see `docs/specs/2026-10-08-phase-2-templates-design.md`).
-- [ ] **Dashboard stack (Phase 6):** Default: a Next.js app built on Forge's own `nextjs` template and deployed by Forge itself. The alternative is a static single-page app that forge-api serves. Decide before Phase 6 starts.
+- [x] **Dashboard stack (Phase 6):** Decided: a Next.js app scaffolded from Forge's own `nextjs` template, with its own repo, and deployed by Forge like any other service. A static single-page app served by forge-api is ruled out.

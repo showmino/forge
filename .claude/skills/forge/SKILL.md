@@ -18,6 +18,7 @@ skill holds what neither says.
 - Dex for local and demo login; production IdP deferred. CLI uses the OIDC device flow and sends the **ID token** as bearer; the API verifies it with the CLI client ID (`forge-cli`) as audience.
 - Argo CD only (Flux later). OpenTofu jobs run by the API (not Crossplane).
 - Templates live in a Git repo, versioned by tag.
+- The Phase 6 web dashboard is a Next.js app from Forge's own `nextjs` template, deployed by Forge; it is a thin client of the same ConnectRPC API (no dashboard-only endpoints).
 - Telemetry off. Distribution: GitHub Releases + Homebrew tap (`showmino/homebrew-tap`).
 - Demos run on the owner's k3s cluster (see verifying.md for its quirks).
 
@@ -81,7 +82,7 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - The GoReleaser image's `COPY ${TARGETPLATFORM}/forge` is unbuilt until the first release snapshot.
 - **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
 - **Groundwork (done):** k3s login through GitHub (writer group `showmino:platform-engineering`), and CloudNativePG `forge-db` holds the catalog and Dex's logins (spec docs/specs/2026-10-09-groundwork-auth-storage-design.md, PR #18). Live on k3s since 2026-10-10: forge-api 9d310f0 (chart still pinned to 18b1232), render adds `FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github`; checked: GitHub login with the writer group, the catalog survives a forge-api restart, Dex's refresh tokens and keys survive a Dex restart.
-- **Later:** Phase 5, resources (OpenTofu jobs) and audit; Phase 6, a web dashboard on the same API (docs/index.md; stack still open: Next.js app vs static SPA served by forge-api).
+- **Later:** Phase 5, resources (OpenTofu jobs) and audit; Phase 6, a web dashboard on the same API (docs/index.md; decided: a Next.js app from the `nextjs` template, deployed by Forge itself).
 - **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP. The demo Dex password is resolved by the groundwork (GitHub login).
 
 ## Common mistakes
