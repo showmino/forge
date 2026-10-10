@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -322,5 +323,37 @@ func TestCreateEnvironmentNeedsWrite(t *testing.T) {
 	}))
 	if connect.CodeOf(err) != connect.CodePermissionDenied {
 		t.Fatalf("reader create: %v", err)
+	}
+}
+
+func TestAuditEnvironmentService(t *testing.T) {
+	t.Parallel()
+	f := newEnvFixture(t, false, nil)
+	f.available(t, nil)
+	resp, err := f.create(t, &forgev1.CreateEnvironmentRequest{EnvironmentId: "pr-7", Ref: "main", Ttl: durationpb.New(2 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.wait(t, resp.GetOperation())
+	ctx := context.Background()
+	if _, err := f.client.ExtendEnvironment(ctx, as("writer", &forgev1.ExtendEnvironmentRequest{Name: "environments/pr-7", Ttl: durationpb.New(4 * time.Hour)})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.client.DestroyEnvironment(ctx, as("writer", &forgev1.DestroyEnvironmentRequest{Name: "environments/pr-7"})); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range allEvents(t, f.audit) {
+		if e.GetKind() == "request" {
+			got = append(got, e.GetAction()+" "+e.GetService()+" "+e.GetTarget()+" "+e.GetDetails()["ttl"])
+		}
+	}
+	want := []string{
+		"environment.create services/payments environments/pr-7 2h0m0s",
+		"environment.extend services/payments environments/pr-7 4h0m0s",
+		"environment.destroy services/payments environments/pr-7 ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

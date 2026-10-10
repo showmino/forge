@@ -21,6 +21,7 @@ import (
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/store"
 )
 
 const envSHA = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
@@ -37,6 +38,7 @@ type envFixture struct {
 	client  forgev1connect.EnvironmentServiceClient
 	clock   *clock
 	image   string
+	audit   *store.Memory
 }
 
 func newEnvFixture(t *testing.T, noImage bool, tweak func(*EnvOptions)) *envFixture {
@@ -79,6 +81,7 @@ func newEnvFixture(t *testing.T, noImage bool, tweak func(*EnvOptions)) *envFixt
 		tweak(&o)
 	}
 	f.envs = NewEnvironments(o)
+	f.audit = store.NewMemory()
 	h, err := New(Options{
 		Authenticator: StaticAuthenticator{
 			"writer": {Subject: "ana", Groups: []string{"platform"}},
@@ -88,6 +91,7 @@ func newEnvFixture(t *testing.T, noImage bool, tweak func(*EnvOptions)) *envFixt
 		Catalog:      catalog,
 		Operations:   f.ops,
 		Environments: f.envs,
+		Audit:        f.audit,
 	})
 	if err != nil {
 		t.Fatal(err)

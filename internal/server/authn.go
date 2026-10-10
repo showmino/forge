@@ -150,6 +150,9 @@ func (i *authInterceptor) authenticate(ctx context.Context, procedure, header st
 		}
 		return ctx, connect.NewError(connect.CodeUnauthenticated, err)
 	}
+	if r := auditFrom(ctx); r != nil {
+		r.setActor(p)
+	}
 	if p.Workload != nil {
 		if !slices.Contains(workloadProcedures, procedure) {
 			return ctx, connect.NewError(connect.CodePermissionDenied,

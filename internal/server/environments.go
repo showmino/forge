@@ -270,6 +270,7 @@ func (e *Environments) ExtendEnvironment(ctx context.Context, req *connect.Reque
 	if err != nil {
 		return nil, envErr(id, err)
 	}
+	noteAuditService(ctx, servicePrefix+ns.Labels[labelService])
 	if ns.Annotations[annState] == stateDestroying {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s is being destroyed", envNamePrefix, id))
 	}
@@ -307,6 +308,7 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 	default:
 		return nil, envErr(id, err)
 	}
+	noteAuditService(ctx, env.GetService())
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Environment: env}), nil
 	}
