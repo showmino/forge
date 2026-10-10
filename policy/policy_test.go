@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -68,7 +71,7 @@ func TestRules(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r, err := e.Evaluate(ctx, tc.plan, tc.f)
+			r, err := e.Evaluate(ctx, tc.plan, declaring(tc.f, tc.plan))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -271,7 +274,7 @@ func TestRulesFailClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			r, err := e.Evaluate(ctx, tc.plan, tc.f)
+			r, err := e.Evaluate(ctx, tc.plan, declaring(tc.f, tc.plan))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -304,6 +307,155 @@ func TestRulesFailClosed(t *testing.T) {
 	for _, body := range []string{"null", "[]", `"tofu"`, "42"} {
 		if _, err := e.Evaluate(ctx, []byte(body), stg); err == nil {
 			t.Errorf("%s: want an error", body)
+		}
+	}
+}
+
+// declaring returns f declaring what planJSON's first change ends with, so a
+// case that is not about the declaration is not refused for it.
+func declaring(f Forge, planJSON []byte) Forge {
+	var doc struct {
+		ResourceChanges []struct {
+			Change struct {
+				After struct {
+					Manifest struct {
+						Metadata struct {
+							Name string `json:"name"`
+						} `json:"metadata"`
+						Spec struct {
+							Instances json.Number `json:"instances"`
+							Storage   struct {
+								Size string `json:"size"`
+							} `json:"storage"`
+						} `json:"spec"`
+					} `json:"manifest"`
+				} `json:"after"`
+			} `json:"change"`
+		} `json:"resource_changes"`
+	}
+	if json.Unmarshal(planJSON, &doc) != nil || len(doc.ResourceChanges) == 0 {
+		return f
+	}
+	m := doc.ResourceChanges[0].Change.After.Manifest
+	gi, err1 := strconv.Atoi(strings.TrimSuffix(m.Spec.Storage.Size, "Gi"))
+	n, err2 := strconv.Atoi(m.Spec.Instances.String())
+	if err1 != nil || err2 != nil {
+		return f
+	}
+	f.Resources = []Resource{{Name: m.Metadata.Name, Type: "postgres", StorageGi: int32(gi), Instances: int32(n)}} //nolint:gosec // test sizes
+	return f
+}
+
+// A plan may only make what forge.yaml declares.
+func TestRulesDeclared(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const retain = "longhorn-retain"
+	create := plan(t, []string{"create"}, nil, cluster("payments-staging", 5, 1, retain))
+	main := func(gi, instances int32) []Resource {
+		return []Resource{{Name: "main", Type: "postgres", StorageGi: gi, Instances: instances}}
+	}
+	for name, tc := range map[string]struct {
+		resources []Resource
+		want      string
+	}{
+		"as declared":           {main(5, 1), ""},
+		"nothing declared":      {nil, `the plan makes database "main" with 5Gi and 1 instances, which is not what forge.yaml declares`},
+		"another size":          {main(6, 1), "which is not what forge.yaml declares"},
+		"another count":         {main(5, 2), "which is not what forge.yaml declares"},
+		"another name":          {[]Resource{{Name: "other", Type: "postgres", StorageGi: 5, Instances: 1}}, "which is not what forge.yaml declares"},
+		"another type":          {[]Resource{{Name: "main", Type: "redis", StorageGi: 5, Instances: 1}}, "which is not what forge.yaml declares"},
+		"declared among others": {append(main(9, 3), main(5, 1)...), ""},
+	} {
+		r, err := e.Evaluate(ctx, create, Forge{Service: "payments", Environment: "staging", Resources: tc.resources})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(r.Deny, "|"); (tc.want == "") != (got == "") || !strings.Contains(got, tc.want) {
+			t.Errorf("%s: deny %q, want %q", name, got, tc.want)
+		}
+	}
+	// Deleting needs no declaration: removing it from forge.yaml is the point.
+	gone := plan(t, []string{"delete"}, cluster("payments-staging", 5, 1, retain), nil)
+	if r, err := e.Evaluate(ctx, gone, Forge{Service: "payments", Environment: "staging", AllowDestroy: true}); err != nil || r.Denied() {
+		t.Errorf("an asked-for delete with nothing declared: %v %v", r, err)
+	}
+}
+
+// Actions the rules do not know, and changes that leave nothing behind
+// without saying they delete, are refused.
+func TestRulesKnownActions(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := cluster("payments-staging", 5, 1, "longhorn-retain")
+	destroy := Forge{Service: "payments", Environment: "staging", AllowDestroy: true}
+	for name, tc := range map[string]struct {
+		actions       []string
+		before, after any
+		want          string
+	}{
+		"forget":                      {[]string{"forget"}, ok, nil, `has an action the rules do not know: "forget"`},
+		"forget beside a delete":      {[]string{"delete", "forget"}, ok, nil, `has an action the rules do not know: "forget"`},
+		"an update to nothing":        {[]string{"update"}, ok, nil, "leaves nothing behind but is not a delete"},
+		"a create of nothing":         {[]string{"create"}, nil, nil, "leaves nothing behind but is not a delete"},
+		"an unknown verb with a body": {[]string{"destroy"}, ok, ok, `has an action the rules do not know: "destroy"`},
+	} {
+		r, err := e.Evaluate(ctx, plan(t, tc.actions, tc.before, tc.after), declaring(destroy, plan(t, tc.actions, tc.before, tc.after)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(r.Deny, "|"), tc.want) {
+			t.Errorf("%s: deny %q, want it to contain %q", name, r.Deny, tc.want)
+		}
+	}
+}
+
+// Plans captured from real OpenTofu 1.12.7 runs of the module (provider
+// hashicorp/kubernetes 3.3.0) against CloudNativePG 1.30: the rules must read
+// the real shape, not only the hand-built one.
+func TestRulesOnCapturedPlans(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := func(instances int32) []Resource {
+		return []Resource{{Name: "main", Type: "postgres", StorageGi: 1, Instances: instances}}
+	}
+	for _, tc := range []struct {
+		file       string
+		f          Forge
+		deny, warn string
+	}{
+		{"create.json", Forge{Service: "payments", Environment: "staging", Resources: main(1)}, "", ""},
+		{"create.json", Forge{Service: "payments", Environment: "staging", Resources: main(2)}, "which is not what forge.yaml declares", ""},
+		{"create.json", Forge{Service: "ledger", Environment: "staging", Resources: main(1)}, `in namespace "payments-staging", not ledger-staging`, ""},
+		{"update.json", Forge{Service: "payments", Environment: "staging", Resources: main(2)}, "", "staging has 2 instances; 1 is usually enough"},
+		{"delete.json", Forge{Service: "payments", Environment: "staging"}, "the plan deletes database main; plan again with --allow-destroy to remove it", ""},
+		{"delete.json", Forge{Service: "payments", Environment: "staging", AllowDestroy: true}, "", ""},
+	} {
+		planJSON, err := os.ReadFile(filepath.Join("testdata", tc.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := e.Evaluate(ctx, planJSON, tc.f)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.file, err)
+		}
+		if got := strings.Join(r.Deny, "|"); (tc.deny == "") != (got == "") || !strings.Contains(got, tc.deny) {
+			t.Errorf("%s as %s: deny %q, want %q", tc.file, tc.f.Service, got, tc.deny)
+		}
+		if got := strings.Join(r.Warn, "|"); got != tc.warn {
+			t.Errorf("%s as %s: warn %q, want %q", tc.file, tc.f.Service, got, tc.warn)
 		}
 	}
 }

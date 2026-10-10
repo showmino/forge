@@ -35,6 +35,12 @@ type Catalog struct {
 	resources store.ResourceStore
 }
 
+// GuardResources makes DeleteService refuse a service that still has
+// resource records in s. forge-api sets it whenever it has a database, also
+// with resources turned off: records made while they were on must still
+// keep their service.
+func (c *Catalog) GuardResources(s store.ResourceStore) { c.resources = s }
+
 // NewCatalog returns an empty catalog in memory.
 func NewCatalog(now func() time.Time) *Catalog { return NewCatalogWithStore(store.NewMemory(), now) }
 

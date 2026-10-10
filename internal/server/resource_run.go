@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -125,15 +126,23 @@ func (r *Resources) signal(planName string) {
 func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, emit func(string, string)) error {
 	if spec.Mode == run.ModeApply && r.o.Namespaces != nil {
 		if err := r.o.Namespaces.EnsureServiceNamespace(ctx, spec.Service, spec.Env); err != nil {
+			if ctx.Err() != nil {
+				return r.failRun(ctx, spec, OpCodeCancelled, "the run was cancelled")
+			}
 			return r.failRun(ctx, spec, opCodeLaunchFailed, "namespace "+spec.Service+"-"+spec.Env+": "+clip(err.Error()))
 		}
 		emit("namespace", spec.Service+"-"+spec.Env)
 	}
 	if err := r.o.Launcher.Start(ctx, spec); err != nil {
+		if ctx.Err() != nil {
+			return r.failRun(ctx, spec, OpCodeCancelled, "the run was cancelled")
+		}
 		return r.failRun(ctx, spec, opCodeLaunchFailed, "the runner could not be started: "+clip(err.Error()))
 	}
 	emit("launch", "the "+spec.Mode+" runner started")
-	deadline := time.NewTimer(r.o.RunTimeout)
+	// The same deadline as the run's token: the namespace and the launch
+	// have already used part of the run's time.
+	deadline := time.NewTimer(spec.Deadline.Sub(r.o.Now()))
 	defer deadline.Stop()
 	tick := time.NewTicker(r.o.Poll)
 	defer tick.Stop()
@@ -167,7 +176,7 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 				continue
 			}
 			if st.Failed {
-				return r.failRun(ctx, spec, opCodeRunnerFailed, "the runner failed: "+clip(st.Log))
+				return r.failRun(ctx, spec, opCodeRunnerFailed, "the runner failed: "+runText(st.Log))
 			}
 			// It ended cleanly: its result is on its way, or it never sent one.
 			if exited.IsZero() {
@@ -177,6 +186,30 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 			}
 		}
 	}
+}
+
+// runText makes a runner's output fit for a message: its lines joined by
+// "; ", and the END of it kept, because OpenTofu puts the error last. The
+// caller still cleans it (failRun and Complete go through auditText).
+func runText(s string) string {
+	var lines []string
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	s = strings.ToValidUTF8(strings.Join(lines, "; "), "\uFFFD")
+	const max = auditMessageMax - 40 // room for the prefix failRun's caller adds
+	if n := utf8.RuneCountInString(s); n > max {
+		skip := n - max
+		for i := range s {
+			if skip == 0 {
+				return "…" + s[i:]
+			}
+			skip--
+		}
+	}
+	return s
 }
 
 // failRun ends the run as failed and returns the operation's error. When
@@ -564,7 +597,7 @@ func (r *Resources) Complete(ctx context.Context, token string, res run.Result) 
 	}
 	end := runEnd{res: res}
 	if res.Error != "" {
-		end.code, end.message = opCodeRunFailed, auditText(res.Error, auditMessageMax)
+		end.code, end.message = opCodeRunFailed, auditText(runText(res.Error), auditMessageMax)
 	}
 	won, err := r.endRun(ctx, rec.Plan.GetName(), mode, end)
 	if err != nil {
