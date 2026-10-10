@@ -205,11 +205,11 @@ func TestAuditAppendSurvivesCancel(t *testing.T) {
 func TestAuditClip(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("é", 600)
-	got := auditClip(long)
+	got := auditText(long, auditMessageMax)
 	if n := len([]rune(got)); n != 500 || !strings.HasPrefix(long, got) {
 		t.Fatalf("clipped to %d runes", n)
 	}
-	if auditClip("short") != "short" {
+	if auditText("short", auditMessageMax) != "short" {
 		t.Error("short text changed")
 	}
 }

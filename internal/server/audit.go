@@ -190,9 +190,6 @@ func errMessage(err error) string {
 	return ""
 }
 
-// auditClip keeps at most auditMessageMax characters, cut on a rune boundary.
-func auditClip(s string) string { return clipRunes(s, auditMessageMax) }
-
 func clipRunes(s string, max int) string {
 	if utf8.RuneCountInString(s) <= max {
 		return s

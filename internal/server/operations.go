@@ -135,9 +135,9 @@ func (s *Operations) run(ctx context.Context, o *operation, w Work) {
 		switch {
 		case e == nil:
 		case e.GetCode() == OpCodeCancelled:
-			ev.Result = &forgev1.AuditResult{Code: "cancelled", Message: auditText(e.GetMessage(), 500)}
+			ev.Result = &forgev1.AuditResult{Code: "cancelled", Message: auditText(e.GetMessage(), auditMessageMax)}
 		default:
-			ev.Result = &forgev1.AuditResult{Code: "failed", Message: auditText(e.GetCode()+": "+e.GetMessage(), 500)}
+			ev.Result = &forgev1.AuditResult{Code: "failed", Message: auditText(e.GetCode()+": "+e.GetMessage(), auditMessageMax)}
 		}
 		s.appendAudit(ctx, ev)
 	}

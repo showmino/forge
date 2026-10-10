@@ -89,7 +89,7 @@ func newAuditListCmd(f *Factory) *cobra.Command {
 				}
 				v.Rows = append(v.Rows, []string{
 					auditID(e.GetName()), e.GetTime().AsTime().UTC().Format("2006-01-02 15:04:05"), auditActor(e.GetActor()),
-					act, strings.TrimPrefix(e.GetService(), "services/"), e.GetTarget(), e.GetResult().GetCode(),
+					act, strings.TrimPrefix(e.GetService(), "services/"), e.GetTarget(), auditResult(e),
 				})
 				v.Names = append(v.Names, e.GetName())
 			}
@@ -190,7 +190,18 @@ func auditActor(a *forgev1.AuditActor) string {
 		return a.GetEmail()
 	case a.GetRepository() != "":
 		return a.GetRepository()
+	case a.GetSubject() != "":
+		return a.GetSubject()
 	default:
 		return a.GetKind()
 	}
+}
+
+// auditResult is the RESULT cell: the code, marked when the call was a dry run.
+func auditResult(e *forgev1.AuditEvent) string {
+	code := e.GetResult().GetCode()
+	if e.GetDetails()["validate_only"] == "true" {
+		return code + " (dry run)"
+	}
+	return code
 }

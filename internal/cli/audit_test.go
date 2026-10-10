@@ -64,6 +64,27 @@ func TestAuditList(t *testing.T) {
 	h.fails(2, "audit", "list", "--limit", "0")
 }
 
+func TestAuditListMarksDryRuns(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	for _, code := range []string{"ok", "invalid_argument"} {
+		if _, err := h.audit.AppendAuditEvent(context.Background(), &forgev1.AuditEvent{
+			Time: timestamppb.Now(), Kind: "request", Action: "deploy.start", Service: "services/payments", Target: "deployments/payments/staging",
+			Actor:  &forgev1.AuditActor{Kind: "user", Subject: "bo"},
+			Result: &forgev1.AuditResult{Code: code}, Details: map[string]string{"validate_only": "true"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := h.ok("audit", "list")
+	if !strings.Contains(r.out, "ok (dry run)") || !strings.Contains(r.out, "invalid_argument (dry run)") || !strings.Contains(r.out, " bo ") {
+		t.Errorf("table: %s", r.out)
+	}
+	if r := h.ok("audit", "get", "1"); strings.Contains(r.out, "dry run") {
+		t.Errorf("get must keep the plain code: %s", r.out)
+	}
+}
+
 func TestAuditListSinceDuration(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
