@@ -233,7 +233,7 @@ Build in six phases, sequenced rather than dated, and move on only when a phase'
 | 2 · Templates and scaffolding (done) | template list / get / lint; `forge create` from a Git template repo; first golden path: Go gRPC service | A scaffolded service passes its own CI and appears in the catalog |
 | 3 · Environments (done) | env create / list / destroy / extend with a TTL; operations: op watch, streamed progress; one Kubernetes namespace per preview | `forge create` to a running preview environment in under 10 minutes |
 | 4 · Deployments (done) | deploy start / status / history; rollback and promote through Argo CD; deploys from CI with workload identity | A team ships to staging from CI without kubectl or Argo access |
-| 5 · Resources and audit | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
+| 5 · Resources and audit (audit log done) | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
 | 6 · Web dashboard | a browser UI on the same Forge API: GitHub login through Dex; catalog and service pages; templates and create; environments; deploys with promote and rollback; operations with live progress; audit log | A writer creates, previews and promotes a service from the browser, and a reader sees the same data, all without a terminal |
 
 Each phase grows the API and the CLI together, so the CLI never ships a command the server cannot back. The command table above tags every group with its phase.

@@ -224,8 +224,8 @@ forge audit list --actor ana@example.com --failed
 forge audit get 1234
 ```
 
-Events live in PostgreSQL (`forge-db`) when forge-api has `--database-url`;
-otherwise in memory.
+Events live in PostgreSQL (`forge-db`) when forge-api has `--database-url`
+(or `FORGE_DATABASE_URL`); otherwise in memory.
 
 ## The API
 
