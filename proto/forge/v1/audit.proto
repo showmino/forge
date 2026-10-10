@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// AuditService reads the audit log: one event per write call to the Forge
+// API, refused calls included, plus the outcome of long-running work and
+// forge-api's own actions. Events are append-only. Resource names follow AIP
+// style: "auditEvents/{id}", where a higher id is a later event.
+service AuditService {
+  // ListAuditEvents returns events newest first.
+  rpc ListAuditEvents(ListAuditEventsRequest) returns (ListAuditEventsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetAuditEvent returns one event.
+  rpc GetAuditEvent(GetAuditEventRequest) returns (GetAuditEventResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// AuditEvent is one entry of the audit log.
+message AuditEvent {
+  // "auditEvents/1234".
+  string name = 1;
+  google.protobuf.Timestamp time = 2;
+  // "request" (a write call) or "outcome" (how long-running work ended).
+  string kind = 3;
+  // For example "deploy.promote".
+  string action = 4;
+  AuditActor actor = 5;
+  // "services/payments" when the action concerns a service.
+  string service = 6;
+  // The resource acted on, for example "deployments/payments/production".
+  string target = 7;
+  AuditResult result = 8;
+  // "operations/op_..." when the call started long-running work.
+  string operation = 9;
+  // A few identifiers and settings of the request, per action.
+  map<string, string> details = 10;
+  AuditClient client = 11;
+}
+
+// AuditActor is who acted.
+message AuditActor {
+  // "user", "workload" (a CI job), "system" (forge-api) or "anonymous".
+  string kind = 1;
+  string subject = 2;
+  // Set for users.
+  string email = 3;
+  // "<org>/<repo>", set for workloads.
+  string repository = 4;
+}
+
+// AuditResult is how the action ended.
+message AuditResult {
+  // "ok", a Connect code such as "permission_denied", or for outcomes
+  // "failed" or "cancelled".
+  string code = 1;
+  // The error message, at most 500 characters.
+  string message = 2;
+}
+
+// AuditClient is what the caller's client sent.
+message AuditClient {
+  // The Forge-Client-Version header.
+  string version = 1;
+  // The X-Request-Id header.
+  string request_id = 2;
+}
+
+message ListAuditEventsRequest {
+  // Only events about this service ("services/payments" or "payments").
+  string service = 1;
+  // Only events by this actor: an email, a repository "<org>/<repo>", or an
+  // actor kind such as "system".
+  string actor = 2;
+  // Only this action, for example "deploy.promote".
+  string action = 3;
+  // Only events whose result is not "ok".
+  bool failed_only = 4;
+  // Only events at or after since, and before until.
+  google.protobuf.Timestamp since = 5;
+  google.protobuf.Timestamp until = 6;
+  // At most this many events; default 50, max 500.
+  int32 page_size = 7;
+  string page_token = 8;
+}
+
+message ListAuditEventsResponse {
+  repeated AuditEvent events = 1;
+  // Empty on the last page.
+  string next_page_token = 2;
+}
+
+message GetAuditEventRequest {
+  // "auditEvents/1234".
+  string name = 1;
+}
+
+message GetAuditEventResponse {
+  AuditEvent event = 1;
+}

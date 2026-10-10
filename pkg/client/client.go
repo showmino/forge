@@ -55,6 +55,7 @@ type Client struct {
 	Operations   forgev1connect.OperationServiceClient
 	Environments forgev1connect.EnvironmentServiceClient
 	Deploys      forgev1connect.DeployServiceClient
+	Audit        forgev1connect.AuditServiceClient
 	BaseURL      string
 }
 
@@ -88,6 +89,7 @@ func New(baseURL string, o Options) (*Client, error) {
 		Operations:   forgev1connect.NewOperationServiceClient(hc, baseURL, opts...),
 		Environments: forgev1connect.NewEnvironmentServiceClient(hc, baseURL, opts...),
 		Deploys:      forgev1connect.NewDeployServiceClient(hc, baseURL, opts...),
+		Audit:        forgev1connect.NewAuditServiceClient(hc, baseURL, opts...),
 		BaseURL:      baseURL,
 	}, nil
 }
