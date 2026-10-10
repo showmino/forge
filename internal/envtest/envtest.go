@@ -46,10 +46,14 @@ func Kube(objs ...runtime.Object) *fake.Clientset {
 	return fake.NewClientset(append([]runtime.Object{secret}, objs...)...)
 }
 
-// Dynamic returns a fake dynamic client that knows HTTPRoutes and Argo CD Applications.
+// Databases is the CloudNativePG Cluster resource.
+var Databases = schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"}
+
+// Dynamic returns a fake dynamic client that knows HTTPRoutes, Argo CD
+// Applications and CloudNativePG clusters.
 func Dynamic() *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{HTTPRoutes: "HTTPRouteList", Applications: "ApplicationList"})
+		map[schema.GroupVersionResource]string{HTTPRoutes: "HTTPRouteList", Applications: "ApplicationList", Databases: "ClusterList"})
 }
 
 // GitHub is an in-memory GitHub: refs, files and Actions runs.

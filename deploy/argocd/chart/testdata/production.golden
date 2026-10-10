@@ -6,11 +6,12 @@ metadata:
   name: forge
 spec:
   hard:
-    requests.cpu: "1"
-    requests.memory: 1Gi
-    limits.cpu: "2"
-    limits.memory: 2Gi
-    pods: "10"
+    # Room for the app and, next to it, a database of up to three instances.
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    pods: "15"
 ---
 # Source: forge-service/templates/limits.yaml
 apiVersion: v1

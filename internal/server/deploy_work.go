@@ -12,6 +12,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/resource"
 )
 
 // lock claims target ("<svc>/<env>") for opName; d.mu must be held.
@@ -111,6 +112,15 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 		v.Forge.Operation = p
 	}
 	v.Forge.Time = d.o.Now().UTC().Format(time.RFC3339)
+	// Worked out now, for this environment: never copied from an older
+	// deploy (a rollback) or from another environment (a promote).
+	db, err := d.database(ctx, svc, env)
+	if err != nil {
+		return fmt.Errorf("read the resources of %s%s in %s: %w", servicePrefix, svc, env, err)
+	}
+	if v.Database = db; db != nil {
+		emit("database", "DATABASE_URL comes from Secret "+db.Secret)
+	}
 	rec := v.Forge
 	rec.Image = v.Image
 	content := v.marshal()
@@ -136,6 +146,24 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 	}
 	emit("namespace", svc+"-"+env)
 	return stands(d.awaitSync(ctx, svc, env, commit, content, emit))
+}
+
+// database is the database the service's pods should reach in env: the one
+// with a Secret that is not being deleted. nil when there is none.
+func (d *Deploys) database(ctx context.Context, svc, env string) (*deployDatabase, error) {
+	if d.o.Resources == nil {
+		return nil, nil
+	}
+	rs, err := d.o.Resources.ListResources(ctx, servicePrefix+svc, env)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rs {
+		if r.GetType() == resource.TypePostgres && r.GetSecret() != "" && r.GetState() != forgev1.Resource_STATE_DELETING {
+			return &deployDatabase{Secret: r.GetSecret()}, nil
+		}
+	}
+	return nil, nil
 }
 
 // commit writes build()'s content to path on the deploy repo's head. When
