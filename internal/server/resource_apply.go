@@ -80,10 +80,17 @@ func (r *Resources) applicable(ctx context.Context, rec *store.PlanRecord, m *fo
 	return nil
 }
 
+// errNoTarget is returned for a plan that names no service or environment:
+// the store reads "" as "all".
+var errNoTarget = errors.New("a resource plan has no service or environment")
+
 // recordsInSync reports whether Forge's records of the plan's target say
-// exactly what the plan declares: one ready record per declared resource,
-// with the declared settings, and no other record.
+// exactly what the plan declares: one ready record with a Secret per
+// declared resource, with the declared settings, and no other record.
 func (r *Resources) recordsInSync(ctx context.Context, p *forgev1.ResourcePlan) (bool, error) {
+	if p.GetService() == "" || p.GetEnv() == "" {
+		return false, errNoTarget
+	}
 	recs, err := r.o.Store.ListResources(ctx, p.GetService(), p.GetEnv())
 	if err != nil {
 		return false, storeErr(err)
@@ -93,7 +100,7 @@ func (r *Resources) recordsInSync(ctx context.Context, p *forgev1.ResourcePlan) 
 	}
 	for _, want := range p.GetResources() {
 		if !slices.ContainsFunc(recs, func(res *forgev1.Resource) bool {
-			return res.GetName() == resourceName(p, want.GetName()) && res.GetState() == forgev1.Resource_STATE_READY && proto.Equal(res.GetSettings(), want)
+			return res.GetName() == resourceName(p, want.GetName()) && res.GetState() == forgev1.Resource_STATE_READY && res.GetSecret() != "" && proto.Equal(res.GetSettings(), want)
 		}) {
 			return false, nil
 		}

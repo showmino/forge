@@ -83,8 +83,9 @@ type Result struct {
 	// it; both set by a plan run.
 	PlanFile []byte
 	PlanJSON []byte
-	// Secrets maps a resource's name to the Secret holding its connection
-	// string; set by an apply run.
+	// Secrets maps the name of every resource that exists after the apply,
+	// changed by it or not, to the Secret holding its connection string; set
+	// by an apply run.
 	Secrets map[string]string
 	// Error says why the run failed; empty when it worked.
 	Error string

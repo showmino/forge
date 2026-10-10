@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
@@ -1431,7 +1432,7 @@ func TestSecretName(t *testing.T) {
 			t.Errorf("%q gave %q", ok, got)
 		}
 	}
-	for _, bad := range []string{"", "Bad_Name", "a\\x01b", strings.Repeat("a", 300), "-a", "a-"} {
+	for _, bad := range []string{"", "Bad_Name", "a\x01b", strings.Repeat("a", 300), "-a", "a-"} {
 		if got := f.res.secretName("r", bad); got != "" {
 			t.Errorf("%q gave %q", bad, got)
 		}
@@ -1452,4 +1453,117 @@ func TestApplyAfterServiceDeleted(t *testing.T) {
 	if len(f.runner.Started()) != started {
 		t.Error("an apply started a run")
 	}
+}
+
+// handApply starts an apply with the runner hanging, plays the runner itself
+// and completes the run with res.
+func (f *resourceFixture) handApply(t *testing.T, plan string, res run.Result) *forgev1.Operation {
+	t.Helper()
+	f.runner.Hang = true
+	defer func() { f.runner.Hang = false }()
+	before := len(f.runner.Started())
+	resp, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(f.runner.Started()) == before && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	spec := f.runner.Started()[before]
+	if _, err := f.res.Claim(context.Background(), spec.Token); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.res.Complete(context.Background(), spec.Token, res); err != nil {
+		t.Fatal(err)
+	}
+	return waitCIOp(t, f.ops, resp.GetOperation().GetName())
+}
+
+func TestApplyKeepsSecretNames(t *testing.T) {
+	t.Parallel()
+	t.Run("a run that returns no Secret", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		f.apply(t, p.GetName())
+		grow, _ := f.plan(t, "writer", "staging", database("10Gi", 0), false)
+		if op := f.handApply(t, grow.GetName(), run.Result{}); op.GetError() != nil {
+			t.Fatalf("apply: %v", op.GetError())
+		}
+		res := f.getResource(t, "resources/payments/staging/main")
+		if res.GetState() != forgev1.Resource_STATE_READY || res.GetSettings().GetStorageGi() != 10 || res.GetSecret() != "main-app" {
+			t.Errorf("record: %v", res)
+		}
+	})
+	t.Run("a record without a Secret is repaired", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		if op := f.handApply(t, p.GetName(), run.Result{}); op.GetError() != nil {
+			t.Fatalf("apply: %v", op.GetError())
+		}
+		if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_READY || res.GetSecret() != "" {
+			t.Fatalf("record: %v", res)
+		}
+		again, op := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		// The fake has no database (the hand-played run made none), so it plans a
+		// create; either way the apply must leave the Secret name.
+		t.Logf("same settings planned %d change(s); records event: %v", len(again.GetChanges()), hasStep(op, "records"))
+		if len(again.GetChanges()) == 0 && !hasStep(op, "records") {
+			t.Error("a record without a Secret counted as in sync")
+		}
+		if op := f.apply(t, again.GetName()); op.GetError() != nil {
+			t.Fatalf("repair: %v", op.GetError())
+		}
+		if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_READY || res.GetSecret() != "main-app" {
+			t.Errorf("after the repair: %v", res)
+		}
+	})
+	t.Run("an in-sync record is left alone", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		ctx := context.Background()
+		st := store.NewMemory()
+		plan := &forgev1.ResourcePlan{Name: "resourcePlans/new", Service: "services/payments", Env: "staging", Resources: []*forgev1.ResourceSettings{{Name: "main", Type: "postgres", StorageGi: 5, Instances: 1}}}
+		then := timestamppb.New(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+		existing := &forgev1.Resource{Name: "resources/payments/staging/main", Service: "services/payments", Env: "staging", Type: "postgres",
+			Settings: plan.Resources[0], State: forgev1.Resource_STATE_READY, Secret: "main-app", LastPlan: "resourcePlans/old", CreateTime: then, UpdateTime: then}
+		err := st.WriteResources(ctx, func(tx store.ResourceTx) error {
+			if err := tx.PutResource(ctx, proto.Clone(existing).(*forgev1.Resource)); err != nil {
+				return err
+			}
+			return f.res.applyResources(ctx, tx, plan, map[string]string{"main": "main-app"}, timestamppb.Now())
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.GetResource(ctx, existing.GetName())
+		if err != nil || !proto.Equal(got, existing) {
+			t.Errorf("record changed: %v %v", got, err)
+		}
+		// A runner that returns nothing does not blank it either.
+		err = st.WriteResources(ctx, func(tx store.ResourceTx) error {
+			return f.res.applyResources(ctx, tx, plan, nil, timestamppb.Now())
+		})
+		if got, _ := st.GetResource(ctx, existing.GetName()); err != nil || !proto.Equal(got, existing) {
+			t.Errorf("record changed by an empty result: %v %v", got, err)
+		}
+	})
+	t.Run("a plan without a target", func(t *testing.T) {
+		t.Parallel()
+		f := newResourceFixture(t, nil)
+		ctx := context.Background()
+		for _, p := range []*forgev1.ResourcePlan{{Service: "services/payments"}, {Env: "staging"}} {
+			if _, err := f.res.recordsInSync(ctx, p); err == nil {
+				t.Errorf("recordsInSync accepted %v", p)
+			}
+			err := f.store.WriteResources(ctx, func(tx store.ResourceTx) error {
+				return f.res.applyResources(ctx, tx, p, nil, timestamppb.Now())
+			})
+			if err == nil {
+				t.Errorf("applyResources accepted %v", p)
+			}
+		}
+	})
 }

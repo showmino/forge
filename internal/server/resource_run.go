@@ -10,6 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
@@ -391,7 +392,10 @@ func resourceName(p *forgev1.ResourcePlan, name string) string {
 // changes, so an apply also repairs records that a failed or interrupted
 // apply left behind.
 func (r *Resources) applyResources(ctx context.Context, tx store.ResourceTx, p *forgev1.ResourcePlan, secrets map[string]string, now *timestamppb.Timestamp) error {
-	old, err := tx.ListResources(ctx, p.GetService(), p.GetEnv())
+	if p.GetService() == "" || p.GetEnv() == "" {
+		return errNoTarget
+	}
+	list, err := tx.ListResources(ctx, p.GetService(), p.GetEnv())
 	if err != nil {
 		return err
 	}
@@ -399,9 +403,9 @@ func (r *Resources) applyResources(ctx context.Context, tx store.ResourceTx, p *
 	for _, s := range p.GetResources() {
 		declared[resourceName(p, s.GetName())] = true
 	}
-	created := map[string]*timestamppb.Timestamp{}
-	for _, res := range old {
-		created[res.GetName()] = res.GetCreateTime()
+	old := map[string]*forgev1.Resource{}
+	for _, res := range list {
+		old[res.GetName()] = res
 		if !declared[res.GetName()] {
 			if err := tx.DeleteResource(ctx, res.GetName()); err != nil {
 				return err
@@ -410,13 +414,25 @@ func (r *Resources) applyResources(ctx context.Context, tx store.ResourceTx, p *
 	}
 	for _, s := range p.GetResources() {
 		name := resourceName(p, s.GetName())
+		prev := old[name]
+		// A run that returns no Secret for a resource leaves the name it had.
+		secret := ""
+		if _, returned := secrets[s.GetName()]; returned || prev.GetSecret() == "" {
+			secret = r.secretName(name, secrets[s.GetName()])
+		}
+		if secret == "" {
+			secret = prev.GetSecret()
+		}
+		if prev != nil && prev.GetState() == forgev1.Resource_STATE_READY && prev.GetSecret() == secret && proto.Equal(prev.GetSettings(), s) {
+			continue
+		}
 		res := &forgev1.Resource{
 			Name: name, Service: p.GetService(), Env: p.GetEnv(), Type: s.GetType(), Settings: s,
-			State: forgev1.Resource_STATE_READY, Secret: r.secretName(name, secrets[s.GetName()]),
+			State: forgev1.Resource_STATE_READY, Secret: secret,
 			LastPlan: p.GetName(), CreateTime: now, UpdateTime: now,
 		}
-		if t := created[name]; t != nil {
-			res.CreateTime = t
+		if prev != nil && prev.GetCreateTime() != nil {
+			res.CreateTime = prev.GetCreateTime()
 		}
 		if err := tx.PutResource(ctx, res); err != nil {
 			return err
