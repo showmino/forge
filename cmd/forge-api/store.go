@@ -12,12 +12,12 @@ import (
 	"github.com/showmino/forge/internal/store"
 )
 
-// openStore returns the service catalog's store: PostgreSQL at url, migrated,
-// or memory when url is empty. The database may start after forge-api (k3s),
+// openStore returns the service catalog's and audit log's store: PostgreSQL at
+// url, migrated, or memory when url is empty. The database may start after forge-api (k3s),
 // so connecting is retried for about a minute (10 attempts, waiting 1.5s longer each time),
 // except for an invalid URL or a cancelled ctx, which fail at once. Never log url: it holds the
 // password.
-func openStore(ctx context.Context, url string, log *slog.Logger) (store.Store, error) {
+func openStore(ctx context.Context, url string, log *slog.Logger) (store.Backend, error) {
 	if url == "" {
 		log.Warn("no --database-url: the service catalog is in memory and is lost when forge-api stops")
 		return store.NewMemory(), nil

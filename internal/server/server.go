@@ -105,6 +105,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))
+	mux.Handle(forgev1connect.NewAuditServiceHandler(&auditService{store: o.Audit}, opts))
 	mux.HandleFunc("GET /cli/{name}", cliDownload(o.CLIDir))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
