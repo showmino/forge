@@ -5,11 +5,14 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
@@ -243,5 +246,74 @@ func TestAuditCoversEveryProcedure(t *testing.T) {
 	})
 	if seen != len(auditActions)+len(auditReads) {
 		t.Errorf("saw %d procedures, the tables list %d: a listed procedure does not exist", seen, len(auditActions)+len(auditReads))
+	}
+}
+
+func TestAuditText(t *testing.T) {
+	t.Parallel()
+	if got := auditText("a\x00b\xffc", 10); got != "ab\uFFFDc" {
+		t.Errorf("got %q", got)
+	}
+	if got := auditText(strings.Repeat("é", 300), 256); len([]rune(got)) != 256 {
+		t.Errorf("clipped to %d runes", len([]rune(got)))
+	}
+	if auditText("ok", 256) != "ok" {
+		t.Error("clean text changed")
+	}
+}
+
+func TestAuditCleansCallerText(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	c := auditAPI(t, audit, nil)
+	req := as("writer", &forgev1.RegisterServiceRequest{ServiceId: "payments", Service: &forgev1.Service{OwnerTeam: "billing"}})
+	req.Header().Set("X-Request-Id", "\xff")
+	req.Header().Set("Forge-Client-Version", "a\x00b") // the HTTP client may refuse this one
+	_, err := c.RegisterService(context.Background(), req)
+	if err != nil {
+		req.Header().Set("Forge-Client-Version", "ab")
+		if _, err = c.RegisterService(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evs := allEvents(t, audit)
+	if len(evs) == 0 {
+		t.Fatal("no event")
+	}
+	for _, e := range evs {
+		if _, err := protojson.Marshal(e); err != nil {
+			t.Errorf("event does not marshal: %v", err)
+		}
+		for _, s := range []string{e.GetClient().GetVersion(), e.GetClient().GetRequestId(), e.GetService(), e.GetTarget()} {
+			if !utf8.ValidString(s) || strings.ContainsRune(s, 0) {
+				t.Errorf("unclean text %q", s)
+			}
+		}
+	}
+	// A NUL in a header, which a Go client will not send, still comes out clean.
+	h := http.Header{}
+	h.Set("Forge-Client-Version", "a\x00b")
+	ev := newAuditRecord("x").finish(h, nil)
+	if ev.GetClient().GetVersion() != "ab" {
+		t.Errorf("version %q", ev.GetClient().GetVersion())
+	}
+}
+
+func TestAuditBoundsLongIdentifiers(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	c := auditAPI(t, audit, nil)
+	_, _ = c.RegisterService(context.Background(), as("writer", &forgev1.RegisterServiceRequest{
+		ServiceId: strings.Repeat("a", 10000), Service: &forgev1.Service{OwnerTeam: "t"},
+	}))
+	evs := allEvents(t, audit)
+	if len(evs) != 1 {
+		t.Fatalf("got %d events", len(evs))
+	}
+	if n := len([]rune(evs[0].GetService())); n == 0 || n > 256 {
+		t.Errorf("service has %d runes", n)
+	}
+	if n := len([]rune(evs[0].GetTarget())); n == 0 || n > 256 {
+		t.Errorf("target has %d runes", n)
 	}
 }

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -32,6 +33,9 @@ const (
 	actorSystem    = "system"
 	actorAnonymous = "anonymous"
 )
+
+// auditFieldMax is the most characters of a caller-derived field an event keeps.
+const auditFieldMax = 256
 
 // auditMessageMax is the most characters of an error message an event keeps.
 const auditMessageMax = 500
@@ -117,21 +121,24 @@ func (r *auditRecord) describe(act auditAction, msg any) {
 		return
 	}
 	service, target, det := act.describe(msg)
+	for k, v := range det {
+		det[k] = auditText(v, auditFieldMax)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if service != "" {
-		r.ev.Service = service
+		r.ev.Service = auditText(service, auditFieldMax)
 	}
-	r.ev.Target, r.ev.Details = target, det
+	r.ev.Target, r.ev.Details = auditText(target, auditFieldMax), det
 }
 
 // finish sets the result and client and returns a copy of the event.
 func (r *auditRecord) finish(h interface{ Get(string) string }, err error) *forgev1.AuditEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.ev.Result = &forgev1.AuditResult{Code: auditCode(err), Message: auditClip(errMessage(err))}
+	r.ev.Result = &forgev1.AuditResult{Code: auditCode(err), Message: auditText(errMessage(err), auditMessageMax)}
 	if h != nil {
-		r.ev.Client = &forgev1.AuditClient{Version: h.Get(client.HeaderClientVersion), RequestId: h.Get(client.HeaderRequestID)}
+		r.ev.Client = &forgev1.AuditClient{Version: auditText(h.Get(client.HeaderClientVersion), auditFieldMax), RequestId: auditText(h.Get(client.HeaderRequestID), auditFieldMax)}
 	}
 	return proto.Clone(r.ev).(*forgev1.AuditEvent)
 }
@@ -156,18 +163,28 @@ func errMessage(err error) string {
 }
 
 // auditClip keeps at most auditMessageMax characters, cut on a rune boundary.
-func auditClip(s string) string {
-	if utf8.RuneCountInString(s) <= auditMessageMax {
+func auditClip(s string) string { return clipRunes(s, auditMessageMax) }
+
+func clipRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
 		return s
 	}
 	n := 0
 	for i := range s {
-		if n == auditMessageMax {
+		if n == max {
 			return s[:i]
 		}
 		n++
 	}
 	return s
+}
+
+// auditText makes caller-derived text safe to store: valid UTF-8, no NUL
+// bytes, at most max characters.
+func auditText(s string, max int) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	s = strings.ReplaceAll(s, "\x00", "")
+	return clipRunes(s, max)
 }
 
 // auditor appends events to the store, falling back to the log.
@@ -193,8 +210,11 @@ func (a *auditor) append(ctx context.Context, ev *forgev1.AuditEvent) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if _, err := a.store.AppendAuditEvent(ctx, ev); err != nil {
-		b, _ := protojson.Marshal(ev)
-		a.log.Error("audit event not stored", "error", err, "event", string(b))
+		event := fmt.Sprintf("%v", ev)
+		if b, merr := protojson.Marshal(ev); merr == nil {
+			event = string(b)
+		}
+		a.log.Error("audit event not stored", "error", err, "event", event)
 	}
 }
 
