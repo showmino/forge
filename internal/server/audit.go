@@ -141,6 +141,13 @@ func (r *auditRecord) describe(act auditAction, msg any) {
 	r.ev.Target, r.ev.Details = auditText(target, auditFieldMax), det
 }
 
+// safeDescribe is describe, but a panic in it leaves the event with its
+// action only: the call still runs and is still recorded.
+func (r *auditRecord) safeDescribe(act auditAction, msg any) {
+	defer func() { _ = recover() }()
+	r.describe(act, msg)
+}
+
 // finish sets the result and client and returns a copy of the event.
 func (r *auditRecord) finish(h interface{ Get(string) string }, err error) *forgev1.AuditEvent {
 	r.mu.Lock()
@@ -381,10 +388,20 @@ func (i *auditInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
 			return next(ctx, req)
 		}
 		rec := newAuditRecord(act.name)
-		rec.describe(act, req.Any())
+		rec.safeDescribe(act, req.Any())
+		defer i.appendOnPanic(ctx, rec, req.Header())
 		resp, err := next(withAuditRecord(ctx, rec), req)
 		i.a.append(ctx, rec.finish(req.Header(), err))
 		return resp, err
+	}
+}
+
+// appendOnPanic is deferred by the wrappers: when the handler panicked it
+// appends an "internal" event, then panics again with the same value.
+func (i *auditInterceptor) appendOnPanic(ctx context.Context, rec *auditRecord, h interface{ Get(string) string }) {
+	if v := recover(); v != nil {
+		i.a.append(ctx, rec.finish(h, connect.NewError(connect.CodeInternal, fmt.Errorf("panic: %v", v))))
+		panic(v)
 	}
 }
 
@@ -400,6 +417,7 @@ func (i *auditInterceptor) WrapStreamingHandler(next connect.StreamingHandlerFun
 		}
 		rec := newAuditRecord(act.name)
 		sc := &auditConn{StreamingHandlerConn: conn, rec: rec, act: act}
+		defer i.appendOnPanic(ctx, rec, conn.RequestHeader())
 		err := next(withAuditRecord(ctx, rec), sc)
 		i.a.append(ctx, rec.finish(conn.RequestHeader(), err))
 		return err
@@ -418,7 +436,7 @@ func (c *auditConn) Receive(m any) error {
 	err := c.StreamingHandlerConn.Receive(m)
 	if err == nil && !c.seen {
 		c.seen = true
-		c.rec.describe(c.act, m)
+		c.rec.safeDescribe(c.act, m)
 	}
 	return err
 }

@@ -344,3 +344,55 @@ func TestAuditUnauthenticatedControlCharacters(t *testing.T) {
 		}
 	}
 }
+
+// panicStore panics on every write, like a bug in a handler.
+type panicStore struct{ brokenStore }
+
+func (panicStore) Write(context.Context, func(store.Tx) error) error { panic("kaboom\x1b[2J") }
+
+func TestAuditHandlerPanicIsRecorded(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	h, err := New(Options{
+		Authenticator: StaticAuthenticator{"writer": {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}}},
+		Authorizer:    Authorizer{WriterGroups: []string{"platform"}},
+		Catalog:       NewCatalogWithStore(panicStore{}, nil),
+		Audit:         audit,
+		Logger:        slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var propagated any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() { propagated = recover() }() // what net/http would do
+		h.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	c := forgev1connect.NewServiceCatalogServiceClient(srv.Client(), srv.URL)
+	_, _ = c.RegisterService(context.Background(), as("writer", &forgev1.RegisterServiceRequest{
+		ServiceId: "payments", Service: &forgev1.Service{OwnerTeam: "billing"},
+	}))
+	if s, _ := propagated.(string); !strings.HasPrefix(s, "kaboom") {
+		t.Fatalf("panic did not propagate unchanged: %v", propagated)
+	}
+	evs := allEvents(t, audit)
+	if len(evs) != 1 {
+		t.Fatalf("got %d events, want 1", len(evs))
+	}
+	r := evs[0].GetResult()
+	if evs[0].GetAction() != "service.register" || evs[0].GetService() != "services/payments" || r.GetCode() != "internal" ||
+		!strings.HasPrefix(r.GetMessage(), "panic: kaboom") || strings.ContainsRune(r.GetMessage(), 0x1b) {
+		t.Fatalf("event %v", evs[0])
+	}
+}
+
+func TestAuditDescribePanicKeepsAction(t *testing.T) {
+	t.Parallel()
+	rec := newAuditRecord("x")
+	rec.safeDescribe(auditAction{name: "x", describe: func(any) (string, string, map[string]string) { panic("bad") }}, "msg")
+	ev := rec.snapshot()
+	if ev.GetAction() != "x" || ev.GetService() != "" || ev.GetTarget() != "" {
+		t.Fatalf("event %v", ev)
+	}
+}
