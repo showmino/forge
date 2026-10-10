@@ -225,7 +225,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done; Phase 5 is next. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (`docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |

@@ -54,15 +54,15 @@ An audit event is an API resource named `auditEvents/{id}`. `id` comes from a Po
 | UpdateService | `service.update` | `services/<id>` | `update_mask`, `validate_only` |
 | DeleteService | `service.delete` | `services/<id>` | `validate_only` |
 | CreateService | `service.create` | `services/<id>` | `template`, `template_version`, `validate_only` |
-| CreateEnvironment | `environment.create` | `environments/<id>` | `ref`, `ttl` |
+| CreateEnvironment | `environment.create` | `environments/<id>` | `ref`, `ttl`, `validate_only` |
 | ExtendEnvironment | `environment.extend` | `environments/<id>` | `ttl` |
-| DestroyEnvironment | `environment.destroy` | `environments/<id>` | |
-| StartDeploy | `deploy.start` | `deployments/<service>/<env>` | `env`, `ref` |
-| RollbackDeploy | `deploy.rollback` | `deployments/<service>/<env>` | `to_revision` |
-| PromoteDeploy | `deploy.promote` | `deployments/<service>/production` | `from_revision` |
+| DestroyEnvironment | `environment.destroy` | `environments/<id>` | `validate_only` |
+| StartDeploy | `deploy.start` | `deployments/<service>/<env>` | `env`, `ref`, `validate_only` |
+| RollbackDeploy | `deploy.rollback` | `deployments/<service>/<env>` | `to`, `validate_only` |
+| PromoteDeploy | `deploy.promote` | `deployments/<service>/production` | `from`, `to`, `validate_only` |
 | CancelOperation | `operation.cancel` | `operations/<id>` | |
 
-The plan fills in the exact field names from the protos. The rule: only identifiers and settings, never free text from the caller.
+The plan fills in the exact field names from the protos. The rule: only identifiers and settings, never free text from the caller. Text that comes from the caller (identifiers, client headers, error messages) is cleaned to valid UTF-8, stripped of NUL bytes and cut to 256 characters (500 for the result message) before it is stored.
 
 Service: for the catalog calls, from the target. For environments and deploys, from the request's `service` field when it has one, otherwise from the environment or deployment name. For `operation.cancel`, from the operation's stored service.
 
@@ -79,7 +79,7 @@ Streaming: `CreateService` is server-streaming. The interceptor wraps the stream
 - **At finish:** when the operation finishes (`finish`), the runner appends an `outcome` event with the same action, actor, service and target. `operation` is the operation's name, and `result` is `ok`, `failed` with the error message, or `cancelled`.
 - **No audit context:** an operation started without one, such as by the system, gets actor `system`.
 
-**System actions.** The preview reaper appends `environment.expire` with actor `system` when it destroys an expired environment. Its destroy operation's outcome follows, as for any operation.
+**System actions.** The preview reaper appends `environment.expire` with actor `system` only for a destroy it starts itself. Its destroy operation's outcome follows, as for any operation.
 
 **If the append fails** (the database is down), forge-api logs the full event at ERROR level as JSON, with the message "audit event not stored", and returns the call's own result unchanged. The catalog shares the database, so in that state nearly every write already fails with `Unavailable`, and the log still records the attempt.
 
@@ -138,9 +138,9 @@ Streaming: `CreateService` is server-streaming. The interceptor wraps the stream
 4. `forge audit list --service audit-gate-<date>` must show every step:
    - each with its actor: the owner's email, the CI repository, `anonymous`;
    - each with its result;
-   - an `outcome` row for the create, the deploys and the environment operations.
+   - an `outcome` row for the deploys and the environment operations.
 
-   `forge audit get` on the promote shows its details and operation.
+   `forge audit get` on the promote shows its details and operation. `CreateService` streams its result instead of starting an operation, so its request row carries its final result.
 5. Clean up as in earlier gates. The cleanup's own events are expected in the log.
 
 **Docs:**
