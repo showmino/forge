@@ -107,7 +107,7 @@ func TestTableSanitizesCells(t *testing.T) {
 
 func TestTableReplacesControlAndBidi(t *testing.T) {
 	var buf bytes.Buffer
-	_ = Print(&buf, Table, View{Headers: []string{"a"}, Rows: [][]string{{"x\x1b[2J\a‮evil⁦"}}})
+	_ = Print(&buf, Table, View{Headers: []string{"a"}, Rows: [][]string{{"x\x1b[2J\a\u202eevil\u2066"}}})
 	if want := "A\nx�[2J��evil�\n"; buf.String() != want {
 		t.Errorf("got %q want %q", buf.String(), want)
 	}
