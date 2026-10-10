@@ -62,15 +62,15 @@ All four support `-o table|json|yaml|name`. `plan` and `apply` support `--wait` 
 Names follow the existing style:
 
 - `resources/<service>/<env>/<name>`, for example `resources/payments/staging/main`
-- `resourcePlans/<id>`, with a random id like an operation's
+- `resourcePlans/<id>`, where the id is 12 random hex characters
 
 A plan prints like this:
 
 ```
-Plan resourcePlans/7f3a91c2 for payments (staging)
+Plan resourcePlans/7f3a91c2b04e for payments (staging)
   + postgres main   storage 5Gi, instances 1
 Policy: passed
-Apply it with: forge resource apply resourcePlans/7f3a91c2
+Apply it with: forge resource apply resourcePlans/7f3a91c2b04e
 ```
 
 A plan with nothing to change prints "No changes" and cannot be applied.
@@ -109,7 +109,7 @@ For a service that has previews, the plan output adds one line: previews get no 
 | `PlanResources` | An Operation | Takes the service, the environment, the declared resource list, `allow_destroy` and a `request_id`. A repeated `request_id` returns the first call's Operation. |
 | `GetResourcePlan` | A plan | State, summary of changes, policy result and messages, creator, times. Never the raw OpenTofu plan. |
 | `ListResourcePlans` | Plans, newest first | Filters: service, environment, state, and "created by the caller". |
-| `ApplyResourcePlan` | An Operation | Takes the plan name and, when the CLI has a manifest at hand, the declared resource list for the stale check. `dry_run` stops before the Job. |
+| `ApplyResourcePlan` | An Operation | Takes the plan name and, when the CLI has a manifest at hand, the declared resource list for the stale check. `validate_only` (the CLI's `--dry-run`) stops before the Job. |
 | `ListResources` | Resources | Filters: service and environment. |
 | `GetResource` | A resource | |
 
@@ -288,7 +288,7 @@ The last deny rule guards the platform: if the module or the runner ever tried t
 A denied plan ends its Operation with the code `policy_denied`, and the CLI prints each message and exits 5:
 
 ```
-Plan resourcePlans/7f3a91c2 for payments (production): denied by policy
+Plan resourcePlans/7f3a91c2b04e for payments (production): denied by policy
   ✗ storage 200Gi is above the 50Gi limit for production
 ```
 
@@ -358,7 +358,7 @@ The target is `resources/<service>/<env>`. A plan denied by policy has the outco
 | `--runner-addr` / `FORGE_RUNNER_ADDR` | The runner API's listen address, default `:8081` |
 | `--runner-namespace` / `FORGE_RUNNER_NAMESPACE` | Default `forge-runner` |
 
-With resources off, the `ResourceService` calls answer `unimplemented` with a message that says so.
+With resources off, the `ResourceService` calls answer `failed_precondition` with a message that says so, as previews and deploys do when they are off.
 
 ### Tests
 
