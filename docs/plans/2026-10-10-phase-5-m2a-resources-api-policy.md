@@ -30,6 +30,17 @@ Reviews during execution changed the code in these places. Where the task text b
 - **Task 8:** the sweep pages through plans (`ResourceOptions.SweepPage`) and stops the runner of a run it ends.
 - **Final review:** plan lists carry no plan files (and migration 0003 has a partial index on open plans); a reader's refused apply is audited under its service; the runner API refuses an unlock with no lock id.
 
+### Left for plan 2 by the reviews
+
+The whole-branch review sorted the smaller findings of the task reviews. These are the ones to take up in plan 2 (the runner); `.claude/skills/forge/SKILL.md` lists the larger obligations.
+
+- **Policy:** `actions: ["forget"]` on a database, and any change with no `after` and no `delete`, pass without `allow_destroy`. Close both with one rule that whitelists actions, when the captured fixtures arrive. No rule ties the plan's clusters to the declared resources (name, size, count). The rules read `input.forge.environment` and `service` directly, so they are silent if the key is absent (the Go engine always sends it).
+- **Store:** `LockResourceState` in PostgreSQL can return a nil holder together with `ErrStateLocked`; the HTTP 423 answer must cope.
+- **Runs:** `Stop` is not called when `Start` fails after creating the runner, and a cancel during `Start` ends as `launch_failed`. There is no test that races `Complete` against a cancel or the deadline. `storedRun` reads at most 10 open plans, and it is checked outside the start transaction, so two forge-api processes in a rolling update could both start a run. The watch deadline is a fresh timer, not the token's deadline.
+- **Apply and records:** nothing is logged when a run omits the Secret of a resource that has one. `withHealth` logs a warning per resource and reads serially with no timeout. No test covers a policy evaluation error at apply or a namespace failure. A repair plan (no changes, records out of line) says so only in an operation event.
+- **CLI:** `apply --env --yes` and `--dry-run` do not name the plan before the call; with a plan name and another service's manifest the `forge.yaml` check is skipped silently; `planText` prints server text without the output sanitiser; apply and get have no golden files.
+- **Other:** the catalog's delete guard is off when resources are off; failure text keeps the head of the runner's output, not the tail, and loses newlines; `requests` (request ids of plans) is never pruned.
+
 ## Global Constraints
 
 - **Exact names:**
