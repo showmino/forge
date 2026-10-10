@@ -62,7 +62,7 @@ func TestRules(t *testing.T) {
 		{"a delete", plan(t, []string{"delete"}, cluster("payments-staging", 5, 1, retain), nil), stg, "the plan deletes database main; plan again with --allow-destroy to remove it", ""},
 		{"a delete that was asked for", plan(t, []string{"delete"}, cluster("payments-staging", 5, 1, retain), nil), destroy, "", ""},
 		{"a replace is a delete", plan(t, []string{"delete", "create"}, cluster("payments-staging", 5, 1, retain), cluster("payments-staging", 5, 1, retain)), stg, "the plan deletes database main; plan again with --allow-destroy to remove it", ""},
-		{"another namespace", plan(t, []string{"create"}, nil, cluster("ledger-staging", 5, 1, retain)), stg, "the plan changes a database in namespace ledger-staging, not payments-staging", ""},
+		{"another namespace", plan(t, []string{"create"}, nil, cluster("ledger-staging", 5, 1, retain)), stg, `the plan changes a database in namespace "ledger-staging", not payments-staging`, ""},
 		{"two instances in staging warn", plan(t, []string{"create"}, nil, cluster("payments-staging", 5, 2, retain)), stg, "", "staging has 2 instances; 1 is usually enough"},
 		{"a no-op is not checked", plan(t, []string{"no-op"}, cluster("ledger-staging", 500, 9, "x"), cluster("ledger-staging", 500, 9, "x")), stg, "", ""},
 	} {
@@ -176,5 +176,101 @@ func TestEngine(t *testing.T) {
 	}
 	if _, err := d.Evaluate(ctx, []byte(`{}`), Forge{}); err == nil {
 		t.Error("a non-string message must be an error")
+	}
+}
+
+// without returns a copy of a cluster side with one nested field removed.
+func without(side map[string]any, path ...string) map[string]any {
+	b, _ := json.Marshal(side)
+	var out map[string]any
+	_ = json.Unmarshal(b, &out)
+	m := out
+	for _, k := range path[:len(path)-1] {
+		m = m[k].(map[string]any)
+	}
+	delete(m, path[len(path)-1])
+	return out
+}
+
+// raw builds a plan from one hand-written resource change.
+func raw(t *testing.T, rc map[string]any) []byte {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"resource_changes": []any{rc}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// A rule that reads a missing field does not fire in Rego. These are the
+// shapes that once slipped through: each must be refused.
+func TestRulesFailClosed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const retain = "longhorn-retain"
+	ok := cluster("payments-staging", 5, 1, retain)
+	stg := Forge{Service: "payments", Environment: "staging"}
+	destroy := stg
+	destroy.AllowDestroy = true
+	change := func(actions any, before, after any) map[string]any {
+		return map[string]any{"address": "kubernetes_manifest.database", "type": "kubernetes_manifest",
+			"change": map[string]any{"actions": actions, "before": before, "after": after}}
+	}
+	noAddress := change([]string{"create"}, nil, map[string]any{"id": "1"})
+	delete(noAddress, "address")
+	noActions := change(nil, nil, ok)
+	delete(noActions["change"].(map[string]any), "actions")
+	for _, tc := range []struct {
+		name string
+		plan []byte
+		f    Forge
+		want string
+	}{
+		{"an update whose after has no manifest", raw(t, change([]string{"update"}, ok, map[string]any{})), stg, "which is not a CloudNativePG cluster"},
+		{"a replace whose after has no manifest", raw(t, change([]string{"delete", "create"}, ok, map[string]any{})), destroy, "which is not a CloudNativePG cluster"},
+		{"a create with no namespace", raw(t, change([]string{"create"}, nil, without(ok, "manifest", "metadata", "namespace"))), stg, `in namespace "", not payments-staging`},
+		{"a delete with no name", raw(t, change([]string{"delete"}, without(ok, "manifest", "metadata", "name"), nil)), stg, "the plan deletes database kubernetes_manifest.database; plan again with --allow-destroy"},
+		{"a replace with no name", raw(t, change([]string{"delete", "create"}, ok, without(ok, "manifest", "metadata", "name"))), stg, "the plan deletes database main; plan again with --allow-destroy"},
+		{"a replace that moves a database out of another namespace", raw(t, change([]string{"delete", "create"}, cluster("ledger-staging", 5, 1, retain), ok)), destroy, `in namespace "ledger-staging", not payments-staging`},
+		{"an unknown environment", plan(t, []string{"create"}, nil, cluster("payments-dev", 5000, 1, retain)), Forge{Service: "payments", Environment: "dev"}, `the rules have no limits for environment "dev"`},
+		{"no environment", plan(t, []string{"create"}, nil, ok), Forge{Service: "payments"}, `the rules have no limits for environment ""`},
+		{"something else with no address", raw(t, noAddress), stg, "the plan changes an unnamed resource, which is not a CloudNativePG cluster"},
+		{"an update from a size the rules cannot read", raw(t, change([]string{"update"}, map[string]any{"manifest": map[string]any{
+			"apiVersion": "postgresql.cnpg.io/v1", "kind": "Cluster", "metadata": map[string]any{"name": "main", "namespace": "payments-staging"},
+			"spec": map[string]any{"instances": 1, "storage": map[string]any{"size": "1Ti", "storageClass": retain}}}}, ok)), stg, "has no readable storage size or instance count"},
+		{"actions as a string", raw(t, change("create", nil, ok)), stg, "has no readable actions"},
+		{"no actions", raw(t, noActions), stg, "has no readable actions"},
+		{"empty actions", raw(t, change([]string{}, nil, ok)), stg, "has no readable actions"},
+		{"zero instances", plan(t, []string{"create"}, nil, cluster("payments-staging", 5, 0, retain)), stg, "0 instances is below the minimum of 1"},
+		{"a database of another manifest type", raw(t, map[string]any{"address": "kubectl_manifest.x", "type": "kubectl_manifest",
+			"change": map[string]any{"actions": []string{"create"}, "before": nil, "after": ok}}), stg, "kubectl_manifest.x, which is not a CloudNativePG cluster"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, err := e.Evaluate(ctx, tc.plan, tc.f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !r.Denied() || !strings.Contains(strings.Join(r.Deny, "|"), tc.want) {
+				t.Errorf("deny %q, want it to contain %q", r.Deny, tc.want)
+			}
+		})
+	}
+
+	// A pure delete that was asked for goes through even when the old
+	// object cannot be read: it only has to go.
+	odd := without(ok, "manifest", "spec")
+	if r, err := e.Evaluate(ctx, raw(t, change([]string{"delete"}, odd, nil)), destroy); err != nil || r.Denied() {
+		t.Errorf("an asked-for delete of an unreadable database: %v %v", r, err)
+	}
+	// A plan that is not a JSON object could not be checked: an error.
+	for _, body := range []string{"null", "[]", `"tofu"`, "42"} {
+		if _, err := e.Evaluate(ctx, []byte(body), stg); err == nil {
+			t.Errorf("%s: want an error", body)
+		}
 	}
 }

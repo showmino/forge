@@ -95,9 +95,12 @@ func (e *Engine) Fingerprint() string { return e.fingerprint }
 // Evaluate checks planJSON, the output of `tofu show -json`, with f. An
 // error means the plan could not be checked; it must then not be applied.
 func (e *Engine) Evaluate(ctx context.Context, planJSON []byte, f Forge) (Result, error) {
-	var plan any
+	var plan map[string]any
 	if err := json.Unmarshal(planJSON, &plan); err != nil {
-		return Result{}, fmt.Errorf("policy: the plan is not JSON: %w", err)
+		return Result{}, fmt.Errorf("policy: the plan is not a JSON object: %w", err)
+	}
+	if plan == nil {
+		return Result{}, errors.New("policy: the plan is not a JSON object")
 	}
 	if f.Resources == nil {
 		f.Resources = []Resource{}
