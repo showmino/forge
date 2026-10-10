@@ -145,7 +145,7 @@ Streaming: `CreateService` is server-streaming. The interceptor wraps the stream
 
 **Docs:**
 - README: an audit section.
-- `docs/index.md`: Phase 5 milestone 1 built; exit gate pending.
+- `docs/index.md`: Phase 5 milestone 1 done, once the exit gate has passed.
 - `.claude/skills/forge/SKILL.md`: the status.
 
 ## Risks
