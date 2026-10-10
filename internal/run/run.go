@@ -44,11 +44,19 @@ type Status struct {
 
 // Launcher starts and watches runners (Kubernetes Jobs in production).
 type Launcher interface {
-	// Start starts a runner for s and returns once it is started.
+	// Start starts a runner for s and returns once it is started. When it
+	// fails it leaves nothing behind: no runner, and no copy of the token.
+	// Its error and Status.Log are shown to users and stored: they must never
+	// hold the token.
 	Start(ctx context.Context, s Spec) error
-	// Status reports on the runner started for plan and mode.
+	// Status reports on the runner started for plan and mode. Log is short:
+	// the last lines of the runner's output.
 	Status(ctx context.Context, plan, mode string) (Status, error)
-	// Stop ends that runner, if it still runs.
+	// Stop ends that runner and returns only once it has exited, or failed
+	// to within the launcher's own limit. The runner gets time to stop
+	// OpenTofu cleanly, and its token still works meanwhile, so the state of
+	// what an interrupted apply made is saved. Stopping a runner that is
+	// gone is not an error.
 	Stop(ctx context.Context, plan, mode string) error
 }
 
@@ -70,25 +78,25 @@ type Variables struct {
 
 // Work is what a runner is asked to do.
 type Work struct {
-	Plan      string
-	Mode      string
-	Variables Variables
+	Plan      string    `json:"plan"`
+	Mode      string    `json:"mode"`
+	Variables Variables `json:"variables"`
 	// PlanFile is the saved plan to apply; empty for a plan run.
-	PlanFile []byte
+	PlanFile []byte `json:"plan_file,omitempty"`
 }
 
 // Result is what a runner hands back.
 type Result struct {
 	// PlanFile is OpenTofu's saved plan and PlanJSON `tofu show -json` of
 	// it; both set by a plan run.
-	PlanFile []byte
-	PlanJSON []byte
+	PlanFile []byte `json:"plan_file,omitempty"`
+	PlanJSON []byte `json:"plan_json,omitempty"`
 	// Secrets maps the name of every resource that exists after the apply,
 	// changed by it or not, to the Secret holding its connection string; set
 	// by an apply run.
-	Secrets map[string]string
+	Secrets map[string]string `json:"secrets,omitempty"`
 	// Error says why the run failed; empty when it worked.
-	Error string
+	Error string `json:"error,omitempty"`
 }
 
 // API is what a runner calls, authenticated by its run token.
