@@ -73,8 +73,10 @@ type ResourceOptions struct {
 	// Grace is how long after a runner ended cleanly its result may still
 	// arrive (default 10s).
 	Grace time.Duration
-	Now   func() time.Time
-	Log   *slog.Logger
+	// SweepPage is how many plans the sweep reads per page (default 500).
+	SweepPage int
+	Now       func() time.Time
+	Log       *slog.Logger
 }
 
 // Resources serves ResourceService and is the runner's API. A nil
@@ -111,6 +113,9 @@ func NewResources(o ResourceOptions) (*Resources, error) {
 		if *d.v == 0 {
 			*d.v = d.def
 		}
+	}
+	if o.SweepPage <= 0 {
+		o.SweepPage = 500
 	}
 	if o.Now == nil {
 		o.Now = time.Now

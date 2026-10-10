@@ -74,7 +74,12 @@ func TestSweepExpiresPlans(t *testing.T) {
 func TestSweepEndsDeadRuns(t *testing.T) {
 	t.Parallel()
 	clk := newTestClock()
-	f := newResourceFixture(t, func(o *ResourceOptions) { o.Now = clk.Now })
+	var rl *recordingLauncher
+	f := newResourceFixture(t, func(o *ResourceOptions) {
+		o.Now = clk.Now
+		rl = &recordingLauncher{Launcher: o.Launcher}
+		o.Launcher = rl
+	})
 	ctx := context.Background()
 
 	// A run whose forge-api died: the record says "applying", nobody watches it.
@@ -106,6 +111,9 @@ func TestSweepEndsDeadRuns(t *testing.T) {
 	}
 
 	f.res.Sweep(ctx) // before the deadline: the run may still report
+	if n := len(rl.calls()); n != 0 {
+		t.Fatalf("stopped %d runners before the deadline", n)
+	}
 	if rec, _ := f.store.GetResourcePlan(ctx, dead.Plan.GetName()); rec.Plan.GetState() != forgev1.ResourcePlan_STATE_APPLYING {
 		t.Fatalf("swept before the deadline: %v", rec.Plan.GetState())
 	}
@@ -113,7 +121,13 @@ func TestSweepEndsDeadRuns(t *testing.T) {
 	// Past the deadline its token is dead too.
 	wantCode(t, "a late complete", f.res.Complete(ctx, "dead-token", run.Result{}), connect.CodeUnauthenticated, "not valid")
 	f.res.Sweep(ctx)
+	if got := rl.calls(); len(got) != 1 || got[0] != dead.Plan.GetName()+" apply" {
+		t.Errorf("Stop calls after the first sweep: %v", got)
+	}
 	f.res.Sweep(ctx) // a second sweep finds nothing to do
+	if got := rl.calls(); len(got) != 1 {
+		t.Errorf("Stop calls after the second sweep: %v", got)
+	}
 
 	rec, _ := f.store.GetResourcePlan(ctx, dead.Plan.GetName())
 	if rec.Plan.GetState() != forgev1.ResourcePlan_STATE_APPLY_FAILED || rec.Plan.GetMessage() != "the run did not finish before its deadline" ||
@@ -211,4 +225,68 @@ func TestCompleteAfterRestart(t *testing.T) {
 	// A nil service sweeps nothing and does not panic.
 	var off *Resources
 	off.Sweep(ctx)
+}
+
+// recordingLauncher records the Stop calls it gets.
+type recordingLauncher struct {
+	run.Launcher
+	mu    sync.Mutex
+	stops []string
+}
+
+func (l *recordingLauncher) Stop(ctx context.Context, plan, mode string) error {
+	l.mu.Lock()
+	l.stops = append(l.stops, plan+" "+mode)
+	l.mu.Unlock()
+	return l.Launcher.Stop(ctx, plan, mode)
+}
+
+func (l *recordingLauncher) calls() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.stops...)
+}
+
+func TestSweepPages(t *testing.T) {
+	t.Parallel()
+	clk := newTestClock()
+	f := newResourceFixture(t, func(o *ResourceOptions) { o.Now = clk.Now; o.SweepPage = 2 })
+	ctx := context.Background()
+	tmpl, err := protojson.Marshal(&forgev1.AuditEvent{Kind: "outcome", Action: "resource.plan",
+		Actor: &forgev1.AuditActor{Kind: "user", Subject: "ana"}, Service: "services/payments"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := &forgev1.ResourceSettings{Name: "main", Type: "postgres", StorageGi: 5, Instances: 1}
+	names := []string{"aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd", "eeeeeeeeeeee", "ffffffffffff", "111111111111"}
+	for i, n := range names {
+		state := forgev1.ResourcePlan_STATE_PLANNING
+		if i >= 5 {
+			state = forgev1.ResourcePlan_STATE_PLANNED
+		}
+		rec := &store.PlanRecord{
+			Plan: &forgev1.ResourcePlan{Name: "resourcePlans/" + n, Service: "services/payments", Env: "staging", State: state,
+				Resources:  []*forgev1.ResourceSettings{main},
+				CreateTime: timestamppb.New(clk.Now()), ExpireTime: timestamppb.New(clk.Now().Add(time.Hour))},
+			TokenHash: hashToken("tok-" + n), Deadline: clk.Now().Add(time.Minute), Audit: tmpl, PlanFile: []byte("plan"),
+		}
+		if err := f.store.WriteResources(ctx, func(tx store.ResourceTx) error { return tx.PutResourcePlan(ctx, rec) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clk.Add(2 * time.Hour)
+	f.res.Sweep(ctx)
+	for i, n := range names {
+		rec, err := f.store.GetResourcePlan(ctx, "resourcePlans/"+n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := forgev1.ResourcePlan_STATE_FAILED
+		if i >= 5 {
+			want = forgev1.ResourcePlan_STATE_EXPIRED
+		}
+		if rec.Plan.GetState() != want {
+			t.Errorf("%s: %v, want %v", n, rec.Plan.GetState(), want)
+		}
+	}
 }

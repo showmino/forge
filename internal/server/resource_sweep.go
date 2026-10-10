@@ -8,9 +8,6 @@ import (
 	"github.com/showmino/forge/internal/store"
 )
 
-// sweepLimit is the most plans one sweep looks at; the rest wait for the next.
-const sweepLimit = 1000
-
 // RunSweeper sweeps now and then every interval, until ctx ends.
 func (r *Resources) RunSweeper(ctx context.Context, every time.Duration) {
 	if r == nil {
@@ -36,13 +33,25 @@ func (r *Resources) Sweep(ctx context.Context) {
 	if r == nil {
 		return
 	}
-	recs, err := r.o.Store.ListResourcePlans(ctx, store.PlanQuery{Limit: sweepLimit, States: []forgev1.ResourcePlan_State{
+	states := []forgev1.ResourcePlan_State{
 		forgev1.ResourcePlan_STATE_PLANNING, forgev1.ResourcePlan_STATE_APPLYING, forgev1.ResourcePlan_STATE_PLANNED,
-	}})
-	if err != nil {
-		r.o.Log.Error("resource sweep: listing plans", "error", err)
-		return
 	}
+	var before int64
+	for {
+		recs, err := r.o.Store.ListResourcePlans(ctx, store.PlanQuery{Limit: r.o.SweepPage, BeforeSeq: before, States: states})
+		if err != nil {
+			r.o.Log.Error("resource sweep: listing plans", "error", err)
+			return
+		}
+		r.sweepPage(ctx, recs)
+		if len(recs) < r.o.SweepPage {
+			return
+		}
+		before = recs[len(recs)-1].Seq
+	}
+}
+
+func (r *Resources) sweepPage(ctx context.Context, recs []*store.PlanRecord) {
 	now := r.o.Now()
 	for _, rec := range recs {
 		name := rec.Plan.GetName()
@@ -53,8 +62,14 @@ func (r *Resources) Sweep(ctx context.Context) {
 			if now.Before(rec.Deadline) || r.isLive(name) {
 				continue
 			}
-			if _, err := r.endRun(ctx, name, mode, runEnd{code: opCodeRunTimeout, message: "the run did not finish before its deadline"}); err != nil {
+			won, err := r.endRun(ctx, name, mode, runEnd{code: opCodeRunTimeout, message: "the run did not finish before its deadline"})
+			if err != nil {
 				r.o.Log.Error("resource sweep: ending a run", "plan", name, "error", err)
+			} else if won {
+				// The runner may have outlived forge-api; stop it like watchRun does.
+				if err := r.o.Launcher.Stop(context.WithoutCancel(ctx), name, mode); err != nil {
+					r.o.Log.Warn("stopping a resource runner", "plan", name, "mode", mode, "error", err)
+				}
 			}
 		case !now.Before(rec.Plan.GetExpireTime().AsTime()):
 			if err := r.expire(ctx, name); err != nil {
