@@ -89,10 +89,18 @@ func (e *Environments) Reap(ctx context.Context) error {
 			continue
 		}
 		id := ns.Labels[labelEnvironment]
-		op := e.startDestroy(context.Background(), id, "forge-reaper")
+		rec := newAuditRecord("environment.expire")
+		rec.setSystem()
+		actx := withAuditRecord(context.Background(), rec)
+		noteAuditService(actx, servicePrefix+ns.Labels[labelService])
+		op := e.startDestroy(actx, id, "forge-reaper")
 		if op == nil {
 			continue
 		}
+		ev := rec.snapshot()
+		ev.Target, ev.Operation = envNamePrefix+id, op.GetName()
+		ev.Result = &forgev1.AuditResult{Code: "ok"}
+		e.o.Operations.appendAudit(actx, ev)
 		e.o.Log.Info("environment expired", "environment", id, "operation", op.GetName())
 	}
 	return nil

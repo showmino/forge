@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +14,8 @@ import (
 	"connectrpc.com/connect"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
+	"github.com/showmino/forge/internal/store"
 )
 
 // clock is a settable time source.
@@ -377,4 +381,109 @@ func waitSubscribers(t *testing.T, s *Operations, name string, n int) {
 			t.Fatalf("%d subscribers of %s, want %d", got, name, n)
 		}
 	}
+}
+
+func TestOperationOutcomeAudited(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	ops := NewOperations(nil)
+	ops.setAuditor(&auditor{store: audit, log: slog.New(slog.DiscardHandler)})
+
+	rec := newAuditRecord("deploy.promote")
+	rec.setActor(&Principal{Subject: "ana", Email: "ana@example.com"})
+	ctx := withAuditRecord(context.Background(), rec)
+	noteAuditService(ctx, "services/payments")
+	ok := ops.Start(ctx, "promote", "deployments/payments/production", "ana", func(context.Context, func(string, string)) error { return nil })
+	if rec.snapshot().GetOperation() != ok.GetName() {
+		t.Fatalf("Start must name its operation in the call's event: %v", rec.snapshot())
+	}
+	failed := ops.Start(ctx, "promote", "deployments/payments/production", "ana", func(context.Context, func(string, string)) error {
+		return &OpError{Code: "sync_timeout", Message: "argo cd did not sync"}
+	})
+	bare := ops.Start(context.Background(), "test_kind", "things/a", "", func(context.Context, func(string, string)) error { return nil })
+	for _, op := range []*forgev1.Operation{ok, failed, bare} {
+		if _, err := ops.Wait(context.Background(), op.GetName()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	evs := waitEvents(t, audit, 3)
+	byOp := map[string]*forgev1.AuditEvent{}
+	for _, e := range evs {
+		byOp[e.GetOperation()] = e
+	}
+	if e := byOp[ok.GetName()]; e.GetKind() != "outcome" || e.GetAction() != "deploy.promote" || e.GetService() != "services/payments" ||
+		e.GetTarget() != "deployments/payments/production" || e.GetActor().GetEmail() != "ana@example.com" || e.GetResult().GetCode() != "ok" {
+		t.Errorf("ok outcome: %v", e)
+	}
+	if e := byOp[failed.GetName()]; e.GetResult().GetCode() != "failed" || !strings.Contains(e.GetResult().GetMessage(), "argo cd did not sync") {
+		t.Errorf("failed outcome: %v", e)
+	}
+	if e := byOp[bare.GetName()]; e.GetActor().GetKind() != "system" || e.GetAction() != "test_kind" {
+		t.Errorf("an operation without an audit context: %v", e)
+	}
+}
+
+// waitEvents polls until the store holds n events (outcomes are appended just
+// after an operation is marked done) and returns them oldest first.
+func waitEvents(t *testing.T, s store.AuditStore, n int) []*forgev1.AuditEvent {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		evs := allEvents(t, s)
+		if len(evs) >= n || time.Now().After(deadline) {
+			if len(evs) != n {
+				t.Fatalf("got %d events, want %d: %v", len(evs), n, evs)
+			}
+			return evs
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAuditCancelService(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	ops := NewOperations(nil)
+	h, err := New(Options{
+		Authenticator: StaticAuthenticator{"writer": {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}}},
+		Authorizer:    Authorizer{WriterGroups: []string{"platform"}},
+		Operations:    ops, Audit: audit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	rec := newAuditRecord("environment.create")
+	ctx := withAuditRecord(context.Background(), rec)
+	noteAuditService(ctx, "services/payments")
+	block := make(chan struct{})
+	op := ops.Start(ctx, "create_environment", "environments/pr-1", "ana", func(ctx context.Context, _ func(string, string)) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-block:
+			return nil
+		}
+	})
+	c := forgev1connect.NewOperationServiceClient(srv.Client(), srv.URL)
+	if _, err := c.CancelOperation(context.Background(), as("writer", &forgev1.CancelOperationRequest{Name: op.GetName()})); err != nil {
+		t.Fatal(err)
+	}
+	evs := waitEvents(t, audit, 2) // the cancel request, then the operation's outcome
+	var cancel, outcome *forgev1.AuditEvent
+	for _, e := range evs {
+		if e.GetAction() == "operation.cancel" {
+			cancel = e
+		} else {
+			outcome = e
+		}
+	}
+	if cancel.GetService() != "services/payments" || cancel.GetTarget() != op.GetName() {
+		t.Errorf("cancel event: %v", cancel)
+	}
+	if outcome.GetResult().GetCode() != "cancelled" {
+		t.Errorf("outcome: %v", outcome)
+	}
+	close(block)
 }

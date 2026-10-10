@@ -88,6 +88,7 @@ func New(o Options) (http.Handler, error) {
 	}
 
 	aud := &auditor{store: o.Audit, log: o.Logger}
+	o.Operations.setAuditor(aud)
 	opts := connect.WithInterceptors(
 		&logInterceptor{log: o.Logger},
 		&auditInterceptor{a: aud},

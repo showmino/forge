@@ -16,6 +16,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/internal/store"
 )
 
 // readyEnv creates environment id and waits until it is ready.
@@ -356,4 +357,53 @@ func TestAuditEnvironmentService(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
+}
+
+func TestReaperAuditsAsSystem(t *testing.T) {
+	t.Parallel()
+	f := newEnvFixture(t, false, nil)
+	f.available(t, nil)
+	resp, err := f.create(t, &forgev1.CreateEnvironmentRequest{EnvironmentId: "pr-8", Ttl: durationpb.New(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.wait(t, resp.GetOperation())
+	f.clock.add(2 * time.Hour)
+	if err := f.envs.Reap(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var expire *forgev1.AuditEvent
+	deadline := time.Now().Add(5 * time.Second)
+	for expire == nil && time.Now().Before(deadline) {
+		for _, e := range allEvents(t, f.audit) {
+			if e.GetAction() == "environment.expire" && e.GetKind() == "request" {
+				expire = e
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if expire == nil || expire.GetActor().GetKind() != "system" || expire.GetService() != "services/payments" ||
+		expire.GetTarget() != "environments/pr-8" || expire.GetOperation() == "" || expire.GetResult().GetCode() != "ok" {
+		t.Fatalf("expire event: %v", expire)
+	}
+	// Its destroy operation's outcome follows, also as the system.
+	evs := waitOutcome(t, f.audit, expire.GetOperation())
+	if evs.GetActor().GetKind() != "system" || evs.GetAction() != "environment.expire" {
+		t.Fatalf("outcome: %v", evs)
+	}
+}
+
+func waitOutcome(t *testing.T, s store.AuditStore, op string) *forgev1.AuditEvent {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, e := range allEvents(t, s) {
+			if e.GetKind() == "outcome" && e.GetOperation() == op {
+				return e
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no outcome for %s", op)
+	return nil
 }

@@ -74,7 +74,6 @@ func (r *auditRecord) setActor(p *Principal) {
 	r.ev.Actor = &forgev1.AuditActor{Kind: actorUser, Subject: p.Subject, Email: p.Email}
 }
 
-//nolint:unused // used by the expiry sweeper and Operations (Task 4)
 func (r *auditRecord) setSystem() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -82,8 +81,6 @@ func (r *auditRecord) setSystem() {
 }
 
 // snapshot returns a copy of the event so far.
-//
-//nolint:unused // used by Operations.Start (Task 4)
 func (r *auditRecord) snapshot() *forgev1.AuditEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,8 +100,6 @@ func noteAuditService(ctx context.Context, service string) {
 }
 
 // noteAuditOperation records the operation the call started.
-//
-//nolint:unused // used by Operations.Start (Task 4)
 func noteAuditOperation(ctx context.Context, name string) {
 	if r := auditFrom(ctx); r != nil {
 		r.mu.Lock()
