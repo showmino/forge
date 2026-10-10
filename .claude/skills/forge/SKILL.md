@@ -80,7 +80,7 @@ make generate | make update-golden | make api-dev     # api-dev: token "dev", no
   - Database backups: `forge-db` (CloudNativePG) has none yet.
   - The GoReleaser image's `COPY ${TARGETPLATFORM}/forge` is unbuilt until the first release snapshot.
 - **Design doc items Phase 1 did not build:** OpenTelemetry tracing (`traceparent`, `FORGE_TRACE`), rich error details (`BadRequest`, `ErrorInfo`), `auth login --web` (PKCE), daily version-skew check, testscript tests (the CLI harness in `cli_test.go` plays that role), a CLI container image. No release is tagged yet, so the Phase 1 gate's "Homebrew install" is unverified.
-- **Groundwork (done):** k3s login through GitHub (writer group `showmino:platform-engineering`), and CloudNativePG `forge-db` holds the catalog and Dex's logins (spec docs/specs/2026-10-09-groundwork-auth-storage-design.md).
+- **Groundwork (done):** k3s login through GitHub (writer group `showmino:platform-engineering`), and CloudNativePG `forge-db` holds the catalog and Dex's logins (spec docs/specs/2026-10-09-groundwork-auth-storage-design.md, PR #18). Live on k3s since 2026-10-10: forge-api 9d310f0 (chart still pinned to 18b1232), render adds `FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github`; checked: GitHub login with the writer group, the catalog survives a forge-api restart, Dex's refresh tokens and keys survive a Dex restart.
 - **Later:** environments, resources (OpenTofu jobs).
 - **Known follow-ups:** credentials file fallback is not encrypted (newer gosec flags it as G117); macOS binary not notarized; no LICENSE; k3s demo serves plain HTTP. The demo Dex password is resolved by the groundwork (GitHub login).
 
