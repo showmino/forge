@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -394,5 +395,39 @@ func TestAuditDescribePanicKeepsAction(t *testing.T) {
 	ev := rec.snapshot()
 	if ev.GetAction() != "x" || ev.GetService() != "" || ev.GetTarget() != "" {
 		t.Fatalf("event %v", ev)
+	}
+}
+
+func TestAuditAnonymousLimit(t *testing.T) {
+	t.Parallel()
+	audit := store.NewMemory()
+	var logs bytes.Buffer
+	now := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
+	a := &auditor{store: audit, log: slog.New(slog.NewJSONHandler(&logs, nil)), now: func() time.Time { return now }}
+	event := func(kind string) *forgev1.AuditEvent {
+		return &forgev1.AuditEvent{Kind: "request", Action: "x", Actor: &forgev1.AuditActor{Kind: kind}, Result: &forgev1.AuditResult{Code: "ok"}}
+	}
+	for range 60 {
+		a.append(context.Background(), event(actorAnonymous))
+	}
+	a.append(context.Background(), event(actorAnonymous))
+	a.append(context.Background(), event(actorAnonymous))
+	if n := len(allEvents(t, audit)); n != 60 {
+		t.Fatalf("stored %d anonymous events, want 60", n)
+	}
+	a.append(context.Background(), event(actorUser))
+	a.append(context.Background(), event(actorWorkload))
+	a.append(context.Background(), event(actorSystem))
+	if n := len(allEvents(t, audit)); n != 63 {
+		t.Fatalf("stored %d events, want 63: other actors are not limited", n)
+	}
+	if n := strings.Count(logs.String(), "over the limit"); n != 1 || !strings.Contains(logs.String(), `"dropped_total":1`) ||
+		!strings.Contains(logs.String(), `"level":"WARN"`) {
+		t.Fatalf("want one warning in the window, got %d: %s", n, logs.String())
+	}
+	now = now.Add(anonymousWindow)
+	a.append(context.Background(), event(actorAnonymous))
+	if n := len(allEvents(t, audit)); n != 64 {
+		t.Fatalf("stored %d events after the window, want 64", n)
 	}
 }

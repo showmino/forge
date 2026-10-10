@@ -213,11 +213,56 @@ func auditText(s string, max int) string {
 	return clipRunes(s, max)
 }
 
+// anonymousPerWindow is the most events from anonymous callers stored per
+// anonymousWindow; anyone can send those, and the log is append-only.
+const (
+	anonymousPerWindow = 60
+	anonymousWindow    = time.Minute
+)
+
 // auditor appends events to the store, falling back to the log.
 type auditor struct {
 	store store.AuditStore
 	log   *slog.Logger
 	now   func() time.Time
+
+	mu         sync.Mutex // guards the anonymous limiter
+	windowEnd  time.Time
+	windowN    int
+	dropped    int64 // events not stored since start
+	droppedLog time.Time
+}
+
+func (a *auditor) clock() time.Time {
+	if a.now != nil {
+		return a.now()
+	}
+	return time.Now()
+}
+
+// allow reports whether ev may be stored: events of anonymous callers are
+// limited to anonymousPerWindow per window; the first one over the limit in
+// a window is logged with the running count of dropped events.
+func (a *auditor) allow(ev *forgev1.AuditEvent) bool {
+	if ev.GetActor().GetKind() != actorAnonymous {
+		return true
+	}
+	now := a.clock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !now.Before(a.windowEnd) {
+		a.windowEnd, a.windowN = now.Add(anonymousWindow), 0
+	}
+	if a.windowN < anonymousPerWindow {
+		a.windowN++
+		return true
+	}
+	a.dropped++
+	if now.Sub(a.droppedLog) >= anonymousWindow {
+		a.droppedLog = now
+		a.log.Warn("anonymous audit events over the limit; not stored", "dropped_total", a.dropped, "limit_per_minute", anonymousPerWindow)
+	}
+	return false
 }
 
 // append stores ev. It does not depend on ctx's cancellation, so a caller
@@ -226,12 +271,11 @@ func (a *auditor) append(ctx context.Context, ev *forgev1.AuditEvent) {
 	if a == nil {
 		return
 	}
+	if !a.allow(ev) {
+		return
+	}
 	if ev.Time == nil {
-		now := time.Now
-		if a.now != nil {
-			now = a.now
-		}
-		ev.Time = timestamppb.New(now())
+		ev.Time = timestamppb.New(a.clock())
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
