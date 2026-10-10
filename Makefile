@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := build
 BIN := bin
 
-.PHONY: build test lint chart-test generate update-golden tools dex db api api-dev image clean
+.PHONY: build test lint chart-test generate update-golden tools dex db api api-dev image runner-image clean
 
 build: ## Build forge and forge-api into ./bin
 	CGO_ENABLED=0 go build -trimpath -o $(BIN)/ ./cmd/...
@@ -48,6 +48,9 @@ api-dev: build ## Run forge-api without an identity provider (token "dev")
 
 image: ## Build the forge-api image for k3s (then: docker save forge-api:dev | sudo k3s ctr images import -)
 	docker build -t forge-api:dev .
+
+runner-image: ## Build the resource runner image (OpenTofu, the provider, the module, forge-runner)
+	docker build -f deploy/runner/Dockerfile -t forge-runner:dev .
 
 clean:
 	rm -rf $(BIN) dist

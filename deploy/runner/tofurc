@@ -1,0 +1,10 @@
+# OpenTofu CLI configuration of the runner image: providers come from the
+# mirror baked into the image, never from the network.
+provider_installation {
+  filesystem_mirror {
+    path = "/opt/forge/providers"
+  }
+  direct {
+    exclude = ["*/*"]
+  }
+}
