@@ -407,3 +407,39 @@ func waitOutcome(t *testing.T, s store.AuditStore, op string) *forgev1.AuditEven
 	t.Fatalf("no outcome for %s", op)
 	return nil
 }
+
+func TestReaperAuditsOnlyDestroysItStarts(t *testing.T) {
+	t.Parallel()
+	f := newEnvFixture(t, false, nil)
+	var stuck atomic.Bool
+	f.cluster.Kube.(*fake.Clientset).PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return stuck.Load(), nil, nil
+	})
+	f.available(t, nil)
+	resp, err := f.create(t, &forgev1.CreateEnvironmentRequest{EnvironmentId: "pr-9", Ttl: durationpb.New(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.wait(t, resp.GetOperation())
+	stuck.Store(true) // the destroy stays running
+	f.clock.add(2 * time.Hour)
+	for range 3 {
+		if err := f.envs.Reap(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitEvents(t, f.audit, 3)          // create request+outcome, one expire
+	time.Sleep(100 * time.Millisecond) // time for any duplicate to land
+	n := 0
+	for _, e := range allEvents(t, f.audit) {
+		if e.GetAction() == "environment.expire" && e.GetKind() == "request" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("expire request events = %d, want 1", n)
+	}
+	for _, op := range f.ops.List("environments/pr-9", true) {
+		f.ops.Cancel(op.GetName())
+	}
+}

@@ -97,6 +97,11 @@ func (e *Environments) Reap(ctx context.Context) error {
 		if op == nil {
 			continue
 		}
+		// Only the Reap call that started the destroy records the expiry; Start
+		// names its operation in the record only when it ran with actx.
+		if rec.snapshot().GetOperation() != op.GetName() {
+			continue
+		}
 		ev := rec.snapshot()
 		ev.Target, ev.Operation = envNamePrefix+id, op.GetName()
 		ev.Result = &forgev1.AuditResult{Code: "ok"}
