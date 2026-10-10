@@ -84,7 +84,7 @@ For a service that has previews, the plan output adds one line: previews get no 
 | The plan was made and passed policy | 0 |
 | Policy denied the plan, at plan or at apply | 5 |
 | The caller lacks permission | 5 |
-| The plan is stale, expired, used, or has no changes | 6 (conflict), as for other `failed_precondition` answers |
+| The plan is stale, expired, used, or has no changes while Forge's records already match | 6 (conflict), as for other `failed_precondition` answers |
 | The run failed (an OpenTofu error) | 7 (operation failed) |
 | The run or the wait timed out | 8 (timeout) |
 
