@@ -28,6 +28,16 @@ const (
 // opNameKey carries an operation's own name in its work's context.
 type opNameKey struct{}
 
+// noOutcomeKey marks a context whose operation appends no outcome event.
+type noOutcomeKey struct{}
+
+// withoutOutcome returns ctx marked so an operation started with it appends
+// no outcome event: its owner appends one itself. Resource runs do, because
+// a run can end after forge-api restarted and its operation is gone.
+func withoutOutcome(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noOutcomeKey{}, true)
+}
+
 // watchBuffer is how many messages a watcher may fall behind before it is dropped.
 const watchBuffer = 64
 
@@ -60,7 +70,8 @@ type operation struct {
 	done   chan struct{}
 	subs   map[*watcher]struct{} // guarded by Operations.mu
 
-	auditEv *forgev1.AuditEvent // the outcome event's template; set before the work starts
+	auditEv   *forgev1.AuditEvent // the outcome event's template; set before the work starts
+	noOutcome bool                // the owner appends the outcome event
 }
 
 // watcher receives live messages. The publisher closes ch when the operation
@@ -102,6 +113,7 @@ func (s *Operations) Start(ctx context.Context, kind, target, creator string, w 
 		o.auditEv.Target = target
 	}
 	o.auditEv.Details, o.auditEv.Client, o.auditEv.Result, o.auditEv.Name, o.auditEv.Time = nil, nil, nil, "", nil
+	o.noOutcome = ctx.Value(noOutcomeKey{}) != nil
 	s.mu.Lock()
 	s.ops[o.pb.Name] = o
 	s.prune()
@@ -129,7 +141,7 @@ func (s *Operations) run(ctx context.Context, o *operation, w Work) {
 	}()
 	e := opError(ctx, err)
 	s.finish(o, e)
-	if o.auditEv != nil {
+	if o.auditEv != nil && !o.noOutcome {
 		ev := proto.Clone(o.auditEv).(*forgev1.AuditEvent)
 		ev.Result = &forgev1.AuditResult{Code: "ok"}
 		switch {

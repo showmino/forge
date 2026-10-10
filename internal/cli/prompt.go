@@ -47,3 +47,25 @@ func (f *Factory) ask(label string) (string, error) {
 	}
 	return answer, nil
 }
+
+// confirm asks a yes/no question before a change that is not destructive.
+// --yes skips it. Without a terminal (or with --no-input) it fails with exit
+// code 2 rather than hanging.
+func (f *Factory) confirm(question string, yes bool) error {
+	if yes {
+		return nil
+	}
+	if !f.interactive() {
+		return exitcode.Usagef("refusing to continue without confirmation").
+			WithHint("pass --yes to confirm, or --dry-run to preview")
+	}
+	fmt.Fprintf(f.IO.ErrOut, "%s [y/N]: ", question)
+	answer, err := f.readLine()
+	if err != nil {
+		return exitcode.Usagef("no confirmation received")
+	}
+	if a := strings.ToLower(answer); a != "y" && a != "yes" {
+		return exitcode.Usagef("not confirmed; nothing was changed")
+	}
+	return nil
+}

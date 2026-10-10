@@ -19,6 +19,12 @@ type Memory struct {
 
 	auditMu sync.Mutex
 	audit   []*forgev1.AuditEvent // index i holds id i+1
+
+	resMu     sync.Mutex
+	plans     map[string]*PlanRecord // never changed in place: a write replaces the entry
+	planSeq   int64
+	resources map[string]*forgev1.Resource // likewise
+	states    map[string]ResourceState
 }
 
 type memEntry struct {
@@ -28,7 +34,10 @@ type memEntry struct {
 
 // NewMemory returns an empty Memory store.
 func NewMemory() *Memory {
-	return &Memory{services: map[string]memEntry{}, requests: map[string]*forgev1.Service{}}
+	return &Memory{
+		services: map[string]memEntry{}, requests: map[string]*forgev1.Service{},
+		plans: map[string]*PlanRecord{}, resources: map[string]*forgev1.Resource{}, states: map[string]ResourceState{},
+	}
 }
 
 // Get implements Store.

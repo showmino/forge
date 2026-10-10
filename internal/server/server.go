@@ -49,6 +49,9 @@ type Options struct {
 	// Deploys serves DeployService; nil answers FAILED_PRECONDITION. It must
 	// share Catalog and Operations with these Options.
 	Deploys *Deploys
+	// Resources serves ResourceService; nil answers FAILED_PRECONDITION. It
+	// must share Catalog and Operations with these Options.
+	Resources *Resources
 	// CLIDir holds forge CLI builds (forge-linux-amd64, forge-linux-arm64)
 	// served at GET /cli/<name>; empty serves none.
 	CLIDir string
@@ -89,6 +92,10 @@ func New(o Options) (http.Handler, error) {
 
 	aud := &auditor{store: o.Audit, log: o.Logger}
 	o.Operations.setAuditor(aud)
+	if o.Resources != nil {
+		o.Resources.setAuditor(aud)
+		o.Catalog.resources = o.Resources.o.Store
+	}
 	opts := connect.WithInterceptors(
 		&logInterceptor{log: o.Logger},
 		&auditInterceptor{a: aud},
@@ -106,6 +113,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))
 	mux.Handle(forgev1connect.NewAuditServiceHandler(&auditService{store: o.Audit}, opts))
+	mux.Handle(forgev1connect.NewResourceServiceHandler(o.Resources, opts))
 	mux.HandleFunc("GET /cli/{name}", cliDownload(o.CLIDir))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

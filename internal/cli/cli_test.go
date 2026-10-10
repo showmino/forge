@@ -37,6 +37,7 @@ type harness struct {
 	catalog   *server.Catalog
 	envs      *server.Environments
 	deploys   *server.Deploys
+	resources *server.Resources
 	audit     *store.Memory
 }
 
@@ -76,6 +77,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Catalog:       h.catalog,
 		Environments:  h.envs,
 		Deploys:       h.deploys,
+		Resources:     h.resources,
 		Audit:         h.audit,
 	})
 	if err != nil {

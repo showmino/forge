@@ -487,3 +487,22 @@ func TestAuditCancelService(t *testing.T) {
 	}
 	close(block)
 }
+
+func TestOperationWithoutOutcome(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	ops := NewOperations(nil)
+	ops.setAuditor(&auditor{store: st, log: slog.New(slog.DiscardHandler)})
+	op := ops.Start(withoutOutcome(context.Background()), "resource.plan", "resources/payments/staging", "ana",
+		func(context.Context, func(string, string)) error { return nil })
+	wait(t, ops, op.GetName())
+	loud := ops.Start(context.Background(), "deploy", "deployments/payments/staging", "ana",
+		func(context.Context, func(string, string)) error { return nil })
+	wait(t, ops, loud.GetName())
+	waitEvents(t, st, 1)
+	time.Sleep(50 * time.Millisecond) // an outcome of the quiet one would have landed by now
+	evs := allEvents(t, st)
+	if len(evs) != 1 || evs[0].GetOperation() != loud.GetName() {
+		t.Errorf("events: %v", evs)
+	}
+}

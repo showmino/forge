@@ -1,6 +1,7 @@
 // Package manifest reads and writes forge.yaml, the per-repo source of truth
 // for a service's catalog entry. Phase 1 covers the catalog fields; Phase 3
-// adds run, how a preview environment runs the service.
+// adds run, how a preview environment runs the service; Phase 5 adds
+// resources.
 package manifest
 
 import (
@@ -8,12 +9,16 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/internal/resource"
 )
 
 // FileName is the manifest's file name.
@@ -30,6 +35,8 @@ type Manifest struct {
 	Namespace string `yaml:"namespace,omitempty"`
 	// Run says how preview environments run the service.
 	Run *Run `yaml:"run,omitempty"`
+	// Resources are what the service needs besides its own pods.
+	Resources []Resource `yaml:"resources,omitempty"`
 }
 
 // Defaults for a manifest without run settings.
@@ -60,6 +67,49 @@ func (m *Manifest) RunHealth() string {
 		return m.Run.Health
 	}
 	return DefaultRunHealth
+}
+
+// Resource is one entry of resources: today a Postgres database.
+type Resource struct {
+	Name string `yaml:"name"`
+	Type string `yaml:"type"`
+	// Storage is whole gibibytes, such as "5Gi" (default 1Gi).
+	Storage string `yaml:"storage,omitempty"`
+	// Instances is 1 to 3 (default 1 in staging, 2 in production).
+	Instances int `yaml:"instances,omitempty"`
+	// Environments overrides storage and instances per environment.
+	Environments map[string]ResourceOverride `yaml:"environments,omitempty"`
+}
+
+// ResourceOverride replaces a resource's values in one environment.
+type ResourceOverride struct {
+	Storage   string `yaml:"storage,omitempty"`
+	Instances int    `yaml:"instances,omitempty"`
+}
+
+// count turns a YAML int into the API's int32; a value that does not fit
+// becomes -1, which validation refuses.
+func count(n int) int32 {
+	if n < 0 || n > math.MaxInt32 {
+		return -1
+	}
+	return int32(n)
+}
+
+// Declarations returns resources as the API takes them.
+func (m *Manifest) Declarations() []*forgev1.ResourceDeclaration {
+	out := make([]*forgev1.ResourceDeclaration, 0, len(m.Resources))
+	for _, r := range m.Resources {
+		d := &forgev1.ResourceDeclaration{Name: r.Name, Type: r.Type, Storage: r.Storage, Instances: count(r.Instances)}
+		for env, o := range r.Environments {
+			if d.Environments == nil {
+				d.Environments = map[string]*forgev1.ResourceOverride{}
+			}
+			d.Environments[env] = &forgev1.ResourceOverride{Storage: o.Storage, Instances: count(o.Instances)}
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // Service is the catalog part of the manifest.
@@ -102,6 +152,9 @@ func (m *Manifest) Validate() error {
 		if r.Health != "" && !strings.HasPrefix(r.Health, "/") {
 			return fmt.Errorf("run.health %q must be an absolute path such as /healthz", r.Health)
 		}
+	}
+	if err := resource.Validate(m.Declarations()); err != nil {
+		return fmt.Errorf("resources: %w", err)
 	}
 	return nil
 }

@@ -122,6 +122,28 @@ func noteAuditOperation(ctx context.Context, name string) {
 	}
 }
 
+// noteAuditDetail adds one detail to the call's event. Like the details of
+// describe, value must be an identifier or a setting, never free text.
+func noteAuditDetail(ctx context.Context, key, value string) {
+	if r := auditFrom(ctx); r != nil && value != "" {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.ev.Details == nil {
+			r.ev.Details = map[string]string{}
+		}
+		r.ev.Details[key] = auditText(value, auditFieldMax)
+	}
+}
+
+// noteAuditTarget replaces the call's target, when the request did not name it.
+func noteAuditTarget(ctx context.Context, target string) {
+	if r := auditFrom(ctx); r != nil && target != "" {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.ev.Target = auditText(target, auditFieldMax)
+	}
+}
+
 // describe fills service, target and details from the request message. The
 // interceptor calls it before the handler runs, so an operation the handler
 // starts copies them into its outcome template.
@@ -404,6 +426,18 @@ var auditActions = map[string]auditAction{
 	forgev1connect.OperationServiceCancelOperationProcedure: {"operation.cancel", func(m any) (string, string, map[string]string) {
 		return "", m.(*forgev1.CancelOperationRequest).GetName(), nil
 	}},
+	forgev1connect.ResourceServicePlanResourcesProcedure: {opResourcePlan, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.PlanResourcesRequest)
+		s := serviceName(r.GetService())
+		return s, resourceNamePrefix + strings.TrimPrefix(s, servicePrefix) + "/" + r.GetEnv(),
+			details("environment", r.GetEnv(), "allow_destroy", flag(r.GetAllowDestroy()))
+	}},
+	// The request names only the plan; the handler adds the service, the
+	// target and the environment once it has read the plan.
+	forgev1connect.ResourceServiceApplyResourcePlanProcedure: {opResourceApply, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.ApplyResourcePlanRequest)
+		return "", r.GetName(), details("plan", r.GetName(), "validate_only", flag(r.GetValidateOnly()))
+	}},
 }
 
 // auditReads lists every read procedure. A procedure in neither table fails
@@ -425,6 +459,10 @@ var auditReads = []string{
 	forgev1connect.DeployServiceListDeployHistoryProcedure,
 	forgev1connect.AuditServiceListAuditEventsProcedure,
 	forgev1connect.AuditServiceGetAuditEventProcedure,
+	forgev1connect.ResourceServiceGetResourcePlanProcedure,
+	forgev1connect.ResourceServiceListResourcePlansProcedure,
+	forgev1connect.ResourceServiceListResourcesProcedure,
+	forgev1connect.ResourceServiceGetResourceProcedure,
 }
 
 // auditInterceptor records every write call; it runs outside authentication

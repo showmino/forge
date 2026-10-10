@@ -434,3 +434,27 @@ func TestAuditAnonymousLimit(t *testing.T) {
 		t.Fatalf("stored %d events after the window, want 64", n)
 	}
 }
+
+func TestAuditDescribesResourceCalls(t *testing.T) {
+	t.Parallel()
+	plan := auditActions[forgev1connect.ResourceServicePlanResourcesProcedure]
+	svc, target, det := plan.describe(&forgev1.PlanResourcesRequest{Service: "payments", Env: "staging", AllowDestroy: true})
+	if plan.name != "resource.plan" || svc != "services/payments" || target != "resources/payments/staging" {
+		t.Errorf("plan: %q %q %q", plan.name, svc, target)
+	}
+	if det["environment"] != "staging" || det["allow_destroy"] != "true" {
+		t.Errorf("plan details: %v", det)
+	}
+	if _, _, det := plan.describe(&forgev1.PlanResourcesRequest{Service: "services/payments", Env: "production"}); det["allow_destroy"] != "" {
+		t.Errorf("allow_destroy must be absent when false: %v", det)
+	}
+
+	apply := auditActions[forgev1connect.ResourceServiceApplyResourcePlanProcedure]
+	svc, target, det = apply.describe(&forgev1.ApplyResourcePlanRequest{Name: "resourcePlans/0123456789ab", ValidateOnly: true})
+	if apply.name != "resource.apply" || svc != "" || target != "resourcePlans/0123456789ab" {
+		t.Errorf("apply: %q %q %q", apply.name, svc, target)
+	}
+	if det["plan"] != "resourcePlans/0123456789ab" || det["validate_only"] != "true" {
+		t.Errorf("apply details: %v", det)
+	}
+}

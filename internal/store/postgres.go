@@ -24,8 +24,9 @@ var migrations embed.FS
 
 // Advisory lock keys: arbitrary, fixed, and Forge's own.
 const (
-	migrateLock int64 = 0x666f726765_01 // "forge", 1
-	writeLock   int64 = 0x666f726765_02 // "forge", 2
+	migrateLock  int64 = 0x666f726765_01 // "forge", 1
+	writeLock    int64 = 0x666f726765_02 // "forge", 2
+	resourceLock int64 = 0x666f726765_03 // "forge", 3
 )
 
 // Postgres is a Store in PostgreSQL.

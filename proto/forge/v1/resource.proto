@@ -1,0 +1,248 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "forge/v1/operation.proto";
+import "google/protobuf/timestamp.proto";
+
+// ResourceService plans and applies the resources a service declares in
+// forge.yaml. A plan is made by an OpenTofu run, checked against policy and
+// saved; an apply runs exactly that plan. Both return an Operation.
+// Names: "resources/{service}/{env}/{name}" and "resourcePlans/{id}".
+service ResourceService {
+  // PlanResources plans the declared resources for one environment.
+  rpc PlanResources(PlanResourcesRequest) returns (PlanResourcesResponse) {}
+
+  // GetResourcePlan returns one plan: its changes and policy result.
+  rpc GetResourcePlan(GetResourcePlanRequest) returns (GetResourcePlanResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ListResourcePlans returns plans, newest first.
+  rpc ListResourcePlans(ListResourcePlansRequest) returns (ListResourcePlansResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // ApplyResourcePlan applies a saved plan.
+  rpc ApplyResourcePlan(ApplyResourcePlanRequest) returns (ApplyResourcePlanResponse) {}
+
+  // ListResources returns resources, by name.
+  rpc ListResources(ListResourcesRequest) returns (ListResourcesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetResource returns one resource.
+  rpc GetResource(GetResourceRequest) returns (GetResourceResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// ResourceDeclaration is one entry of forge.yaml's resources list.
+message ResourceDeclaration {
+  string name = 1;
+  // "postgres".
+  string type = 2;
+  // "<n>Gi"; empty means the default.
+  string storage = 3;
+  // 0 means the default.
+  int32 instances = 4;
+  // Overrides per environment, keyed "staging" or "production".
+  map<string, ResourceOverride> environments = 5;
+}
+
+// ResourceOverride replaces a declaration's values in one environment.
+message ResourceOverride {
+  string storage = 1;
+  int32 instances = 2;
+}
+
+// ResourceSettings are a declaration worked out for one environment.
+message ResourceSettings {
+  string name = 1;
+  string type = 2;
+  int32 storage_gi = 3;
+  int32 instances = 4;
+}
+
+// Resource is one resource of a service in one environment.
+message Resource {
+  // State is how the last apply left the resource.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_APPLYING = 1;
+    STATE_READY = 2;
+    STATE_FAILED = 3;
+    STATE_DELETING = 4;
+  }
+
+  // "resources/{service}/{env}/{name}".
+  string name = 1;
+  // "services/{service}".
+  string service = 2;
+  // "staging" or "production".
+  string env = 3;
+  string type = 4;
+  ResourceSettings settings = 5;
+  State state = 6;
+  // Read live when the resource is listed or fetched.
+  ResourceHealth health = 7;
+  // The Secret with the connection string, in the service's namespace.
+  string secret = 8;
+  // The plan that last changed it.
+  string last_plan = 9;
+  google.protobuf.Timestamp create_time = 10;
+  google.protobuf.Timestamp update_time = 11;
+}
+
+// ResourceHealth is what the cluster reports for a resource now.
+message ResourceHealth {
+  // The operator's phase text, or "unknown" when it cannot be read.
+  string phase = 1;
+  int32 ready_instances = 2;
+  int32 instances = 3;
+}
+
+// ResourceChange is one thing a plan would do.
+message ResourceChange {
+  // "create", "update", "delete" or "replace".
+  string action = 1;
+  // The resource's short name, or the plan address when it is not a known resource.
+  string resource = 2;
+  string type = 3;
+  // Unset on create.
+  ResourceSettings before = 4;
+  // Unset on delete.
+  ResourceSettings after = 5;
+}
+
+// PolicyResult is what the rules said about a plan.
+message PolicyResult {
+  bool denied = 1;
+  repeated string deny = 2;
+  repeated string warn = 3;
+  // The fingerprint of the rule set that decided.
+  string rules = 4;
+}
+
+// ResourcePlan is a saved plan for one service and environment.
+message ResourcePlan {
+  // State is where the plan is in its life.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_PLANNING = 1;
+    STATE_PLANNED = 2;
+    STATE_DENIED = 3;
+    STATE_FAILED = 4;
+    STATE_APPLYING = 5;
+    STATE_APPLIED = 6;
+    STATE_APPLY_FAILED = 7;
+    STATE_EXPIRED = 8;
+  }
+
+  // "resourcePlans/{id}".
+  string name = 1;
+  // "services/{service}".
+  string service = 2;
+  string env = 3;
+  State state = 4;
+  // The declared resources, worked out for env.
+  repeated ResourceSettings resources = 5;
+  repeated ResourceChange changes = 6;
+  // Unset until the plan has been checked.
+  PolicyResult policy = 7;
+  bool allow_destroy = 8;
+  // Who made it: an email, or a CI subject.
+  string creator = 9;
+  // The newest operation on it.
+  string operation = 10;
+  google.protobuf.Timestamp create_time = 11;
+  google.protobuf.Timestamp expire_time = 12;
+  google.protobuf.Timestamp apply_time = 13;
+  // Why it failed, when it did.
+  string message = 14;
+  // Who applied it.
+  string applier = 15;
+}
+
+message PlanResourcesRequest {
+  // "services/{service}".
+  string service = 1;
+  // "staging" or "production".
+  string env = 2;
+  // forge.yaml's resources list. Empty plans the removal of everything.
+  repeated ResourceDeclaration resources = 3;
+  // Let the plan delete resources. Writers only.
+  bool allow_destroy = 4;
+  // Retries with the same request_id return the same operation.
+  string request_id = 5;
+}
+
+message PlanResourcesResponse {
+  Operation operation = 1;
+  ResourcePlan plan = 2;
+}
+
+message GetResourcePlanRequest {
+  // "resourcePlans/{id}".
+  string name = 1;
+}
+
+message GetResourcePlanResponse {
+  ResourcePlan plan = 1;
+}
+
+message ListResourcePlansRequest {
+  // Only this service, "services/{service}".
+  string service = 1;
+  // Only this environment.
+  string env = 2;
+  // Only these states; empty means any.
+  repeated ResourcePlan.State states = 3;
+  // Only plans the caller made.
+  bool mine = 4;
+  // At most this many (default 50, at most 500).
+  int32 page_size = 5;
+  string page_token = 6;
+}
+
+message ListResourcePlansResponse {
+  repeated ResourcePlan plans = 1;
+  string next_page_token = 2;
+}
+
+message ApplyResourcePlanRequest {
+  // "resourcePlans/{id}".
+  string name = 1;
+  // forge.yaml's resources list now, compared with the plan's when
+  // check_resources is set.
+  repeated ResourceDeclaration resources = 2;
+  bool check_resources = 3;
+  // Run every check and stop before the run.
+  bool validate_only = 4;
+}
+
+message ApplyResourcePlanResponse {
+  // Unset when validate_only.
+  Operation operation = 1;
+  ResourcePlan plan = 2;
+}
+
+message ListResourcesRequest {
+  // Only this service, "services/{service}".
+  string service = 1;
+  // Only this environment.
+  string env = 2;
+}
+
+message ListResourcesResponse {
+  repeated Resource resources = 1;
+}
+
+message GetResourceRequest {
+  // "resources/{service}/{env}/{name}".
+  string name = 1;
+}
+
+message GetResourceResponse {
+  Resource resource = 1;
+}

@@ -47,8 +47,8 @@ func TestPostgresMigrate(t *testing.T) {
 		t.Fatalf("second migrate: %v", err)
 	}
 	var n int
-	if err := a.pool.QueryRow(context.Background(), "SELECT count(*) FROM forge_migrations").Scan(&n); err != nil || n != 2 {
-		t.Fatalf("forge_migrations has %d rows (%v), want 2", n, err)
+	if err := a.pool.QueryRow(context.Background(), "SELECT count(*) FROM forge_migrations").Scan(&n); err != nil || n != 3 {
+		t.Fatalf("forge_migrations has %d rows (%v), want 3", n, err)
 	}
 }
 

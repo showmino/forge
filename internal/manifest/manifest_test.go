@@ -104,3 +104,57 @@ func TestRun(t *testing.T) {
 		t.Errorf("marshal: %s %v", out, err)
 	}
 }
+
+func TestResources(t *testing.T) {
+	t.Parallel()
+	m, err := Parse([]byte(`apiVersion: forge.dev/v1
+service:
+  name: payments
+  team: billing
+resources:
+  - name: main
+    type: postgres
+    storage: 5Gi
+    environments:
+      production:
+        storage: 20Gi
+        instances: 2
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := m.Declarations()
+	if len(d) != 1 || d[0].GetName() != "main" || d[0].GetType() != "postgres" || d[0].GetStorage() != "5Gi" || d[0].GetInstances() != 0 {
+		t.Fatalf("declarations: %v", d)
+	}
+	if o := d[0].GetEnvironments()["production"]; o.GetStorage() != "20Gi" || o.GetInstances() != 2 {
+		t.Errorf("override: %v", o)
+	}
+
+	// A manifest without resources has none, and writes none back.
+	bare, err := Parse([]byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bare.Declarations()) != 0 {
+		t.Errorf("bare: %v", bare.Declarations())
+	}
+	out, err := bare.Marshal()
+	if err != nil || strings.Contains(string(out), "resources") {
+		t.Errorf("marshal: %s %v", out, err)
+	}
+
+	for name, body := range map[string]string{
+		"a bad size":       "resources:\n  - {name: main, type: postgres, storage: 5GB}\n",
+		"an unknown field": "resources:\n  - {name: main, type: postgres, version: 18}\n",
+		"an unknown env":   "resources:\n  - {name: main, type: postgres, environments: {prod: {instances: 2}}}\n",
+		"a huge instances": "resources:\n  - {name: main, type: postgres, instances: 99999999999}\n",
+	} {
+		_, err := Parse([]byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n" + body))
+		if err == nil {
+			t.Errorf("%s: want an error", name)
+		} else if name != "an unknown field" && !strings.Contains(err.Error(), "resources: ") {
+			t.Errorf("%s: %v, want it to start with resources:", name, err)
+		}
+	}
+}
