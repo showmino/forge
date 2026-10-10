@@ -389,38 +389,6 @@ func (r *Resources) ListResourcePlans(ctx context.Context, req *connect.Request[
 	return connect.NewResponse(resp), nil
 }
 
-// ApplyResourcePlan, ListResources and GetResource are implemented in resource_apply.go.
-
-func (r *Resources) ApplyResourcePlan(ctx context.Context, _ *connect.Request[forgev1.ApplyResourcePlanRequest]) (*connect.Response[forgev1.ApplyResourcePlanResponse], error) {
-	if err := r.ready(); err != nil {
-		return nil, err
-	}
-	if err := require(ctx, PermServicesWrite); err != nil {
-		return nil, err
-	}
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("apply is not built yet"))
-}
-
-func (r *Resources) ListResources(ctx context.Context, _ *connect.Request[forgev1.ListResourcesRequest]) (*connect.Response[forgev1.ListResourcesResponse], error) {
-	if err := r.ready(); err != nil {
-		return nil, err
-	}
-	if err := require(ctx, PermServicesRead); err != nil {
-		return nil, err
-	}
-	return connect.NewResponse(&forgev1.ListResourcesResponse{}), nil
-}
-
-func (r *Resources) GetResource(ctx context.Context, req *connect.Request[forgev1.GetResourceRequest]) (*connect.Response[forgev1.GetResourceResponse], error) {
-	if err := r.ready(); err != nil {
-		return nil, err
-	}
-	if err := require(ctx, PermServicesRead); err != nil {
-		return nil, err
-	}
-	return nil, notFound(req.Msg.GetName())
-}
-
 // storedRun returns the plan of a run the store says is still going for
 // service ("services/<id>") and env: one this process does not watch, such
 // as a run started before a restart. Its deadline has not passed, so its

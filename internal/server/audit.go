@@ -135,6 +135,15 @@ func noteAuditDetail(ctx context.Context, key, value string) {
 	}
 }
 
+// noteAuditTarget replaces the call's target, when the request did not name it.
+func noteAuditTarget(ctx context.Context, target string) {
+	if r := auditFrom(ctx); r != nil && target != "" {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.ev.Target = auditText(target, auditFieldMax)
+	}
+}
+
 // describe fills service, target and details from the request message. The
 // interceptor calls it before the handler runs, so an operation the handler
 // starts copies them into its outcome template.

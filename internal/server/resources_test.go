@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"connectrpc.com/connect"
@@ -785,4 +786,509 @@ func TestPlanRefusedWhileStoredRunLives(t *testing.T) {
 	now = now.Add(11 * time.Minute)
 	mu.Unlock()
 	f.startPlan(t, "writer", "services/payments", "staging", database("5Gi", 0), false)
+}
+
+// fakeCluster records namespace calls and reports a fixed health.
+type fakeCluster struct {
+	mu      sync.Mutex
+	ensured []string
+	health  *forgev1.ResourceHealth
+	err     error
+}
+
+func (c *fakeCluster) ServiceNamespaceFree(context.Context, string, string) error { return nil }
+
+func (c *fakeCluster) EnsureServiceNamespace(_ context.Context, service, env string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ensured = append(c.ensured, service+"-"+env)
+	return nil
+}
+
+func (c *fakeCluster) DatabaseHealth(context.Context, string, string, string) (*forgev1.ResourceHealth, error) {
+	return c.health, c.err
+}
+
+// startApply asks for an apply as a writer.
+func (f *resourceFixture) startApply(req *forgev1.ApplyResourcePlanRequest) (*forgev1.ApplyResourcePlanResponse, error) {
+	resp, err := f.client.ApplyResourcePlan(context.Background(), as("writer", req))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// apply applies plan and waits for its operation.
+func (f *resourceFixture) apply(t *testing.T, plan string) *forgev1.Operation {
+	t.Helper()
+	resp, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: plan})
+	if err != nil {
+		t.Fatalf("apply %s: %v", plan, err)
+	}
+	return waitCIOp(t, f.ops, resp.GetOperation().GetName())
+}
+
+func (f *resourceFixture) getResource(t *testing.T, name string) *forgev1.Resource {
+	t.Helper()
+	got, err := f.client.GetResource(context.Background(), as("reader", &forgev1.GetResourceRequest{Name: name}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got.Msg.GetResource()
+}
+
+func TestApply(t *testing.T) {
+	t.Parallel()
+	cluster := &fakeCluster{health: &forgev1.ResourceHealth{Phase: "Cluster in healthy state", ReadyInstances: 1, Instances: 1}}
+	f := newResourceFixture(t, func(o *ResourceOptions) { o.Namespaces, o.Health = cluster, cluster })
+	ctx := context.Background()
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	if len(cluster.ensured) != 0 {
+		t.Errorf("a plan made a namespace: %v", cluster.ensured)
+	}
+	op := f.apply(t, p.GetName())
+	if op.GetError() != nil || op.GetKind() != "resource.apply" || op.GetTarget() != "resources/payments/staging" {
+		t.Fatalf("operation: %v", op)
+	}
+	if steps := eventSteps(op); !strings.HasPrefix(steps, "namespace,launch") || !strings.HasSuffix(steps, "apply") {
+		t.Errorf("events: %s", steps)
+	}
+	if last := op.GetEvents()[len(op.GetEvents())-1]; last.GetMessage() != "Deploy to give the app DATABASE_URL." {
+		t.Errorf("last event: %q", last.GetMessage())
+	}
+	if !slices.Equal(cluster.ensured, []string{"payments-staging"}) {
+		t.Errorf("namespaces: %v", cluster.ensured)
+	}
+	if got := f.runner.Databases(); !slices.Equal(got, []string{"payments-staging/main 5Gi x1"}) {
+		t.Errorf("databases: %v", got)
+	}
+
+	applied := f.getPlan(t, p.GetName())
+	if applied.GetState() != forgev1.ResourcePlan_STATE_APPLIED || applied.GetApplier() != "ana@example.com" || applied.GetApplyTime() == nil || applied.GetOperation() != op.GetName() {
+		t.Errorf("plan: %v", applied)
+	}
+	rec, _ := f.store.GetResourcePlan(ctx, p.GetName())
+	if len(rec.PlanFile) != 0 || len(rec.PlanJSON) != 0 || rec.TokenHash != "" {
+		t.Errorf("an applied plan keeps no plan file and no token: %+v", rec)
+	}
+	if st, _ := f.store.GetResourceState(ctx, "payments/staging"); st.Version != 1 || st.LockID != "" {
+		t.Errorf("state: %+v", st)
+	}
+
+	res := f.getResource(t, "resources/payments/staging/main")
+	if res.GetState() != forgev1.Resource_STATE_READY || res.GetSecret() != "main-app" || res.GetType() != "postgres" ||
+		res.GetService() != "services/payments" || res.GetEnv() != "staging" || res.GetLastPlan() != p.GetName() ||
+		res.GetSettings().GetStorageGi() != 5 || res.GetSettings().GetInstances() != 1 || res.GetCreateTime() == nil {
+		t.Errorf("resource: %v", res)
+	}
+	if h := res.GetHealth(); h.GetPhase() != "Cluster in healthy state" || h.GetReadyInstances() != 1 {
+		t.Errorf("health: %v", h)
+	}
+
+	// The audit log: the apply request names the service, and one outcome follows.
+	var req *forgev1.AuditEvent
+	for _, e := range allEvents(t, f.store) {
+		if e.GetKind() == "request" && e.GetAction() == "resource.apply" {
+			req = e
+		}
+	}
+	if req == nil || req.GetService() != "services/payments" || req.GetTarget() != "resources/payments/staging" || req.GetOperation() != op.GetName() ||
+		req.GetActor().GetEmail() != "ana@example.com" || req.GetResult().GetCode() != "ok" {
+		t.Fatalf("request event: %v", req)
+	}
+	if d := req.GetDetails(); d["plan"] != p.GetName() || d["environment"] != "staging" || d["policy"] != "passed" || len(d["policy_rules"]) != 12 {
+		t.Errorf("request details: %v", d)
+	}
+	var outs []*forgev1.AuditEvent
+	for _, e := range f.outcomes(t, p.GetName()) {
+		if e.GetAction() == "resource.apply" {
+			outs = append(outs, e)
+		}
+	}
+	if len(outs) != 1 || outs[0].GetResult().GetCode() != "ok" || outs[0].GetActor().GetEmail() != "ana@example.com" ||
+		outs[0].GetDetails()["changes"] != "create=1 update=0 delete=0" || outs[0].GetDetails()["policy"] != "passed" {
+		t.Errorf("apply outcomes: %v", outs)
+	}
+
+	// Planning the same again changes nothing, and nothing cannot be applied.
+	same, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	if len(same.GetChanges()) != 0 || same.GetState() != forgev1.ResourcePlan_STATE_PLANNED {
+		t.Errorf("unchanged plan: %v", same)
+	}
+	_, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: same.GetName()})
+	wantCode(t, "a plan with no changes", err, connect.CodeFailedPrecondition, "nothing to apply")
+
+	// More storage is an update of the same resource.
+	grow, _ := f.plan(t, "writer", "staging", database("10Gi", 0), false)
+	if cs := grow.GetChanges(); len(cs) != 1 || cs[0].GetAction() != "update" || cs[0].GetBefore().GetStorageGi() != 5 || cs[0].GetAfter().GetStorageGi() != 10 {
+		t.Fatalf("grow plan: %v", grow)
+	}
+	if op := f.apply(t, grow.GetName()); op.GetError() != nil {
+		t.Fatalf("grow apply: %v", op.GetError())
+	}
+	grown := f.getResource(t, "resources/payments/staging/main")
+	if grown.GetSettings().GetStorageGi() != 10 || grown.GetLastPlan() != grow.GetName() || !grown.GetCreateTime().AsTime().Equal(res.GetCreateTime().AsTime()) {
+		t.Errorf("after growing: %v", grown)
+	}
+}
+
+func TestApplyRefusals(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	f := newResourceFixture(t, func(o *ResourceOptions) { o.Now = clock })
+	ctx := context.Background()
+
+	_, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: "resourcePlans/0123456789ab"})
+	wantCode(t, "a missing plan", err, connect.CodeNotFound, "resourcePlans/0123456789ab")
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: "x"})
+	wantCode(t, "a bad name", err, connect.CodeInvalidArgument, "resourcePlans/<id>")
+
+	denied, _ := f.plan(t, "writer", "production", database("200Gi", 2), false)
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: denied.GetName()})
+	wantCode(t, "a denied plan", err, connect.CodeFailedPrecondition, "was denied by policy")
+
+	f.runner.FailPlan = "tofu: boom"
+	failed, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	f.runner.FailPlan = ""
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: failed.GetName()})
+	wantCode(t, "a failed plan", err, connect.CodeFailedPrecondition, "failed; run 'forge resource plan' again")
+
+	// Two plans made from the same state: applying one makes the other stale.
+	a, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	b, _ := f.plan(t, "writer", "staging", database("6Gi", 0), false)
+
+	_, err = f.client.ApplyResourcePlan(ctx, as("reader", &forgev1.ApplyResourcePlanRequest{Name: a.GetName()}))
+	wantCode(t, "a reader", err, connect.CodePermissionDenied, "services.write")
+
+	// forge.yaml changed since the plan.
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: a.GetName(), CheckResources: true, Resources: database("7Gi", 0)})
+	wantCode(t, "a changed manifest", err, connect.CodeFailedPrecondition, "forge.yaml changed since")
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: a.GetName(), CheckResources: true, Resources: database("7GB", 0)})
+	wantCode(t, "a bad manifest", err, connect.CodeInvalidArgument, "resources: main: storage")
+	// Without check_resources the list is ignored.
+	started := len(f.runner.Started())
+	dry, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: a.GetName(), Resources: database("7Gi", 0), ValidateOnly: true})
+	if err != nil || dry.GetOperation() != nil || dry.GetPlan().GetState() != forgev1.ResourcePlan_STATE_PLANNED {
+		t.Fatalf("dry run: %v %v", dry, err)
+	}
+	if _, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: a.GetName(), CheckResources: true, Resources: database("5Gi", 0), ValidateOnly: true}); err != nil {
+		t.Errorf("a dry run with the same manifest: %v", err)
+	}
+	if len(f.runner.Started()) != started || f.getPlan(t, a.GetName()).GetState() != forgev1.ResourcePlan_STATE_PLANNED {
+		t.Error("a dry run started a run or changed the plan")
+	}
+	var dryEvent *forgev1.AuditEvent
+	for _, e := range allEvents(t, f.store) {
+		if e.GetAction() == "resource.apply" && e.GetDetails()["validate_only"] == "true" && e.GetResult().GetCode() == "ok" {
+			dryEvent = e
+		}
+	}
+	if dryEvent == nil || dryEvent.GetDetails()["policy"] != "passed" || dryEvent.GetService() != "services/payments" {
+		t.Errorf("the dry run's event: %v", dryEvent)
+	}
+
+	if op := f.apply(t, a.GetName()); op.GetError() != nil {
+		t.Fatalf("apply: %v", op.GetError())
+	}
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: a.GetName()})
+	wantCode(t, "an applied plan", err, connect.CodeFailedPrecondition, "was already applied")
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: b.GetName()})
+	wantCode(t, "a stale plan", err, connect.CodeFailedPrecondition, "the resources changed since")
+
+	// A day later a ready plan has expired.
+	c, _ := f.plan(t, "writer", "staging", database("6Gi", 0), false)
+	mu.Lock()
+	now = now.Add(25 * time.Hour)
+	mu.Unlock()
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: c.GetName()})
+	wantCode(t, "an expired plan", err, connect.CodeFailedPrecondition, "expired; run 'forge resource plan' again")
+}
+
+func TestApplyChecksPolicyAgain(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	ctx := context.Background()
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+
+	// The rules changed since the plan: a second API on the same store, with stricter rules.
+	rules := "package forge.resources\nimport rego.v1\ndeny contains \"frozen: no changes this week\" if true\nwarn contains \"x\" if false\n"
+	strict, err := policy.NewFromFS(ctx, fstest.MapFS{"freeze.rego": {Data: []byte(rules)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := NewResources(ResourceOptions{Store: f.store, Catalog: f.cat, Operations: f.ops, Policy: strict, Launcher: f.runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := len(f.runner.Started())
+	_, err = other.ApplyResourcePlan(writerCtx(), connect.NewRequest(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()}))
+	wantCode(t, "newer rules deny", err, connect.CodePermissionDenied, "is denied by policy: frozen: no changes this week")
+	if len(f.runner.Started()) != started {
+		t.Error("a denied apply started a run")
+	}
+	got := f.getPlan(t, p.GetName())
+	if got.GetState() != forgev1.ResourcePlan_STATE_DENIED || got.GetPolicy().GetRules() != strict.Fingerprint() ||
+		!slices.Equal(got.GetPolicy().GetDeny(), []string{"frozen: no changes this week"}) {
+		t.Errorf("plan after the refusal: %v", got)
+	}
+	// Denied for good, also for the API with the old rules.
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()})
+	wantCode(t, "a plan denied at apply", err, connect.CodeFailedPrecondition, "was denied by policy")
+}
+
+func TestApplyOnce(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var ops []string
+	for range 8 {
+		wg.Go(func() {
+			resp, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()})
+			mu.Lock()
+			defer mu.Unlock()
+			if err == nil {
+				ops = append(ops, resp.GetOperation().GetName())
+			} else if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+				t.Errorf("a refused apply: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if len(ops) != 1 {
+		t.Fatalf("%d of 8 applies started, want 1", len(ops))
+	}
+	waitCIOp(t, f.ops, ops[0])
+	applies := 0
+	for _, s := range f.runner.Started() {
+		if s.Mode == run.ModeApply {
+			applies++
+		}
+	}
+	outs := 0
+	for _, e := range f.outcomes(t, p.GetName()) {
+		if e.GetAction() == "resource.apply" {
+			outs++
+		}
+	}
+	if applies != 1 || outs != 1 {
+		t.Errorf("%d apply runs and %d outcomes, want 1 and 1", applies, outs)
+	}
+}
+
+func TestApplyFailure(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	f.runner.FailApply = "tofu: no capacity"
+	op := f.apply(t, p.GetName())
+	if op.GetError().GetCode() != "run_failed" || op.GetError().GetMessage() != "tofu: no capacity" {
+		t.Errorf("operation: %v", op.GetError())
+	}
+	if got := f.getPlan(t, p.GetName()); got.GetState() != forgev1.ResourcePlan_STATE_APPLY_FAILED || got.GetMessage() != "tofu: no capacity" {
+		t.Errorf("plan: %v", got)
+	}
+	if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_FAILED || res.GetLastPlan() != p.GetName() {
+		t.Errorf("resource: %v", res)
+	}
+	_, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()})
+	wantCode(t, "a failed apply again", err, connect.CodeFailedPrecondition, "failed; run 'forge resource plan' again")
+
+	// A new plan and apply repair it.
+	f.runner.FailApply = ""
+	again, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	if op := f.apply(t, again.GetName()); op.GetError() != nil {
+		t.Fatalf("repair: %v", op.GetError())
+	}
+	if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_READY || res.GetSecret() != "main-app" {
+		t.Errorf("after the repair: %v", res)
+	}
+}
+
+func TestDestroy(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	ctx := context.Background()
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	f.apply(t, p.GetName())
+
+	// Removing the database from forge.yaml is refused unless asked for.
+	refused, op := f.plan(t, "writer", "staging", nil, false)
+	if refused.GetState() != forgev1.ResourcePlan_STATE_DENIED || op.GetError().GetCode() != "policy_denied" ||
+		!strings.Contains(op.GetError().GetMessage(), "the plan deletes database main") {
+		t.Fatalf("a delete without allow_destroy: %v %v", refused, op.GetError())
+	}
+	gone, op := f.plan(t, "writer", "staging", nil, true)
+	if gone.GetState() != forgev1.ResourcePlan_STATE_PLANNED || !gone.GetAllowDestroy() || op.GetError() != nil ||
+		len(gone.GetChanges()) != 1 || gone.GetChanges()[0].GetAction() != "delete" || gone.GetChanges()[0].GetBefore().GetStorageGi() != 5 {
+		t.Fatalf("a delete with allow_destroy: %v %v", gone, op.GetError())
+	}
+
+	// While the destroy runs the resource is "deleting"; a cancel leaves it "failed".
+	f.runner.Hang = true
+	resp, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: gone.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_DELETING {
+		t.Errorf("during the destroy: %v", res.GetState())
+	}
+	if _, err := f.opc.CancelOperation(ctx, as("writer", &forgev1.CancelOperationRequest{Name: resp.GetOperation().GetName()})); err != nil {
+		t.Fatal(err)
+	}
+	if op := waitCIOp(t, f.ops, resp.GetOperation().GetName()); op.GetError().GetCode() != "cancelled" {
+		t.Errorf("cancelled apply: %v", op.GetError())
+	}
+	if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_FAILED {
+		t.Errorf("after the cancel: %v", res.GetState())
+	}
+	if got := f.getPlan(t, gone.GetName()); got.GetState() != forgev1.ResourcePlan_STATE_APPLY_FAILED {
+		t.Errorf("plan after the cancel: %v", got.GetState())
+	}
+
+	// Plan and apply the destroy again: the database and its record go.
+	f.runner.Hang = false
+	gone2, _ := f.plan(t, "writer", "staging", nil, true)
+	op = f.apply(t, gone2.GetName())
+	if op.GetError() != nil {
+		t.Fatalf("destroy: %v", op.GetError())
+	}
+	if last := op.GetEvents()[len(op.GetEvents())-1]; last.GetMessage() != "The next deploy drops DATABASE_URL." {
+		t.Errorf("last event: %q", last.GetMessage())
+	}
+	if len(f.runner.Databases()) != 0 {
+		t.Errorf("databases: %v", f.runner.Databases())
+	}
+	_, err = f.client.GetResource(ctx, as("reader", &forgev1.GetResourceRequest{Name: "resources/payments/staging/main"}))
+	wantCode(t, "a destroyed resource", err, connect.CodeNotFound, "resources/payments/staging/main")
+	var out *forgev1.AuditEvent
+	for _, e := range f.outcomes(t, gone2.GetName()) {
+		if e.GetAction() == "resource.apply" {
+			out = e
+		}
+	}
+	if out == nil || out.GetDetails()["allow_destroy"] != "true" || out.GetDetails()["changes"] != "create=0 update=0 delete=1" {
+		t.Errorf("destroy outcome: %v", out)
+	}
+}
+
+func TestResourceReads(t *testing.T) {
+	t.Parallel()
+	cluster := &fakeCluster{err: errors.New("the API server is away")}
+	f := newResourceFixture(t, func(o *ResourceOptions) { o.Health = cluster })
+	ctx := context.Background()
+	for _, env := range []string{"staging", "production"} {
+		p, _ := f.plan(t, "writer", env, database("5Gi", 2), false)
+		f.apply(t, p.GetName())
+	}
+	list := func(req *forgev1.ListResourcesRequest) []string {
+		t.Helper()
+		resp, err := f.client.ListResources(ctx, as("reader", req))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, r := range resp.Msg.GetResources() {
+			names = append(names, r.GetName())
+			// A cluster that cannot be read gives "unknown", not an error.
+			if r.GetHealth().GetPhase() != "unknown" {
+				t.Errorf("%s health: %v", r.GetName(), r.GetHealth())
+			}
+		}
+		return names
+	}
+	if got := list(&forgev1.ListResourcesRequest{}); !slices.Equal(got, []string{"resources/payments/production/main", "resources/payments/staging/main"}) {
+		t.Errorf("all: %v", got)
+	}
+	if got := list(&forgev1.ListResourcesRequest{Service: "payments", Env: "staging"}); !slices.Equal(got, []string{"resources/payments/staging/main"}) {
+		t.Errorf("staging: %v", got)
+	}
+	if got := list(&forgev1.ListResourcesRequest{Service: "services/billing"}); len(got) != 0 {
+		t.Errorf("billing: %v", got)
+	}
+	_, err := f.client.ListResources(ctx, as("reader", &forgev1.ListResourcesRequest{Env: "qa"}))
+	wantCode(t, "a bad environment", err, connect.CodeInvalidArgument, "staging or production")
+	for _, name := range []string{"main", "resources/payments/main", "resources/payments/qa/main", "resources/Payments/staging/main", "resources/payments/staging/"} {
+		_, err := f.client.GetResource(ctx, as("reader", &forgev1.GetResourceRequest{Name: name}))
+		wantCode(t, "name "+name, err, connect.CodeInvalidArgument, "")
+	}
+	_, err = f.client.GetResource(ctx, as("reader", &forgev1.GetResourceRequest{Name: "resources/payments/staging/other"}))
+	wantCode(t, "a missing resource", err, connect.CodeNotFound, "resources/payments/staging/other")
+
+	var off *Resources
+	_, err = off.ApplyResourcePlan(writerCtx(), connect.NewRequest(&forgev1.ApplyResourcePlanRequest{}))
+	wantCode(t, "resources off", err, connect.CodeFailedPrecondition, "resources are not configured")
+	_, err = off.ListResources(writerCtx(), connect.NewRequest(&forgev1.ListResourcesRequest{}))
+	wantCode(t, "resources off", err, connect.CodeFailedPrecondition, "resources are not configured")
+	_, err = off.GetResource(writerCtx(), connect.NewRequest(&forgev1.GetResourceRequest{}))
+	wantCode(t, "resources off", err, connect.CodeFailedPrecondition, "resources are not configured")
+
+	// No health reader at all: also "unknown".
+	plain := newResourceFixture(t, nil)
+	p, _ := plain.plan(t, "writer", "staging", database("5Gi", 0), false)
+	plain.apply(t, p.GetName())
+	if h := plain.getResource(t, "resources/payments/staging/main").GetHealth(); h.GetPhase() != "unknown" {
+		t.Errorf("no health reader: %v", h)
+	}
+}
+
+func TestDeleteServiceGuard(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	f.apply(t, p.GetName())
+
+	del := func(name string, dryRun bool) error {
+		_, err := f.cat.DeleteService(writerCtx(), connect.NewRequest(&forgev1.DeleteServiceRequest{Name: name, ValidateOnly: dryRun}))
+		return err
+	}
+	for _, dryRun := range []bool{true, false} {
+		err := del("services/payments", dryRun)
+		wantCode(t, "a service with a database", err, connect.CodeFailedPrecondition, "services/payments still has resources (resources/payments/staging/main)")
+		if !strings.Contains(err.Error(), "forge resource plan --env <env> --allow-destroy") {
+			t.Errorf("the refusal must say how to remove them: %v", err)
+		}
+	}
+	if err := del("services/billing", false); err != nil {
+		t.Errorf("a service without resources: %v", err)
+	}
+	gone, _ := f.plan(t, "writer", "staging", nil, true)
+	f.apply(t, gone.GetName())
+	if err := del("services/payments", false); err != nil {
+		t.Errorf("after the destroy: %v", err)
+	}
+}
+
+func TestApplyRefusedWhileStoredRunLives(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	f := newResourceFixture(t, func(o *ResourceOptions) { o.Now = clock })
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	err := f.store.WriteResources(context.Background(), func(tx store.ResourceTx) error {
+		return tx.PutResourcePlan(context.Background(), &store.PlanRecord{
+			Plan: &forgev1.ResourcePlan{Name: "resourcePlans/ghost", Service: "services/payments", Env: "staging",
+				State: forgev1.ResourcePlan_STATE_APPLYING, CreateTime: timestamppb.New(now)},
+			TokenHash: "h", Deadline: now.Add(10 * time.Minute),
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := len(f.runner.Started())
+	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()})
+	wantCode(t, "a stored run", err, connect.CodeFailedPrecondition, "resourcePlans/ghost is still running for resources/payments/staging")
+	if len(f.runner.Started()) != started {
+		t.Error("a refused apply started a run")
+	}
+	mu.Lock()
+	now = now.Add(11 * time.Minute)
+	mu.Unlock()
+	if _, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()}); err != nil {
+		t.Errorf("after the deadline: %v", err)
+	}
 }

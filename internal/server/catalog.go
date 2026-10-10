@@ -30,6 +30,9 @@ const (
 type Catalog struct {
 	store store.Store
 	now   func() time.Time
+	// resources, when set, is asked before a service is deleted: a service
+	// that still has resources stays.
+	resources store.ResourceStore
 }
 
 // NewCatalog returns an empty catalog in memory.
@@ -291,6 +294,21 @@ func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev
 	name, err := parseName(req.Msg.GetName())
 	if err != nil {
 		return nil, err
+	}
+	if c.resources != nil {
+		rs, err := c.resources.ListResources(ctx, name, "")
+		if err != nil {
+			return nil, storeErr(err)
+		}
+		if len(rs) > 0 {
+			names := make([]string, len(rs))
+			for i, r := range rs {
+				names[i] = r.GetName()
+			}
+			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"%s still has resources (%s); remove them from forge.yaml, then run 'forge resource plan --env <env> --allow-destroy' and apply the plan",
+				name, strings.Join(names, ", ")))
+		}
 	}
 	err = c.store.Write(ctx, func(tx store.Tx) error {
 		cur, _, err := tx.Get(ctx, name)
