@@ -1,0 +1,3 @@
+Plan resourcePlans/PLAN for payments (production): denied by policy
+  + postgres main   storage 200Gi, instances 2
+  ✗ storage 200Gi is above the 50Gi limit for production

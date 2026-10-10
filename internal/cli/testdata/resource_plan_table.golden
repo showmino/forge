@@ -1,0 +1,4 @@
+Plan resourcePlans/PLAN for payments (staging)
+  + postgres main   storage 5Gi, instances 1
+Policy: passed
+Apply it with: forge resource apply resourcePlans/PLAN

@@ -1,0 +1,2 @@
+SERVICE    ENV       NAME   TYPE       STORAGE   INSTANCES   STATE   HEALTH
+payments   staging   main   postgres   5Gi       1           ready   unknown
