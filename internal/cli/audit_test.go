@@ -14,7 +14,7 @@ import (
 // seedAudit appends fixed events to the harness's audit store.
 func (h *harness) seedAudit() {
 	h.t.Helper()
-	at := time.Date(2026, 10, 10, 9, 14, 3, 0, time.UTC)
+	at := time.Date(2025, 10, 10, 9, 14, 3, 0, time.UTC)
 	for _, e := range []*forgev1.AuditEvent{
 		{Time: timestamppb.New(at), Kind: "request", Action: "deploy.start", Service: "services/payments",
 			Target: "deployments/payments/staging", Operation: "operations/op_0123456789ab",
@@ -57,7 +57,7 @@ func TestAuditList(t *testing.T) {
 	if r := h.ok("audit", "list", "--action", "environment.expire", "-o", "json"); !strings.Contains(r.out, `"kind": "system"`) {
 		t.Errorf("json: %s", r.out)
 	}
-	if r := h.ok("audit", "list", "--since", "2026-10-10T09:16:00Z", "-o", "name"); r.out != "auditEvents/4\nauditEvents/3\n" {
+	if r := h.ok("audit", "list", "--since", "2025-10-10T09:16:00Z", "-o", "name"); r.out != "auditEvents/4\nauditEvents/3\n" {
 		t.Errorf("--since RFC 3339: %q", r.out)
 	}
 	h.fails(2, "audit", "list", "--since", "yesterday")
@@ -67,7 +67,7 @@ func TestAuditList(t *testing.T) {
 func TestAuditListSinceDuration(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	h.seedAudit() // all in 2026-10-10 09:14–09:17 UTC
+	h.seedAudit() // all in 2025-10-10 09:14–09:17 UTC
 	// 1000 days back covers them; 1h back from now does not (now is the real clock).
 	if r := h.ok("audit", "list", "--since", "1000d", "-o", "name"); strings.Count(r.out, "\n") != 4 {
 		t.Errorf("--since 1000d: %q", r.out)
