@@ -45,6 +45,15 @@ func teamSource(app *github.App) server.TeamSource {
 	return &github.Client{Token: app.Token}
 }
 
+// members asks GitHub, as the App, who is in the organization and its
+// teams; without an App sessions keep the groups of their login.
+func members(app *github.App) server.Members {
+	if app == nil {
+		return nil
+	}
+	return &github.Client{Token: app.Token}
+}
+
 // templateSource picks where the API reads templates from: a local checkout
 // (development) or the GitHub repo as the App. It returns nil when neither is
 // configured; TemplateService then answers FAILED_PRECONDITION.

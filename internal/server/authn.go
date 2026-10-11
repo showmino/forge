@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -31,6 +32,18 @@ type Principal struct {
 	// Workload is set for a CI caller. Its Permissions come from its token,
 	// not from the Authorizer.
 	Workload *Workload
+	// Login is the person's GitHub user name, when the login says it.
+	Login string
+	// Client is what the caller logged in with: ClientCLI or ClientWeb.
+	Client string
+	// IssuedAt is when the ID token was issued; zero for any other token.
+	IssuedAt time.Time
+	// LoginID names the ID token of the call without holding it (a hash);
+	// empty for any other token.
+	LoginID string
+	// Session is the ID of the session the call was made with; empty for a
+	// call with an ID token.
+	Session string
 }
 
 // Workload is a CI job of a service's repo, from its GitHub Actions token.
@@ -171,7 +184,13 @@ func (i *authInterceptor) authenticate(ctx context.Context, procedure, header st
 type OIDCAuthenticator struct {
 	verifier  *oidc.IDTokenVerifier
 	audiences []string
+	// web is the web dashboard's client ID: a token issued to it is a web
+	// login, any other a CLI login.
+	web string
 }
+
+// SetWebClient names the client ID of the web dashboard among the accepted ones.
+func (a *OIDCAuthenticator) SetWebClient(id string) { a.web = id }
 
 // NewOIDCAuthenticator discovers the provider at issuer. Tokens must have one
 // of clientIDs in their audience: the CLI's, and the web dashboard's when the
@@ -204,13 +223,21 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, token string) (*Pr
 		return nil, errors.New("invalid token: it was not issued to a Forge client")
 	}
 	var claims struct {
-		Email  string   `json:"email"`
-		Groups []string `json:"groups"`
+		Email    string   `json:"email"`
+		Groups   []string `json:"groups"`
+		Username string   `json:"preferred_username"`
 	}
 	if err := idt.Claims(&claims); err != nil {
 		return nil, fmt.Errorf("invalid token claims: %w", err)
 	}
-	return &Principal{Subject: idt.Subject, Email: claims.Email, Groups: claims.Groups}, nil
+	client := ClientCLI
+	if a.web != "" && slices.Contains(idt.Audience, a.web) {
+		client = ClientWeb
+	}
+	return &Principal{
+		Subject: idt.Subject, Email: claims.Email, Groups: claims.Groups, Login: claims.Username,
+		Client: client, IssuedAt: idt.IssuedAt, LoginID: hashToken(token),
+	}, nil
 }
 
 // StaticAuthenticator maps fixed tokens to principals. For tests and local

@@ -56,10 +56,38 @@ The API keeps the catalog in memory unless it gets `--database-url` (or
 that and for the store tests:
 `FORGE_TEST_DATABASE_URL='postgres://postgres:forge@localhost:55432/postgres?sslmode=disable' make test`.
 
-The CLI asks the API which issuer and client ID to use (`AuthService.GetServerInfo`),
-runs the OIDC device flow, and stores the ID and refresh tokens in the OS
-keychain (a 0600 file on headless Linux). The API verifies ID tokens with the
-CLI's client ID as audience.
+The CLI asks the API which issuer and client ID to use (`AuthService.GetServerInfo`)
+and runs the OIDC device flow. The API verifies ID tokens with the CLI's
+client ID as audience.
+
+### Sessions
+
+A login does not last on its own: the identity provider's tokens are short,
+and with GitHub behind Dex the refresh dies as soon as GitHub revokes the
+token of that login (it keeps ten per person, and every sign-in anywhere makes
+one). So right after the login the CLI trades the ID token for a session of
+Forge's own (`AuthService.CreateSession`) and keeps only that, in the OS
+keychain (a 0600 file on headless Linux):
+
+- **How long:** a CLI session ends when it has not been used for 90 days; a
+  dashboard session ends 7 days after the sign-in. `forge auth logout` ends
+  one at once, `forge auth session list` shows yours on every machine, and
+  `forge auth session revoke <id>` ends another one.
+- **Who:** forge-api asks GitHub about hourly, with its own App (Members:
+  read), whether the person is still in the organization and in the writer
+  teams. Leaving a team takes the permission away within the hour; leaving
+  the organization ends the session. If GitHub cannot be asked, a session
+  goes on with what was last known for at most a day.
+- **What is stored:** the SHA-256 of the token, never the token
+  (`fgs_...`), in the `sessions` table. A session is made only from a login
+  less than ten minutes old, once per login, and never from another session
+  or a CI token. With sessions the CLI asks for no refresh token, and a new
+  login on a machine ends the session that machine had.
+
+forge-api keeps sessions only when it has the GitHub App, because that is how
+it knows a person has left (`GetServerInfo` says `sessions: true`). Without
+it, and against an older API, `CreateSession` answers `Unimplemented` and the
+CLI keeps the ID and refresh tokens, as before.
 
 ## On k3s
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ type harness struct {
 	issuer string
 
 	authn     server.Authenticator
+	sessions  *server.Sessions
 	templates server.TemplateSource
 	teams     server.TeamSource
 	repos     server.RepoHost
@@ -81,6 +83,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Deploys:       h.deploys,
 		Resources:     h.resources,
 		Audit:         h.audit,
+		Sessions:      h.sessions,
 	})
 	if err != nil {
 		h.t.Fatal(err)
@@ -395,27 +398,7 @@ func TestLoginDeviceFlow(t *testing.T) {
 	h := newHarness(t)
 	idToken := fakeIDToken("ana", time.Now().Add(time.Hour))
 
-	polls := 0
-	idp := httptest.NewServer(nil)
-	idp.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/.well-known/openid-configuration":
-			fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":"%[1]s/auth","token_endpoint":"%[1]s/token","device_authorization_endpoint":"%[1]s/device/code"}`, idp.URL)
-		case "/device/code":
-			fmt.Fprintf(w, `{"device_code":"dc","user_code":"WXYZ-1234","verification_uri":"%s/device","expires_in":60,"interval":1}`, idp.URL)
-		case "/token":
-			if polls++; polls == 1 {
-				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprint(w, `{"error":"authorization_pending"}`)
-				return
-			}
-			fmt.Fprintf(w, `{"access_token":"at","token_type":"bearer","expires_in":3600,"refresh_token":"rt","id_token":%q}`, idToken)
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	t.Cleanup(idp.Close)
+	idp := deviceIDP(t, idToken)
 
 	h.issuer = idp.URL
 	h.startAPI(server.StaticAuthenticator{idToken: {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}}})
@@ -435,6 +418,114 @@ func TestLoginDeviceFlow(t *testing.T) {
 		t.Errorf("token: %q", r.out)
 	}
 	h.ok("auth", "logout")
+	h.fails(4, "service", "list")
+}
+
+// deviceIDP is an identity provider whose device flow answers "pending"
+// once and then hands out idToken, with a refresh token.
+func deviceIDP(t *testing.T, idToken string) *httptest.Server {
+	t.Helper()
+	var polls atomic.Int32
+	idp := httptest.NewServer(nil)
+	idp.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":"%[1]s/auth","token_endpoint":"%[1]s/token","device_authorization_endpoint":"%[1]s/device/code"}`, idp.URL)
+		case "/device/code":
+			fmt.Fprintf(w, `{"device_code":"dc","user_code":"WXYZ-1234","verification_uri":"%s/device","expires_in":60,"interval":1}`, idp.URL)
+		case "/token":
+			if polls.Add(1)%2 == 1 {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprint(w, `{"error":"authorization_pending"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"access_token":"at","token_type":"bearer","expires_in":3600,"refresh_token":"rt","id_token":%q}`, idToken)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	t.Cleanup(idp.Close)
+	return idp
+}
+
+// With an API that keeps sessions, a login ends in a Forge session: the ID
+// and refresh tokens are not kept, and logging out ends it on the API too.
+func TestLoginSession(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	idToken := fakeIDToken("ana", time.Now().Add(time.Hour))
+	h.issuer = deviceIDP(t, idToken).URL
+	h.sessions = server.NewSessions(server.SessionOptions{Store: store.NewMemory()})
+	h.startAPI(server.StaticAuthenticator{idToken: {
+		Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}, Client: server.ClientCLI, IssuedAt: time.Now(),
+	}})
+	delete(h.env, "FORGE_TOKEN")
+
+	if r := h.ok("auth", "login"); !strings.Contains(r.err, "You stay logged in until 90 days without use") {
+		t.Errorf("login output: %v", r)
+	}
+	creds, err := h.store.Get(h.api.URL)
+	if err != nil || !strings.HasPrefix(creds.SessionToken, "fgs_") || creds.IDToken != "" || creds.RefreshToken != "" || creds.Email != "ana@example.com" {
+		t.Fatalf("stored creds: %v %+v", err, creds)
+	}
+	first := creds.SessionToken
+	h.ok("service", "register", "payments", "--team", "billing")
+	if r := h.ok("auth", "token"); strings.TrimSpace(r.out) != first {
+		t.Errorf("token: %q", r.out)
+	}
+	if r := h.ok("auth", "status"); !strings.Contains(r.out, "sessions/ses_") || !strings.Contains(r.out, "(if not used before then)") || !strings.Contains(r.out, "services.write") {
+		t.Errorf("status: %s", r.out)
+	}
+	if r := h.ok("auth", "status", "-o", "json"); !strings.Contains(r.out, `"session": "sessions/ses_`) {
+		t.Errorf("status as JSON: %s", r.out)
+	}
+
+	// Logging in again on this machine replaces its session: the old one ends.
+	h.ok("auth", "login")
+	if r := h.ok("auth", "session", "list", "-o", "name"); strings.Count(r.out, "sessions/ses_") != 1 {
+		t.Fatalf("after a second login here: %q", r.out)
+	}
+	h.env["FORGE_TOKEN"] = first
+	h.fails(4, "service", "list")
+	delete(h.env, "FORGE_TOKEN")
+
+	// A login on another machine is a second session, which can be ended
+	// from here. (Another machine: this one's stored login is not there.)
+	creds, _ = h.store.Get(h.api.URL)
+	first = creds.SessionToken
+	if err := h.store.Delete(h.api.URL); err != nil {
+		t.Fatal(err)
+	}
+	h.ok("auth", "login")
+	r := h.ok("auth", "session", "list")
+	if strings.Count(r.out, "ses_") != 2 || strings.Count(r.out, "(this one)") != 1 || !strings.Contains(r.out, "cli") {
+		t.Fatalf("session list:\n%s", r.out)
+	}
+	other := ""
+	for _, line := range strings.Split(r.out, "\n") {
+		if strings.HasPrefix(line, "ses_") && !strings.Contains(line, "(this one)") {
+			other = strings.Fields(line)[0]
+		}
+	}
+	h.fails(3, "auth", "session", "revoke", "ses_nope")
+	if r := h.ok("auth", "session", "revoke", other); !strings.Contains(r.err, "Ended sessions/"+other) {
+		t.Errorf("revoke: %v", r)
+	}
+	h.env["FORGE_TOKEN"] = first
+	h.fails(4, "service", "list") // the first login's token is worth nothing now
+	delete(h.env, "FORGE_TOKEN")
+	if r := h.ok("auth", "session", "list", "-o", "name"); strings.Count(r.out, "sessions/ses_") != 1 {
+		t.Errorf("after the revoke: %q", r.out)
+	}
+
+	// Logging out ends the session on the API, not only here.
+	creds, _ = h.store.Get(h.api.URL)
+	if r := h.ok("auth", "logout"); !strings.Contains(r.err, "Logged out of "+h.api.URL+".") {
+		t.Errorf("logout: %v", r)
+	}
+	h.fails(4, "service", "list")
+	h.env["FORGE_TOKEN"] = creds.SessionToken
 	h.fails(4, "service", "list")
 }
 

@@ -370,6 +370,13 @@ func ttl(d *durationpb.Duration) string {
 // auditActions maps every write procedure to its action. The allowlisted
 // details are identifiers and settings only, never free text from the caller.
 var auditActions = map[string]auditAction{
+	// A session's label is free text from the caller: it is not recorded.
+	forgev1connect.AuthServiceCreateSessionProcedure: {"auth.session.create", func(any) (string, string, map[string]string) {
+		return "", "", nil
+	}},
+	forgev1connect.AuthServiceDeleteSessionProcedure: {"auth.session.delete", func(m any) (string, string, map[string]string) {
+		return "", m.(*forgev1.DeleteSessionRequest).GetName(), nil
+	}},
 	forgev1connect.ServiceCatalogServiceRegisterServiceProcedure: {"service.register", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.RegisterServiceRequest)
 		s := serviceName(r.GetServiceId())
@@ -447,6 +454,7 @@ var auditReads = []string{
 	forgev1connect.ServiceCatalogServiceGetServiceProcedure,
 	forgev1connect.AuthServiceGetServerInfoProcedure,
 	forgev1connect.AuthServiceGetStatusProcedure,
+	forgev1connect.AuthServiceListSessionsProcedure,
 	forgev1connect.TemplateServiceListTemplatesProcedure,
 	forgev1connect.TemplateServiceGetTemplateProcedure,
 	forgev1connect.TeamServiceListTeamsProcedure,

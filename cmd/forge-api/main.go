@@ -134,6 +134,9 @@ func run() error {
 			return err
 		}
 	}
+	if oidc, ok := authn.(*server.OIDCAuthenticator); ok {
+		oidc.SetWebClient(*webClientID)
+	}
 
 	var groups []string
 	for _, g := range strings.Split(*writers, ",") {
@@ -206,6 +209,22 @@ func run() error {
 	}
 	// Deleting a service takes down its previews and deployments first.
 	catalog.EnableTeardown(deps, envs, ops)
+	// A login becomes a session of Forge's own, which lasts without the
+	// identity provider; forge-api keeps its person's teams current itself.
+	// Only with the GitHub App: without it nobody could tell that a
+	// session's person has left, and the CLI keeps the tokens of its login.
+	var sessions *server.Sessions
+	if app != nil {
+		for _, g := range groups {
+			if org, slug, ok := strings.Cut(g, ":"); !ok || slug == "" || !strings.EqualFold(org, *githubOrg) {
+				log.Warn("a writer group is not a team of the GitHub organization: a session keeps it as its login gave it", "group", g, "org", *githubOrg)
+			}
+		}
+		sessions = server.NewSessions(server.SessionOptions{Store: st, Members: members(app), Org: *githubOrg, Teams: groups, Log: log})
+		go sessions.RunSweeper(ctx, time.Hour)
+	} else {
+		log.Info("sessions are off: they need the GitHub App to keep memberships current")
+	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,
@@ -215,6 +234,7 @@ func run() error {
 		CLIDir:           *cliDir,
 		Templates:        templates,
 		Teams:            teamSource(app),
+		Sessions:         sessions,
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,
 		MinClientVersion: *minClient,

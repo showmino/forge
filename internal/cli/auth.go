@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -19,10 +22,42 @@ func newAuthCmd(f *Factory) *cobra.Command {
 	cmd.Long = `Log in with your identity provider using the OIDC device flow. It works over
 SSH and in containers because it needs no local browser callback.
 
+A login becomes a Forge session: you stay logged in until the session has
+not been used for 90 days, you log out, or you leave the organization.
+'forge auth session list' shows your sessions, on this machine and others.
+
 Credentials are stored in the OS keychain (a 0600 file on headless Linux),
 keyed by API URL. In CI, set FORGE_TOKEN instead of logging in.`
-	cmd.AddCommand(newAuthLoginCmd(f), newAuthLogoutCmd(f), newAuthStatusCmd(f), newAuthTokenCmd(f))
+	cmd.AddCommand(newAuthLoginCmd(f), newAuthLogoutCmd(f), newAuthStatusCmd(f), newAuthTokenCmd(f), newAuthSessionCmd(f))
 	return cmd
+}
+
+// bearer returns req with token as its bearer token, for the calls made
+// with a token that is not the stored one.
+func bearer[T any](token string, msg *T) *connect.Request[T] {
+	req := connect.NewRequest(msg)
+	req.Header().Set("Authorization", "Bearer "+token)
+	return req
+}
+
+// startSession turns the login in creds into a Forge session, which lasts
+// without the identity provider. An API that keeps no sessions leaves creds
+// as they are; so does one that refuses, with the reason in a warning.
+func (f *Factory) startSession(ctx context.Context, api interface {
+	CreateSession(context.Context, *connect.Request[forgev1.CreateSessionRequest]) (*connect.Response[forgev1.CreateSessionResponse], error)
+}, creds *auth.Credentials) {
+	host, _ := os.Hostname()
+	resp, err := api.CreateSession(ctx, bearer(creds.IDToken, &forgev1.CreateSessionRequest{Label: host}))
+	switch {
+	case connect.CodeOf(err) == connect.CodeUnimplemented:
+		return
+	case err != nil:
+		f.infof("warning: no long-lived session (%v); this login lasts as long as the identity provider's token, about an hour.", exitcode.From(err))
+		return
+	}
+	creds.SessionToken = resp.Msg.GetToken()
+	creds.IDToken, creds.RefreshToken = "", ""
+	creds.Expiry = resp.Msg.GetSession().GetExpireTime().AsTime()
 }
 
 func newAuthLoginCmd(f *Factory) *cobra.Command {
@@ -64,6 +99,11 @@ browser.`,
 				Scopes:     info.Msg.GetOidc().GetScopes(),
 				HTTPClient: f.HTTPClient,
 			}
+			if info.Msg.GetSessions() {
+				// The login is traded for a session at once: a refresh token
+				// would only be a second, unused way in.
+				cfg.Scopes = slices.DeleteFunc(slices.Clone(cfg.Scopes), func(s string) bool { return s == "offline_access" })
+			}
 			if issuer != "" {
 				cfg.Issuer = issuer
 			}
@@ -89,12 +129,22 @@ browser.`,
 				}
 				return exitcode.New(exitcode.Unauthenticated, "%v", err)
 			}
+			f.startSession(ctx, c.Auth, creds)
+			// A new login replaces the one this machine had: end that
+			// session rather than leave it to its 90 days.
+			if old, err := f.CredentialStore().Get(r.CredentialKey()); err == nil && old.SessionToken != "" && creds.SessionToken != "" {
+				_, _ = c.Auth.DeleteSession(ctx, bearer(old.SessionToken, &forgev1.DeleteSessionRequest{Name: "sessions/current"}))
+			}
 			if err := f.CredentialStore().Set(r.CredentialKey(), creds); err != nil {
 				return fmt.Errorf("save credentials to %s: %w", f.CredentialStore().Name(), err)
 			}
 			who := creds.Email
 			if who == "" {
 				who = creds.Subject
+			}
+			if creds.SessionToken != "" {
+				f.infof("Logged in to %s as %s. You stay logged in until 90 days without use, or 'forge auth logout'.", c.BaseURL, who)
+				return nil
 			}
 			f.infof("Logged in to %s as %s.", c.BaseURL, who)
 			return nil
@@ -110,17 +160,34 @@ browser.`,
 func newAuthLogoutCmd(f *Factory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
-		Short: "Remove stored credentials for the current context",
+		Short: "End the session and remove stored credentials for the current context",
 		Example: `  forge auth logout
   forge auth logout --context prod`,
 		Args: noArgs,
-		RunE: func(*cobra.Command, []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			url, err := f.APIURL()
 			if err != nil {
 				return err
 			}
+			// End the session on the API too, so the token is worth nothing
+			// to anyone who copied it. The local logout does not wait on it.
+			ended := true
+			if creds, err := f.CredentialStore().Get(url); err == nil && creds.SessionToken != "" {
+				ctx, cancel := f.withTimeout(cmd.Context())
+				defer cancel()
+				ended = false
+				if c, err := f.Client(ctx, false); err == nil {
+					_, err = c.Auth.DeleteSession(ctx, bearer(creds.SessionToken, &forgev1.DeleteSessionRequest{Name: "sessions/current"}))
+					// An API that no longer knows the session has nothing to end.
+					ended = err == nil || connect.CodeOf(err) == connect.CodeUnauthenticated
+				}
+			}
 			if err := f.CredentialStore().Delete(url); err != nil {
 				return err
+			}
+			if !ended {
+				f.infof("Logged out of %s on this machine. The API could not be reached to end the session; it ends on its own after 90 days without use.", url)
+				return nil
 			}
 			f.infof("Logged out of %s.", url)
 			return nil
@@ -136,6 +203,9 @@ type authStatus struct {
 	Permissions []string  `json:"permissions"`
 	Credentials string    `json:"credentials"`
 	Expiry      time.Time `json:"expiry,omitzero"`
+	// Session is the Forge session in use, "sessions/<id>"; empty for a
+	// login the identity provider keeps.
+	Session string `json:"session,omitempty"`
 }
 
 func newAuthStatusCmd(f *Factory) *cobra.Command {
@@ -173,6 +243,20 @@ func newAuthStatusCmd(f *Factory) *cobra.Command {
 				st.Credentials = "FORGE_TOKEN"
 			} else if creds, err := f.CredentialStore().Get(r.CredentialKey()); err == nil {
 				st.Expiry = creds.Expiry
+			}
+			rows := [][]string{
+				{"api", st.API},
+				{"subject", st.Subject},
+				{"email", st.Email},
+				{"groups", strings.Join(st.Groups, ", ")},
+				{"permissions", strings.Join(st.Permissions, ", ")},
+				{"credentials", st.Credentials},
+			}
+			if ses := resp.Msg.GetSession(); ses != nil {
+				// The API knows when the session ends; the stored copy is from the login.
+				st.Session, st.Expiry = ses.GetName(), ses.GetExpireTime().AsTime()
+				rows = append(rows, []string{"session", st.Session}, []string{"session ends", st.Expiry.Local().Format(time.RFC3339) + sessionEnds(ses)})
+				return output.Print(f.IO.Out, format, output.View{Headers: []string{"field", "value"}, Rows: rows, Names: []string{st.Subject}, Data: st})
 			}
 			expires := "-"
 			if !st.Expiry.IsZero() {
@@ -220,6 +304,88 @@ func newAuthTokenCmd(f *Factory) *cobra.Command {
 			return err
 		},
 	}
+}
+
+// sessionEnds says what a session's end time means for its kind.
+func sessionEnds(s *forgev1.Session) string {
+	if s.GetClient() == forgev1.Session_CLIENT_CLI {
+		return " (if not used before then)"
+	}
+	return ""
+}
+
+func newAuthSessionCmd(f *Factory) *cobra.Command {
+	cmd := group("session", "List and end your Forge sessions", "sessions")
+	cmd.Long = `A session is one login: a machine where you ran 'forge auth login', or a
+browser signed in to the dashboard. End one you no longer trust or use.`
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List your sessions, newest first",
+		Example: `  forge auth session list
+  forge auth session list -o json`,
+		Args: noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Auth.ListSessions(ctx, connect.NewRequest(&forgev1.ListSessionsRequest{}))
+			if err != nil {
+				return err
+			}
+			ss := resp.Msg.GetSessions()
+			if len(ss) == 0 && format == output.Table {
+				f.infof("No sessions.")
+				return nil
+			}
+			v := output.View{Headers: []string{"session", "client", "where", "created", "last used", "ends in"}, Data: resp.Msg}
+			if len(ss) == 0 {
+				v.Data = map[string]any{"sessions": []any{}}
+			}
+			for _, s := range ss {
+				id := strings.TrimPrefix(s.GetName(), "sessions/")
+				if s.GetCurrent() {
+					id += " (this one)"
+				}
+				v.Rows = append(v.Rows, []string{
+					id, lowerEnum(s.GetClient(), "CLIENT_"), s.GetLabel(),
+					age(f.Now().Sub(s.GetCreateTime().AsTime())) + " ago", age(f.Now().Sub(s.GetLastUseTime().AsTime())) + " ago",
+					age(s.GetExpireTime().AsTime().Sub(f.Now())),
+				})
+				v.Names = append(v.Names, s.GetName())
+			}
+			return output.Print(f.IO.Out, format, v)
+		},
+	}
+	revoke := &cobra.Command{
+		Use:     "revoke <session>",
+		Short:   "End one of your sessions at once",
+		Long:    "End one of your sessions at once: its token stops working. To end the session of this machine, use 'forge auth logout'.",
+		Example: `  forge auth session revoke ses_4f2a9c1d0b3e5a67`,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			name := "sessions/" + strings.TrimPrefix(args[0], "sessions/")
+			if _, err := c.Auth.DeleteSession(ctx, connect.NewRequest(&forgev1.DeleteSessionRequest{Name: name})); err != nil {
+				return err
+			}
+			f.infof("Ended %s.", name)
+			return nil
+		},
+	}
+	cmd.AddCommand(list, revoke)
+	return cmd
 }
 
 func nonNil(s []string) []string {
