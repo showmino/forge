@@ -23,7 +23,9 @@ import (
 type OIDC struct {
 	Issuer   string
 	ClientID string
-	Scopes   []string
+	// WebClientID is the web dashboard's client; empty when it may not log in.
+	WebClientID string
+	Scopes      []string
 }
 
 // Options configure the API.
@@ -151,14 +153,25 @@ func versionHeaders(v, minClient string, next http.Handler) http.Handler {
 
 type authService struct{ o Options }
 
+// webScopes is what the web dashboard asks for: the CLI's scopes without
+// offline_access, so a browser is never handed a refresh token.
+func (a *authService) webScopes() []string {
+	if a.o.OIDC.WebClientID == "" {
+		return nil
+	}
+	return slices.DeleteFunc(slices.Clone(a.o.OIDC.Scopes), func(s string) bool { return s == "offline_access" })
+}
+
 func (a *authService) GetServerInfo(context.Context, *connect.Request[forgev1.GetServerInfoRequest]) (*connect.Response[forgev1.GetServerInfoResponse], error) {
 	return connect.NewResponse(&forgev1.GetServerInfoResponse{
 		ServerVersion:    a.o.Version,
 		MinClientVersion: a.o.MinClientVersion,
 		Oidc: &forgev1.OIDCConfig{
-			Issuer:   a.o.OIDC.Issuer,
-			ClientId: a.o.OIDC.ClientID,
-			Scopes:   slices.Clone(a.o.OIDC.Scopes),
+			Issuer:      a.o.OIDC.Issuer,
+			ClientId:    a.o.OIDC.ClientID,
+			WebClientId: a.o.OIDC.WebClientID,
+			WebScopes:   a.webScopes(),
+			Scopes:      slices.Clone(a.o.OIDC.Scopes),
 		},
 	}), nil
 }

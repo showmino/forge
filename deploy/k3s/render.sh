@@ -32,6 +32,12 @@
 # forge.yaml.tmpl with a trailing "previews" marker exist only then:
 #   FORGE_PREVIEW_IP=10.150.1.222 FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 #
+# The web dashboard (Phase 6) needs its addresses, comma-separated, each a
+# scheme and a host; lines with a trailing "web" marker exist only then:
+#   FORGE_WEB_ORIGINS=http://forge-web.staging.<domain>,http://forge-web.production.<domain> ... | kubectl apply -f -
+# It adds Dex's public client forge-web and lets those pages call forge-api
+# from a browser. Dex reads its config at start: restart it after a change.
+#
 # Deploys (forge deploy) need previews, plus a commit on origin/main that Argo
 # CD takes the chart from (an unpushed commit makes every Application fail);
 # lines with a trailing "deploys" marker exist only then:
@@ -174,6 +180,39 @@ else
   resources_marks='/#resources$/d'
   runner_image= # unvalidated without resources; keep it out of the sed
 fi
+# The web dashboard: its addresses become Dex's forge-web client (redirect
+# URI <origin>/auth/callback), Dex's allowed origins and forge-api's CORS list.
+web_origins=${FORGE_WEB_ORIGINS:-}
+web_list=
+web_redirects=
+if [ -n "$web_origins" ]; then
+  # Lower case only: a browser sends its origin in lower case, and both Dex
+  # and forge-api compare it as text.
+  case $web_origins in
+    *[!a-z0-9.:/,-]*) echo "invalid FORGE_WEB_ORIGINS: $web_origins (lower case; letters, digits, dots and hyphens)" >&2; exit 2 ;;
+  esac
+  old_ifs=$IFS
+  IFS=,
+  for origin in $web_origins; do
+    case $origin in
+      http://?*|https://?*) ;;
+      *) echo "invalid FORGE_WEB_ORIGINS: \"$origin\" is not http://host or https://host" >&2; exit 2 ;;
+    esac
+    case ${origin#*://} in
+      */*) echo "invalid FORGE_WEB_ORIGINS: \"$origin\" must not have a path or a trailing slash" >&2; exit 2 ;;
+      *:*:*|*:|:*|*:*[!0-9]*) echo "invalid FORGE_WEB_ORIGINS: \"$origin\" has a bad port" >&2; exit 2 ;;
+    esac
+    case $origin in
+      http://*:80|https://*:443) echo "invalid FORGE_WEB_ORIGINS: \"$origin\": leave out the scheme's own port, as a browser does" >&2; exit 2 ;;
+    esac
+    web_list="$web_list${web_list:+, }\"$origin\""
+    web_redirects="$web_redirects${web_redirects:+, }\"$origin/auth/callback\""
+  done
+  IFS=$old_ifs
+  web_marks='s/ *#web$//'
+else
+  web_marks='/#web$/d'
+fi
 if [ -n "$app_id" ]; then
   app='s/ *#app$//' # keep the App lines, drop their marker
 else
@@ -206,7 +245,7 @@ fi
     echo "---"
     cat "$dir/resources.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+} | sed -e "$app" -e "$web_marks" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g"

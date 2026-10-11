@@ -55,6 +55,8 @@ func run() error {
 		writers      = flag.String("writer-groups", env("FORGE_WRITER_GROUPS", ""), "comma-separated groups allowed to change the catalog (empty = every authenticated user)")
 		dbURL        = flag.String("database-url", "", "PostgreSQL URL for the service catalog, or FORGE_DATABASE_URL (empty = in memory, lost on restart)")
 		minClient    = flag.String("min-client-version", env("FORGE_MIN_CLIENT_VERSION", "0.1.0"), "oldest CLI version accepted")
+		webClientID  = flag.String("oidc-web-client-id", env("FORGE_OIDC_WEB_CLIENT_ID", ""), "OIDC client ID of the web dashboard; tokens issued to it are accepted too (empty: only the CLI's)")
+		corsOrigins  = flag.String("cors-origins", env("FORGE_CORS_ORIGINS", ""), "comma-separated origins of the web dashboard that may call the API from a browser, for example https://forge.example.com (empty: none)")
 		insecureDev  = flag.Bool("insecure-dev-token", false, "DEVELOPMENT ONLY: accept the token 'dev' as user dev@example.com instead of verifying OIDC tokens")
 		logJSON      = flag.Bool("log-json", env("FORGE_LOG_FORMAT", "") == "json", "log as JSON")
 		printVersion = flag.Bool("version", false, "print the version and exit")
@@ -93,6 +95,13 @@ func run() error {
 		// Not the flag's default: --help prints defaults, and the URL holds a password.
 		*dbURL = os.Getenv("FORGE_DATABASE_URL")
 	}
+	origins, err := server.ParseOrigins(*corsOrigins)
+	if err != nil {
+		return fmt.Errorf("--cors-origins: %w", err)
+	}
+	if *clientID == "" && !*insecureDev {
+		return errors.New("--oidc-client-id (or FORGE_OIDC_CLIENT_ID) must not be empty")
+	}
 
 	var handler slog.Handler = slog.NewTextHandler(os.Stderr, nil)
 	if *logJSON {
@@ -114,7 +123,7 @@ func run() error {
 		// The issuer may start after the API (docker compose, k3s); retry discovery briefly.
 		var err error
 		for attempt := 1; ; attempt++ {
-			authn, err = server.NewOIDCAuthenticator(ctx, *issuer, *clientID)
+			authn, err = server.NewOIDCAuthenticator(ctx, *issuer, *clientID, *webClientID)
 			if err == nil || attempt == 10 || ctx.Err() != nil {
 				break
 			}
@@ -206,7 +215,7 @@ func run() error {
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,
 		MinClientVersion: *minClient,
-		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID},
+		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID, WebClientID: *webClientID},
 		Authenticator:    authn,
 		Authorizer:       server.Authorizer{WriterGroups: groups},
 		Audit:            st,
@@ -215,7 +224,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	srv := server.HTTPServer(*addr, h)
+	if len(origins) > 0 {
+		log.Info("the web dashboard may call the API from a browser", "origins", origins, "client", *webClientID)
+	}
+	if (len(origins) > 0) != (*webClientID != "") {
+		log.Warn("the web dashboard needs both --cors-origins and --oidc-web-client-id; only one is set, so it cannot log in")
+	}
+	srv := server.HTTPServer(*addr, server.CORS(origins, h))
 	// Open watch streams end only with their operation; cancel their request
 	// contexts when shutdown starts so Shutdown does not wait for them. The
 	// operations' own work is detached from request contexts and keeps going.

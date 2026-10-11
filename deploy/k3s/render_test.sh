@@ -147,4 +147,30 @@ check "resources need deploys"              sh -c "! FORGE_RESOURCES=1 FORGE_RUN
 check "resources need a runner image"       sh -c "! FORGE_RESOURCES=1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad runner image refused"            sh -c "! FORGE_RESOURCES=1 FORGE_RUNNER_IMAGE='x; rm' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad FORGE_RESOURCES refused"         sh -c "! FORGE_RESOURCES=yes FORGE_RUNNER_IMAGE=forge-runner:dev FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+
+# The web dashboard: off unless FORGE_WEB_ORIGINS is set (the goldens above are renders without it).
+web=$(FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io FORGE_GITHUB_APP_ID=5239131 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+web_has() { printf '%s\n' "$web" | grep -qF -- "$1"; }
+web_settings() {
+  web_has '      - id: forge-web' && web_has '        public: true' &&
+    web_has 'redirectURIs: ["http://forge-web.staging.10.150.1.222.nip.io/auth/callback", "http://forge-web.production.10.150.1.222.nip.io/auth/callback"]' &&
+    web_has 'allowedOrigins: ["http://forge-web.staging.10.150.1.222.nip.io", "http://forge-web.production.10.150.1.222.nip.io"]' &&
+    web_has '{name: FORGE_OIDC_WEB_CLIENT_ID, value: forge-web}' &&
+    web_has '{name: FORGE_CORS_ORIGINS, value: "http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io"}'
+}
+no_web() { ! printf '%s\n' "$with" | grep -q -e forge-web -e allowedOrigins -e FORGE_CORS -e '#web'; }
+web_only_adds() { [ "$(printf '%s\n' "$web" | grep -v -e 'id: forge-web' -e 'redirectURIs: \["http' -e allowedOrigins -e 'name: Forge dashboard' -e FORGE_OIDC_WEB_CLIENT_ID -e FORGE_CORS_ORIGINS -e '^        public: true$' | cksum)" = "$(printf '%s\n' "$with" | grep -v '^        public: true$' | cksum)" ]; }
+bad_web() { ! FORGE_WEB_ORIGINS=$1 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1; }
+check "web: Dex client, allowed origins, forge-api settings" web_settings
+check "web: nothing rendered without FORGE_WEB_ORIGINS" no_web
+check "web: adds lines and changes no others"   web_only_adds
+check "web: an origin with a path refused"      bad_web http://forge-web.example.com/app
+check "web: a trailing slash refused"           bad_web http://forge-web.example.com/
+check "web: a wildcard refused"                 bad_web 'http://*.example.com'
+check "web: an origin without a scheme refused" bad_web forge-web.example.com
+check "web: an empty item refused"              bad_web http://a.example.com,,http://b.example.com
+check "web: upper case refused"                 bad_web http://Forge-Web.example.com
+check "web: a port that is not a number refused" bad_web http://forge-web.example.com:xx
+check "web: the scheme's own port refused"      bad_web http://forge-web.example.com:80
+check "web: a port is fine"                     sh -c "FORGE_WEB_ORIGINS=http://localhost:3000 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 | grep -qF 'allowedOrigins: [\"http://localhost:3000\"]'"
 exit $fail

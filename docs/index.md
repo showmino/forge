@@ -240,7 +240,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy (`docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`): the API, policy rules, CLI and the runner that makes real databases are built, and proven end to end on a throwaway cluster; the rollout and exit gate on k3s are next. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy (`docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`): the API, policy rules, CLI and the runner that makes real databases are built, and proven end to end on a throwaway cluster; the rollout to k3s is deferred (resources stay switched off there) until a service first needs a database. Phase 6 has started (`docs/specs/2026-10-11-phase-6-web-dashboard-design.md`). Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |
@@ -258,7 +258,7 @@ Each phase grows the API and the CLI together, so the CLI never ships a command 
 - **API:** it calls the same ConnectRPC services from the browser (Connect's web client). It needs no endpoints of its own, so permissions, policy and audit stay in the API, and the CLI and dashboard behave identically.
 - **Login:** the authorization code flow with PKCE against Dex, as a public client (`forge-web`). The ID token is the bearer, as for the CLI; readers and writers get the permissions they have in the CLI.
 - **Live updates:** long operations stream progress the way `forge op watch` does.
-- **Before Phase 6 starts:** the API needs CORS for the dashboard's origin, and a browser-friendly way to watch operations (server streaming over Connect).
+- **In the API (done):** CORS for the dashboard's exact origins (`--cors-origins`), tokens issued to the dashboard's client accepted next to the CLI's (`--oidc-web-client-id`), and `GetServerInfo` names that client. `WatchOperation` is already a Connect server stream, which a browser reads as it is.
 
 **Phase 1 starting point:**
 
