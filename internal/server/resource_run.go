@@ -175,6 +175,10 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 			if !st.Done {
 				continue
 			}
+			if st.Stuck {
+				stop() // it never started: nothing else will take it away
+				return r.failRun(ctx, spec, opCodeLaunchFailed, "the runner did not start: "+runText(st.Log))
+			}
 			if st.Failed {
 				return r.failRun(ctx, spec, opCodeRunnerFailed, "the runner failed: "+runText(st.Log))
 			}
@@ -557,6 +561,13 @@ func (r *Resources) authRun(ctx context.Context, token string) (*store.PlanRecor
 }
 
 // Claim implements run.API.
+// CheckRunToken reports whether token is the token of a run that is still
+// going, and nothing else.
+func (r *Resources) CheckRunToken(ctx context.Context, token string) error {
+	_, _, err := r.authRun(ctx, token)
+	return err
+}
+
 func (r *Resources) Claim(ctx context.Context, token string) (*run.Work, error) {
 	rec, mode, err := r.authRun(ctx, token)
 	if err != nil {

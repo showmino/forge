@@ -382,6 +382,7 @@ func TestPlanFailures(t *testing.T) {
 		"the runner crashes":         {func(r *envtest.Runner) { r.Crash = "OOMKilled" }, nil, "runner_failed", "the runner failed: OOMKilled"},
 		"the runner says nothing":    {func(r *envtest.Runner) { r.Silent = true }, nil, "runner_failed", "the runner ended without a result"},
 		"the runner cannot start":    {func(r *envtest.Runner) { r.StartErr = context.DeadlineExceeded }, nil, "launch_failed", "the runner could not be started"},
+		"the runner never starts":    {func(r *envtest.Runner) { r.Stuck = "the runner's pod cannot start: ImagePullBackOff" }, nil, "launch_failed", "the runner did not start: the runner's pod cannot start: ImagePullBackOff"},
 		"the run takes too long":     {func(r *envtest.Runner) { r.Hang = true }, func(o *ResourceOptions) { o.RunTimeout = 40 * time.Millisecond }, "run_timeout", "the run did not finish within 40ms"},
 		"control characters removed": {func(r *envtest.Runner) { r.FailPlan = "bad\x1b[31m thing\x00" }, nil, "run_failed", "bad�[31m thing"},
 	} {
@@ -400,8 +401,12 @@ func TestPlanFailures(t *testing.T) {
 			if len(outs) != 1 || outs[0].GetResult().GetCode() != "failed" || !strings.HasPrefix(outs[0].GetResult().GetMessage(), tc.code+": ") {
 				t.Errorf("outcomes: %v", outs)
 			}
+			// A runner that never started is taken away, not left to its timeout.
+			if want := map[bool]int{true: 1}[f.runner.Stuck != ""]; f.runner.StuckStopped() != want {
+				t.Errorf("stuck runs stopped: %d, want %d", f.runner.StuckStopped(), want)
+			}
 			// The target is free again.
-			f.runner.FailPlan, f.runner.Crash, f.runner.Silent, f.runner.StartErr, f.runner.Hang = "", "", false, nil, false
+			f.runner.FailPlan, f.runner.Crash, f.runner.Silent, f.runner.StartErr, f.runner.Hang, f.runner.Stuck = "", "", false, nil, false, ""
 			f.startPlan(t, "writer", "services/payments", "staging", database("5Gi", 0), false)
 		})
 	}

@@ -206,6 +206,62 @@ func TestJobLauncherStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A pod that cannot start: the run waits a while, then fails with why.
+	made := time.Now()
+	job, _ := kube.BatchV1().Jobs("forge-runner").Get(ctx, name, metav1.GetOptions{})
+	job.CreationTimestamp = metav1.NewTime(made)
+	if _, err := kube.BatchV1().Jobs("forge-runner").Update(ctx, job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	l.Now = func() time.Time { return made.Add(time.Minute) }
+	if st := status(); st.Done {
+		t.Errorf("a Job without a pod after a minute: %+v", st)
+	}
+	l.Now = func() time.Time { return made.Add(3 * time.Minute) }
+	if st := status(); !st.Failed || !st.Stuck || !strings.Contains(st.Log, "no pod was made for the runner's Job "+name+" within 2m0s") {
+		t.Errorf("a Job without a pod after three minutes: %+v", st)
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name + "-stuck", Labels: map[string]string{"job-name": name}}, Status: corev1.PodStatus{Phase: corev1.PodPending}}
+	if _, err := kube.CoreV1().Pods("forge-runner").Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	setPod := func(st corev1.PodStatus) {
+		t.Helper()
+		pod.Status = st
+		if _, err := kube.CoreV1().Pods("forge-runner").UpdateStatus(ctx, pod, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if st := status(); st.Done {
+		t.Errorf("a pod that is still starting: %+v", st)
+	}
+	setPod(corev1.PodStatus{Phase: corev1.PodPending, ContainerStatuses: []corev1.ContainerStatus{{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}}}})
+	if st := status(); st.Done {
+		t.Errorf("a container that is being created: %+v", st)
+	}
+	setPod(corev1.PodStatus{Phase: corev1.PodPending, ContainerStatuses: []corev1.ContainerStatus{{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "Back-off pulling image"}}}}})
+	if st := status(); !st.Stuck || st.Log != "the runner's pod cannot start: ImagePullBackOff: Back-off pulling image" {
+		t.Errorf("an image that cannot be pulled: %+v", st)
+	}
+	setPod(corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable, Message: "0/3 nodes are available"}}})
+	if st := status(); !st.Stuck || st.Log != "the runner's pod cannot be scheduled: 0/3 nodes are available" {
+		t.Errorf("a pod that cannot be scheduled: %+v", st)
+	}
+	// Once it runs, the Job's own conditions decide.
+	setPod(corev1.PodStatus{Phase: corev1.PodRunning})
+	if st := status(); st.Done {
+		t.Errorf("a running pod: %+v", st)
+	}
+	if err := kube.CoreV1().Pods("forge-runner").Delete(ctx, pod.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	l.Now = nil
+	job, _ = kube.BatchV1().Jobs("forge-runner").Get(ctx, name, metav1.GetOptions{})
+	job.CreationTimestamp = metav1.Time{}
+	if _, err := kube.BatchV1().Jobs("forge-runner").Update(ctx, job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
 	// A condition that is not True does not count.
 	set(batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionFalse})
 	if st := status(); st.Done {

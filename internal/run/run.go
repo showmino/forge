@@ -40,6 +40,9 @@ type Status struct {
 	Failed bool
 	// Log is the end of its output, when it failed.
 	Log string
+	// Stuck is set with Failed when the runner never started and never
+	// will: it is still there, and must be stopped.
+	Stuck bool
 }
 
 // Launcher starts and watches runners (Kubernetes Jobs in production).

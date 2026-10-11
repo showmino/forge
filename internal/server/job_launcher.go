@@ -46,7 +46,10 @@ type JobLauncher struct {
 	StopTimeout time.Duration
 	// Poll is how often Stop looks (default 1s).
 	Poll time.Duration
-	Now  func() time.Time
+	// StartGrace is how long a runner's pod may take to start before a pod
+	// that cannot start counts as a failed run (default 2m).
+	StartGrace time.Duration
+	Now        func() time.Time
 }
 
 // stopGrace is how long a runner's pod gets after SIGTERM: the runner gives
@@ -229,7 +232,57 @@ func (l *JobLauncher) Status(ctx context.Context, plan, mode string) (run.Status
 			return run.Status{Done: true, Failed: true, Log: log}, nil
 		}
 	}
+	if why := l.stuck(ctx, job); why != "" {
+		return run.Status{Done: true, Failed: true, Stuck: true, Log: why}, nil
+	}
 	return run.Status{}, nil
+}
+
+// cannotStart are the reasons a container waits for that do not pass on
+// their own: the image, or something the pod mounts, is not there.
+var cannotStart = map[string]bool{
+	"ImagePullBackOff": true, "ErrImagePull": true, "InvalidImageName": true, "ErrImageNeverPull": true,
+	"CreateContainerConfigError": true, "CreateContainerError": true,
+}
+
+// stuck says why job's runner will not start, or "" while it still may. A
+// Job is stuck when, StartGrace after it was made, it has no pod (a quota
+// or an admission rule refused it), its pod cannot be scheduled, or the
+// pod's container cannot be started. Without this a run would wait for its
+// whole timeout on a pod that never runs.
+func (l *JobLauncher) stuck(ctx context.Context, job *batchv1.Job) string {
+	grace := l.StartGrace
+	if grace <= 0 {
+		grace = 2 * time.Minute
+	}
+	made := job.CreationTimestamp.Time
+	if made.IsZero() || l.now().Sub(made) < grace {
+		return ""
+	}
+	pods, err := l.Kube.CoreV1().Pods(l.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "job-name=" + job.Name})
+	if err != nil {
+		return ""
+	}
+	if len(pods.Items) == 0 {
+		return fmt.Sprintf("no pod was made for the runner's Job %s within %s (a quota or an admission rule may refuse it; see the Job's events)", job.Name, grace)
+	}
+	why := ""
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != corev1.PodPending {
+			return "" // one started, or ended: the Job's own conditions tell the rest
+		}
+		for _, c := range pod.Status.Conditions {
+			if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
+				why = "the runner's pod cannot be scheduled: " + c.Message
+			}
+		}
+		for _, cs := range append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...) {
+			if w := cs.State.Waiting; w != nil && cannotStart[w.Reason] {
+				why = strings.TrimSpace("the runner's pod cannot start: " + w.Reason + ": " + w.Message)
+			}
+		}
+	}
+	return why
 }
 
 // logTail is the end of the runner pod's output, or "" when it cannot be read.

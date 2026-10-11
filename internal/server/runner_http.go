@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -49,6 +50,30 @@ func RunnerHandler(api run.API, log *slog.Logger) http.Handler {
 type runnerHTTP struct {
 	api run.API
 	log *slog.Logger
+}
+
+// tokenChecker is an API that can tell a good run token from a bad one
+// without doing anything else (*Resources).
+type tokenChecker interface {
+	CheckRunToken(ctx context.Context, token string) error
+}
+
+// admit checks the request's run token before its body is read, so that
+// only a running run can make forge-api read megabytes. It answers the
+// request and returns false when the token is not good.
+func (h *runnerHTTP) admit(w http.ResponseWriter, r *http.Request) bool {
+	token := runToken(r)
+	var err error
+	if c, ok := h.api.(tokenChecker); ok {
+		err = c.CheckRunToken(r.Context(), token)
+	} else if token == "" {
+		err = runTokenError()
+	}
+	if err != nil {
+		h.fail(w, r, err)
+		return false
+	}
+	return true
 }
 
 // runToken reads the run token: "Bearer <token>", or basic auth's password.
@@ -142,6 +167,9 @@ func (h *runnerHTTP) event(w http.ResponseWriter, r *http.Request) {
 		Step    string `json:"step"`
 		Message string `json:"message"`
 	}
+	if !h.admit(w, r) {
+		return
+	}
 	if err := decode(w, r, maxRunnerSmall, &in); err != nil {
 		h.fail(w, r, err)
 		return
@@ -155,6 +183,9 @@ func (h *runnerHTTP) event(w http.ResponseWriter, r *http.Request) {
 
 func (h *runnerHTTP) complete(w http.ResponseWriter, r *http.Request) {
 	var res run.Result
+	if !h.admit(w, r) {
+		return
+	}
 	if err := decode(w, r, maxRunnerResult, &res); err != nil {
 		h.fail(w, r, err)
 		return
@@ -180,6 +211,9 @@ func lockID(info []byte) (string, error) {
 // state is the OpenTofu "http" backend.
 func (h *runnerHTTP) state(w http.ResponseWriter, r *http.Request) {
 	ctx, token := r.Context(), runToken(r)
+	if (r.Method == http.MethodPost || r.Method == "LOCK" || r.Method == "UNLOCK") && !h.admit(w, r) {
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		data, err := h.api.ReadState(ctx, token)

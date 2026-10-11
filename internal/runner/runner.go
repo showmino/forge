@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +55,10 @@ type Options struct {
 	// Grace is how long OpenTofu gets to stop after SIGTERM before it is
 	// killed (default 45s).
 	Grace time.Duration
+	// ReportFor is how long the runner keeps trying to hand its result to
+	// forge-api when forge-api is away (default 3m), and ReportWait the
+	// first pause between two tries (default 2s, doubling up to 20s).
+	ReportFor, ReportWait time.Duration
 	// Env is the environment OpenTofu starts from (default os.Environ()).
 	Env []string
 	Log *slog.Logger
@@ -75,6 +80,12 @@ func Run(ctx context.Context, o Options) error {
 	if o.Grace <= 0 {
 		o.Grace = 45 * time.Second
 	}
+	if o.ReportFor <= 0 {
+		o.ReportFor = 3 * time.Minute
+	}
+	if o.ReportWait <= 0 {
+		o.ReportWait = 2 * time.Second
+	}
 	if o.Env == nil {
 		o.Env = os.Environ()
 	}
@@ -91,13 +102,32 @@ func Run(ctx context.Context, o Options) error {
 		o.Log.Error("run failed", "plan", work.Plan, "mode", work.Mode, "error", res.Error)
 	}
 	// The result is reported also when the run was told to stop.
-	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), o.ReportFor)
 	defer cancel()
-	if err := o.API.Complete(rctx, o.Token, res); err != nil {
+	if err := o.report(rctx, res); err != nil {
 		return fmt.Errorf("report the run: %w", err)
 	}
 	o.Log.Info("run reported", "plan", work.Plan, "mode", work.Mode)
 	return nil
+}
+
+// report hands res to forge-api. It tries again while forge-api cannot be
+// reached or answers with a server error, so a restart of forge-api does not
+// lose the result of an apply; an answer that refuses the result ends it.
+func (o Options) report(ctx context.Context, res run.Result) error {
+	for wait := o.ReportWait; ; wait = min(2*wait, 20*time.Second) {
+		err := o.API.Complete(ctx, o.Token, res)
+		var refused *run.HTTPError
+		if err == nil || (errors.As(err, &refused) && refused.Status < http.StatusInternalServerError) {
+			return err
+		}
+		o.Log.Warn("the result could not be reported; trying again", "error", err, "in", wait)
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(wait):
+		}
+	}
 }
 
 // execute runs OpenTofu for work. Failures end up in Result.Error.
@@ -227,6 +257,9 @@ func (t *tofu) run(ctx context.Context, capture bool, args ...string) ([]byte, e
 	cmd.Dir = t.dir
 	cmd.Env = append(append([]string{}, t.o.Env...),
 		"HOME="+t.o.WorkDir, "TF_IN_AUTOMATION=1", "TF_INPUT=0",
+		// The state backend is forge-api: ride out a restart of it (about
+		// two minutes of tries) instead of losing the state of an apply.
+		"TF_HTTP_RETRY_MAX=8", "TF_HTTP_RETRY_WAIT_MIN=2", "TF_HTTP_RETRY_WAIT_MAX=20",
 		"TF_HTTP_ADDRESS="+t.o.StateURL, "TF_HTTP_LOCK_ADDRESS="+t.o.StateURL, "TF_HTTP_UNLOCK_ADDRESS="+t.o.StateURL,
 		"TF_HTTP_USERNAME="+run.StateUser, "TF_HTTP_PASSWORD="+t.o.Token)
 	if t.o.CLIConfig != "" {

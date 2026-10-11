@@ -46,8 +46,10 @@ type api struct {
 	work        run.Work
 	claimErr    error
 	completeErr error
-	events      []string
-	results     []run.Result
+	// completeErrs are what the first reports answer, one each.
+	completeErrs []error
+	events       []string
+	results      []run.Result
 }
 
 func (a *api) Claim(context.Context, string) (*run.Work, error) {
@@ -72,6 +74,11 @@ func (a *api) Complete(ctx context.Context, _ string, r run.Result) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.results = append(a.results, r)
+	if len(a.completeErrs) > 0 {
+		err := a.completeErrs[0]
+		a.completeErrs = a.completeErrs[1:]
+		return err
+	}
 	return a.completeErr
 }
 
@@ -100,7 +107,7 @@ func setup(t *testing.T, a *api, env ...string) (Options, string) {
 		API: a, Token: token, StateURL: "http://forge-api-runner:8081/runner/v1/state",
 		Tofu: bin, ModuleDir: module, WorkDir: filepath.Join(dir, "work"), CLIConfig: "/opt/forge/tofurc",
 		Env:   append([]string{"PATH=" + os.Getenv("PATH"), "FAKE_DIR=" + fake}, env...),
-		Grace: 5 * time.Second,
+		Grace: 5 * time.Second, ReportFor: 300 * time.Millisecond, ReportWait: 5 * time.Millisecond,
 	}, fake
 }
 
@@ -145,6 +152,7 @@ func TestPlanRun(t *testing.T) {
 		"TF_HTTP_ADDRESS=http://forge-api-runner:8081/runner/v1/state\n", "TF_HTTP_LOCK_ADDRESS=http://forge-api-runner:8081/runner/v1/state\n",
 		"TF_HTTP_UNLOCK_ADDRESS=http://forge-api-runner:8081/runner/v1/state\n", "TF_HTTP_USERNAME=forge-runner\n", "TF_HTTP_PASSWORD=" + token + "\n",
 		"TF_IN_AUTOMATION=1\n", "TF_INPUT=0\n", "TF_CLI_CONFIG_FILE=/opt/forge/tofurc\n",
+		"TF_HTTP_RETRY_MAX=8\n", "TF_HTTP_RETRY_WAIT_MIN=2\n", "TF_HTTP_RETRY_WAIT_MAX=20\n",
 	} {
 		if !strings.Contains(env, want) {
 			t.Errorf("OpenTofu's environment lacks %q:\n%s", want, env)
@@ -246,6 +254,19 @@ func TestRunCannotReport(t *testing.T) {
 	o, _ = setup(t, a)
 	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "report the run: forge-api is away") {
 		t.Errorf("a failed report: %v", err)
+	}
+
+	// forge-api restarts while the runner reports: it tries until it is back.
+	a = &api{work: work, completeErrs: []error{errors.New("connection refused"), &run.HTTPError{Status: 503, Message: "starting"}}}
+	o, _ = setup(t, a)
+	if err := Run(context.Background(), o); err != nil || len(a.results) != 3 {
+		t.Errorf("a report during a restart: %v after %d tries", err, len(a.results))
+	}
+	// An answer that refuses the result is final: no second try.
+	a = &api{work: work, completeErr: &run.HTTPError{Status: 401, Message: "the run token is not valid"}}
+	o, _ = setup(t, a)
+	if err := Run(context.Background(), o); err == nil || len(a.results) != 1 {
+		t.Errorf("a refused report: %v after %d tries", err, len(a.results))
 	}
 
 	// A module directory that is missing is a reported failure, not a crash.
