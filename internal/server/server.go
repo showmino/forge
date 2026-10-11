@@ -94,7 +94,7 @@ func New(o Options) (http.Handler, error) {
 	o.Operations.setAuditor(aud)
 	if o.Resources != nil {
 		o.Resources.setAuditor(aud)
-		o.Catalog.resources = o.Resources.o.Store
+		o.Catalog.GuardResources(o.Resources.o.Store)
 	}
 	opts := connect.WithInterceptors(
 		&logInterceptor{log: o.Logger},

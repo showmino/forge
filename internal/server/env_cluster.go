@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	forgev1 "github.com/showmino/forge/gen/forge/v1"
 )
 
 // Labels and annotations on an environment's namespace. The namespace is
@@ -474,6 +476,51 @@ func (c *Cluster) ServiceNamespaceFree(ctx context.Context, service, env string)
 		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("check namespace %s-%s: %w", service, env, err))
 	}
 }
+
+// EnsureServiceNamespace makes <service>-<env> when it is missing, with the
+// labels Argo CD's ApplicationSet gives it, so a database can exist before
+// the first deploy and Argo CD finds the namespace as it expects it. A
+// namespace of that name that is not Forge's is refused.
+func (c *Cluster) EnsureServiceNamespace(ctx context.Context, service, env string) error {
+	if err := c.ServiceNamespaceFree(ctx, service, env); err != nil {
+		return err
+	}
+	_, err := c.Kube.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   service + "-" + env,
+		Labels: map[string]string{labelManagedBy: "forge", labelService: service, labelDeployEnv: env},
+	}}, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		return nil
+	}
+	return err
+}
+
+var cnpgClusters = schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"}
+
+// DatabaseHealth reads what CloudNativePG reports for the database called
+// name in <service>-<env>. It gives up after five seconds, so a slow API
+// server cannot stall a list of resources.
+func (c *Cluster) DatabaseHealth(ctx context.Context, service, env, name string) (*forgev1.ResourceHealth, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	u, err := c.Dynamic.Resource(cnpgClusters).Namespace(service+"-"+env).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+	phase, _, _ := unstructured.NestedString(u.Object, "status", "phase")
+	if phase == "" {
+		phase = "unknown"
+	}
+	ready, _, _ := unstructured.NestedInt64(u.Object, "status", "readyInstances")
+	want, _, _ := unstructured.NestedInt64(u.Object, "spec", "instances")
+	return &forgev1.ResourceHealth{Phase: phase, ReadyInstances: int32(ready), Instances: int32(want)}, nil //nolint:gosec // instance counts are small
+}
+
+// The cluster is what resources check namespaces and health with.
+var (
+	_ ServiceNamespaces = (*Cluster)(nil)
+	_ DatabaseHealth    = (*Cluster)(nil)
+)
 
 // ApplicationFree reports whether Forge may use the Argo CD Application name:
 // it must not exist yet, or be one the ApplicationSet made (labelled

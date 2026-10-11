@@ -141,10 +141,13 @@ spec:
             - {name: FORGE_PREVIEW_DOMAIN, value: preview.${PREVIEW_IP}.nip.io} #previews
             - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/${PULL_SECRET}} #previews
             - {name: FORGE_DEPLOYS, value: "1"} #deploys
+            - {name: FORGE_RESOURCES, value: "1"} #resources
+            - {name: FORGE_RUNNER_IMAGE, value: "${FORGE_RUNNER_IMAGE}"} #resources
           volumeMounts: #app
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true} #app
           ports:
             - {name: http, containerPort: 8080}
+            - {name: runner, containerPort: 8081} #resources
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:

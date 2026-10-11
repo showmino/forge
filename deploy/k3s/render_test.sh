@@ -119,4 +119,32 @@ check "deploys need previews"               sh -c "! FORGE_DEPLOYS=1 FORGE_DEPLO
 check "deploys need a pinned chart revision" sh -c "! FORGE_DEPLOYS=1 FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "deploys refuse a branch as revision" sh -c "! FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=main FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad FORGE_DEPLOYS refused"           sh -c "! FORGE_DEPLOYS=yes FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+res=$(FORGE_RESOURCES=1 FORGE_RUNNER_IMAGE=ghcr.io/showmino/forge-runner:abc1234 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+# resources_section: everything resources.yaml.tmpl adds (from its first line to the end).
+resources_section() { printf '%s\n' "$res" | awk '/^# Resources:/ {on=1} on'; }
+# The namespace, the permissions, the admission policy, the Service and the
+# NetworkPolicy are pinned exactly: any change to them is a review.
+resources_exact() { resources_section | cmp -s - "$dir/testdata/resources.golden"; }
+resources_settings() {
+  printf '%s\n' "$res" | grep -qF 'FORGE_RESOURCES, value: "1"' &&
+    printf '%s\n' "$res" | grep -qF 'FORGE_RUNNER_IMAGE, value: "ghcr.io/showmino/forge-runner:abc1234"' &&
+    printf '%s\n' "$res" | grep -qF '{name: runner, containerPort: 8081}'
+}
+# Without resources nothing of them is rendered: the deploys render is what it was.
+no_resources() { ! printf '%s\n' "$dep" | grep -q -e FORGE_RESOURCES -e FORGE_RUNNER -e forge-runner -e 8081 -e NetworkPolicy; }
+runner_api_private() {
+  resources_section | awk '$0 == "kind: Service" {on=1} on && /^---/ {on=0} on' | grep -qF 'type: ClusterIP' &&
+    ! printf '%s\n' "$res" | awk '$0 == "kind: Service" {on=1} on && /^---/ {on=0} on' | grep -B8 -A8 'LoadBalancer' | grep -qF 8081
+}
+
+check "resources: forge-api settings and port" resources_settings
+check "resources: nothing without it"       no_resources
+check "resources: objects and RBAC exactly as reviewed" resources_exact
+check "resources: the runner API is cluster-internal" runner_api_private
+check "resources: no #resources markers"    sh -c "! printf '%s' \"\$1\" | grep -qF '#resources'" _ "$res"
+check "resources: valid YAML for kubectl"   sh -c "printf '%s' \"\$1\" | kubectl apply --dry-run=client -f - >/dev/null" _ "$res"
+check "resources need deploys"              sh -c "! FORGE_RESOURCES=1 FORGE_RUNNER_IMAGE=forge-runner:dev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "resources need a runner image"       sh -c "! FORGE_RESOURCES=1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "bad runner image refused"            sh -c "! FORGE_RESOURCES=1 FORGE_RUNNER_IMAGE='x; rm' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "bad FORGE_RESOURCES refused"         sh -c "! FORGE_RESOURCES=yes FORGE_RUNNER_IMAGE=forge-runner:dev FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 exit $fail

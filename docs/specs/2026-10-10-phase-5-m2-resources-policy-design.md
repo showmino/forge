@@ -177,7 +177,7 @@ A resource also carries its live health, read from the CloudNativePG cluster whe
 
 ### The runner API
 
-- It is defined in its own proto package, `forge.runner.v1`, and is not part of the CLI's client.
+- It is plain HTTP with JSON bodies, under `/runner/v1/`, and is not part of the CLI's client. (The first draft of this spec gave it a proto package of its own. OpenTofu's state backend needs plain HTTP on the same listener anyway, and the only other caller is Forge's own runner, so one plain protocol serves both.)
 - forge-api serves it on a second listener (`--runner-addr`, default `:8081`), behind a ClusterIP Service. The LoadBalancer exposes only the public port.
 - A NetworkPolicy on forge-api's pods allows the runner port from the `forge-runner` namespace only, and the public port as today.
 - Every call carries the run's token. forge-api stores only the token's SHA-256. A token works for one run, and only while that run's plan is `planning` or `applying` and its deadline has not passed.
@@ -196,6 +196,8 @@ A resource also carries its live health, read from the CloudNativePG cluster whe
 | Security | Non-root, read-only root file system, all capabilities dropped, a writable `/tmp` |
 | Size | Requests 100m CPU and 256Mi; limit 512Mi |
 
+The pod gets two minutes to stop: on a cancel or before its deadline the runner tells OpenTofu to stop, lets it save its state while the token still works, and reports. forge-api waits for the pod to be gone before it ends the run. The runner image is pulled with a copy of forge-api's pull secret, which forge-api keeps in `forge-runner`.
+
 When a Job fails, the Operation fails with the last lines of the runner's output. Text from the runner goes through the same cleaning as other caller text before it is stored or printed.
 
 ### The Postgres module
@@ -210,18 +212,18 @@ One `kubernetes_manifest` resource of kind `postgresql.cnpg.io/v1` `Cluster`:
 | Instances | The declared count |
 | Pod size | Requests 50m CPU and 256Mi; limit 512Mi |
 | Labels | `app.kubernetes.io/managed-by: forge`, `forge.dev/service`, `forge.dev/resource` |
-| Wait | Until the cluster reports healthy, at most 10 minutes |
+| Wait | Until the cluster reports healthy and every instance is ready, at most 10 minutes |
 
 Its outputs are the cluster name and the name of the Secret CloudNativePG writes (`<name>-app`). The module never reads the Secret, so no password enters the state or the plan.
 
-The OpenTofu and provider versions are pinned in the runner's Dockerfile, and the image build runs `tofu validate` on the module.
+OpenTofu (1.12.7) is pinned in the runner's Dockerfile and the Kubernetes provider (3.3.0) in the module. The image build fetches the provider into a mirror inside the image and runs `tofu validate` on the module from that mirror, so a run downloads nothing.
 
 ### Rights on the cluster
 
 | Who | New rights |
 | --- | --- |
-| The runner's service account | Manage `postgresql.cnpg.io` clusters. A ValidatingAdmissionPolicy limits its writes to namespaces labelled `app.kubernetes.io/managed-by: forge`. |
-| forge-api | Create, get and delete Jobs and Secrets in `forge-runner`. Read `postgresql.cnpg.io` clusters, for live health. |
+| The runner's service account | Manage `postgresql.cnpg.io` clusters, and read resource definitions (the Kubernetes provider looks the kind up before it plans). A ValidatingAdmissionPolicy limits its writes to the staging and production namespaces of Forge's services. |
+| forge-api | In `forge-runner` only: create, get and delete Jobs; create, update and delete Secrets; list pods and read their logs. Read `postgresql.cnpg.io` clusters, for live health. |
 
 ### Storage
 
@@ -379,6 +381,7 @@ With resources off, the `ResourceService` calls answer `failed_precondition` wit
 | Storage | The shared suites, on memory and on Postgres |
 | Policy | For every rule, a passing and a failing case on plan JSON captured from real OpenTofu runs |
 | Runner | The program against a fake `tofu`; the image build runs `tofu validate` |
+| End to end | `TestResourcesEndToEnd` (build tag `e2e`): plan, apply, re-plan and destroy on a throwaway cluster with real Jobs, the real runner image and CloudNativePG. Not part of the normal suite. |
 | Runner API | Token checks: wrong token, used token, expired run, a plan run writing state |
 | Deploy values | `database.secret` is set, dropped and never copied across environments |
 | CLI | Golden files for plan, apply, list and get |
@@ -392,7 +395,7 @@ Tests cannot prove a real apply on a real cluster. The exit gate does.
 One spec, three plans:
 
 1. **API and policy.** The manifest, `ResourceService`, storage, the policy engine and rules, the CLI and audit. It works end to end with a fake launcher.
-2. **Runner.** The runner program and image, the Job launcher, the runner API and state storage, the Postgres module, the chart change and the k3s manifests. It starts by proving the module on a throwaway local cluster.
+2. **Runner.** The runner program and image, the Job launcher, the runner API and state storage, the Postgres module, the chart change and the k3s manifests. It was proven on a throwaway local cluster before the rollout: the module by hand, then the whole path with the end-to-end test.
 3. **Rollout and exit gate on k3s.** The owner approves before anything touches the cluster. The rollout follows the existing routine: render, server dry run, `kubectl diff`, apply, with a rollback file.
 
 ### Exit gate

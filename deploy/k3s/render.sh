@@ -41,6 +41,13 @@
 # applicationset forge-services -o jsonpath='{.spec.template.spec.sources[0].targetRevision}'`);
 # a render without them removes the staging and production routes. Changing the
 # revision re-renders every deployed service.
+#
+# Resources (forge resource) need deploys, plus the image of the runner Job;
+# lines with a trailing "resources" marker exist only then:
+#   FORGE_RESOURCES=1 FORGE_RUNNER_IMAGE=ghcr.io/showmino/forge-runner:<tag> FORGE_DEPLOYS=1 ... | kubectl apply -f -
+# The chart revision must be one whose chart knows database.secret. Once
+# resources are on, every re-render must include both settings: a render
+# without them removes the runner's namespace and permissions.
 set -eu
 
 usage() {
@@ -151,6 +158,22 @@ else
   deploys_marks='/#deploys$/d'
   chart_rev= # unvalidated without deploys; keep it out of the sed
 fi
+resources=${FORGE_RESOURCES:-}
+runner_image=${FORGE_RUNNER_IMAGE:-}
+case $resources in
+  ''|1) ;;
+  *) echo "invalid FORGE_RESOURCES: $resources (use 1)" >&2; exit 2 ;;
+esac
+if [ -n "$resources" ]; then
+  [ -n "$deploys" ] || { echo "FORGE_RESOURCES needs FORGE_DEPLOYS" >&2; exit 2; }
+  case $runner_image in
+    ''|*[!A-Za-z0-9./:@_-]*) echo "FORGE_RESOURCES needs FORGE_RUNNER_IMAGE, the runner image" >&2; exit 2 ;;
+  esac
+  resources_marks='s/ *#resources$//'
+else
+  resources_marks='/#resources$/d'
+  runner_image= # unvalidated without resources; keep it out of the sed
+fi
 if [ -n "$app_id" ]; then
   app='s/ *#app$//' # keep the App lines, drop their marker
 else
@@ -179,7 +202,11 @@ fi
     echo "---"
     cat "$dir/deploys.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$previews" -e "$deploys_marks" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+  if [ -n "$resources" ]; then
+    echo "---"
+    cat "$dir/resources.yaml.tmpl"
+  fi
+} | sed -e "$app" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g"

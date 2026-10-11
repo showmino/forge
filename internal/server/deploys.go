@@ -16,6 +16,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/store"
 )
 
 const (
@@ -45,6 +46,9 @@ type DeployOptions struct {
 	Repo       DeployRepo
 	Catalog    *Catalog
 	Operations *Operations
+	// Resources, when set, says which database a service has in an
+	// environment, so its pods get DATABASE_URL.
+	Resources store.ResourceStore
 	// Org is the GitHub org services' repos must be in.
 	Org string
 	// Domain: hosts are <service>.<env>.<Domain>.
@@ -137,14 +141,22 @@ type deployRecord struct {
 
 // deployValues is services/<svc>/<env>/values.yaml.
 type deployValues struct {
-	Name     string       `yaml:"name"`
-	Env      string       `yaml:"env"`
-	Image    string       `yaml:"image"`
-	Port     int32        `yaml:"port"`
-	Health   string       `yaml:"health"`
-	Replicas int          `yaml:"replicas"`
-	Host     string       `yaml:"host"`
-	Forge    deployRecord `yaml:"forge"`
+	Name     string `yaml:"name"`
+	Env      string `yaml:"env"`
+	Image    string `yaml:"image"`
+	Port     int32  `yaml:"port"`
+	Health   string `yaml:"health"`
+	Replicas int    `yaml:"replicas"`
+	Host     string `yaml:"host"`
+	// Database is set when the service has a database in this environment.
+	Database *deployDatabase `yaml:"database,omitempty"`
+	Forge    deployRecord    `yaml:"forge"`
+}
+
+// deployDatabase tells the chart where the app's DATABASE_URL comes from.
+type deployDatabase struct {
+	// Secret is the Secret CloudNativePG wrote; its "uri" key is the URL.
+	Secret string `yaml:"secret"`
 }
 
 func (v deployValues) marshal() []byte {
