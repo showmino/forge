@@ -20,7 +20,12 @@ func TestParseOrigins(t *testing.T) {
 	if got, err := ParseOrigins(""); err != nil || got != nil {
 		t.Errorf("empty list: %q, %v", got, err)
 	}
-	for _, bad := range []string{"*", "https://*.example.com", "forge.example.com", "https://forge.example.com/", "https://forge.example.com/app", "ftp://forge.example.com", "https://"} {
+	for _, bad := range []string{
+		"*", "null", "https://*.example.com", "forge.example.com", "https://forge.example.com/", "https://forge.example.com/app",
+		"ftp://forge.example.com", "https://", "HTTPS://forge.example.com", "https://Forge.example.com", "https://ana@forge.example.com",
+		"https://forge.example.com:", "https://forge.example.com:xx", "https://forge.example.com:99999", "https://forge.example.com:443",
+		"http://forge.example.com:80", "https://forge.example.com?x=1", "https://forge.example.com#x",
+	} {
 		if _, err := ParseOrigins(bad); err == nil {
 			t.Errorf("%q: accepted", bad)
 		}
@@ -42,6 +47,7 @@ func TestCORS(t *testing.T) {
 		}
 		if preflight {
 			r.Header.Set("Access-Control-Request-Method", http.MethodPost)
+			r.Header.Set("Access-Control-Request-Headers", "authorization,connect-protocol-version,content-type")
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -65,7 +71,7 @@ func TestCORS(t *testing.T) {
 		if got := res.Header().Get("Access-Control-Allow-Origin"); got != web {
 			t.Errorf("allow origin: %q", got)
 		}
-		if res.Header().Get("Access-Control-Expose-Headers") == "" || res.Header().Get("Vary") != "Origin" {
+		if res.Header().Get("Access-Control-Expose-Headers") != "Forge-Server-Version, Forge-Min-Client-Version, X-Request-Id" || res.Header().Get("Vary") != "Origin" {
 			t.Errorf("headers: %v", res.Header())
 		}
 		if res.Header().Get("Access-Control-Allow-Credentials") != "" {
@@ -78,10 +84,13 @@ func TestCORS(t *testing.T) {
 		if res.Code != http.StatusNoContent || served != before {
 			t.Fatalf("status %d, served %d", res.Code, served-before)
 		}
-		if res.Header().Get("Access-Control-Allow-Origin") != web || res.Header().Get("Access-Control-Allow-Methods") == "" {
+		if res.Header().Get("Access-Control-Allow-Origin") != web || res.Header().Get("Access-Control-Allow-Methods") != "GET, POST" {
 			t.Errorf("headers: %v", res.Header())
 		}
-		for _, name := range []string{"Authorization", "Connect-Protocol-Version", "Content-Type"} {
+		for _, name := range []string{
+			"Authorization", "Content-Type", "Connect-Protocol-Version", "Connect-Timeout-Ms",
+			"Connect-Accept-Encoding", "Connect-Content-Encoding", "Forge-Client-Version", "X-Request-Id",
+		} {
 			if !slices.Contains(splitList(res.Header().Get("Access-Control-Allow-Headers")), name) {
 				t.Errorf("%s is not an allowed header", name)
 			}
@@ -99,6 +108,25 @@ func TestCORS(t *testing.T) {
 		res = do(h, http.MethodOptions, "http://evil.example.com", true)
 		if res.Code != http.StatusForbidden || res.Header().Get("Access-Control-Allow-Origin") != "" || served != before+1 {
 			t.Errorf("preflight: status %d, headers %v", res.Code, res.Header())
+		}
+	})
+	t.Run("origins that only look like the dashboard's", func(t *testing.T) {
+		for _, origin := range []string{
+			"null", web + ".evil.example.com", "http://evil-forge-web.production.example.com", web + ":8080",
+			"https://forge-web.production.example.com", "http://FORGE-WEB.production.example.com", web + "/",
+		} {
+			if res := do(h, http.MethodPost, origin, false); res.Header().Get("Access-Control-Allow-Origin") != "" {
+				t.Errorf("%s: allowed as %q", origin, res.Header().Get("Access-Control-Allow-Origin"))
+			}
+			if res := do(h, http.MethodOptions, origin, true); res.Code != http.StatusForbidden {
+				t.Errorf("%s: preflight status %d", origin, res.Code)
+			}
+		}
+	})
+	t.Run("OPTIONS that is not a preflight", func(t *testing.T) {
+		before := served
+		if res := do(h, http.MethodOptions, web, false); res.Code != http.StatusOK || served != before+1 {
+			t.Errorf("status %d, served %d: it must reach the API", res.Code, served-before)
 		}
 	})
 	t.Run("no origin, as the CLI", func(t *testing.T) {

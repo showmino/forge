@@ -99,6 +99,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("--cors-origins: %w", err)
 	}
+	if *clientID == "" && !*insecureDev {
+		return errors.New("--oidc-client-id (or FORGE_OIDC_CLIENT_ID) must not be empty")
+	}
 
 	var handler slog.Handler = slog.NewTextHandler(os.Stderr, nil)
 	if *logJSON {
@@ -223,6 +226,9 @@ func run() error {
 	}
 	if len(origins) > 0 {
 		log.Info("the web dashboard may call the API from a browser", "origins", origins, "client", *webClientID)
+	}
+	if (len(origins) > 0) != (*webClientID != "") {
+		log.Warn("the web dashboard needs both --cors-origins and --oidc-web-client-id; only one is set, so it cannot log in")
 	}
 	srv := server.HTTPServer(*addr, server.CORS(origins, h))
 	// Open watch streams end only with their operation; cancel their request

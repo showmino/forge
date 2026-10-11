@@ -36,6 +36,9 @@ message OIDCConfig {
   // Client ID of the web dashboard; empty when the server accepts no
   // dashboard logins.
   string web_client_id = 4;
+  // Scopes the web dashboard asks for: scopes without "offline_access", so
+  // a browser is never handed a refresh token. Empty with web_client_id.
+  repeated string web_scopes = 5;
 }
 
 message GetStatusRequest {}

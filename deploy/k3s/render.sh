@@ -186,8 +186,10 @@ web_origins=${FORGE_WEB_ORIGINS:-}
 web_list=
 web_redirects=
 if [ -n "$web_origins" ]; then
+  # Lower case only: a browser sends its origin in lower case, and both Dex
+  # and forge-api compare it as text.
   case $web_origins in
-    *[!A-Za-z0-9.:/,-]*) echo "invalid FORGE_WEB_ORIGINS: $web_origins" >&2; exit 2 ;;
+    *[!a-z0-9.:/,-]*) echo "invalid FORGE_WEB_ORIGINS: $web_origins (lower case; letters, digits, dots and hyphens)" >&2; exit 2 ;;
   esac
   old_ifs=$IFS
   IFS=,
@@ -198,6 +200,10 @@ if [ -n "$web_origins" ]; then
     esac
     case ${origin#*://} in
       */*) echo "invalid FORGE_WEB_ORIGINS: \"$origin\" must not have a path or a trailing slash" >&2; exit 2 ;;
+      *:*:*|*:|:*|*:*[!0-9]*) echo "invalid FORGE_WEB_ORIGINS: \"$origin\" has a bad port" >&2; exit 2 ;;
+    esac
+    case $origin in
+      http://*:80|https://*:443) echo "invalid FORGE_WEB_ORIGINS: \"$origin\": leave out the scheme's own port, as a browser does" >&2; exit 2 ;;
     esac
     web_list="$web_list${web_list:+, }\"$origin\""
     web_redirects="$web_redirects${web_redirects:+, }\"$origin/auth/callback\""

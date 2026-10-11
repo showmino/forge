@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/showmino/forge/pkg/client"
@@ -14,6 +15,7 @@ import (
 var (
 	corsAllowHeaders = strings.Join([]string{
 		"Authorization", "Content-Type", "Connect-Protocol-Version", "Connect-Timeout-Ms",
+		"Connect-Accept-Encoding", "Connect-Content-Encoding",
 		client.HeaderClientVersion, client.HeaderRequestID,
 	}, ", ")
 	corsExposeHeaders = strings.Join([]string{
@@ -22,8 +24,10 @@ var (
 )
 
 // ParseOrigins reads a comma-separated list of browser origins such as
-// "http://forge-web.production.example.com". Each must be a scheme and a
-// host, with an optional port and nothing else: no path, no wildcard.
+// "http://forge-web.production.example.com". Each must be written as a
+// browser sends it, because it is compared as text: a lower-case scheme and
+// host, a port only when it is not the scheme's own, and nothing else (no
+// path, no wildcard).
 func ParseOrigins(list string) ([]string, error) {
 	var origins []string
 	for item := range strings.SplitSeq(list, ",") {
@@ -32,13 +36,26 @@ func ParseOrigins(list string) ([]string, error) {
 			continue
 		}
 		u, err := url.Parse(item)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || strings.Contains(u.Host, "*") ||
-			u.Scheme+"://"+u.Host != item {
-			return nil, fmt.Errorf("invalid origin %q: use a scheme and a host, such as https://forge.example.com", item)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || strings.Contains(u.Host, "*") ||
+			u.Scheme+"://"+u.Host != item || item != strings.ToLower(item) || !originPort(u) {
+			return nil, fmt.Errorf("invalid origin %q: write it as a browser sends it, such as https://forge.example.com (lower case, no path, no default port)", item)
 		}
 		origins = append(origins, item)
 	}
 	return origins, nil
+}
+
+// originPort reports whether u has no port, or one a browser would keep in
+// its Origin header: a number that is not the scheme's own.
+func originPort(u *url.URL) bool {
+	if u.Port() == "" {
+		return !strings.HasSuffix(u.Host, ":")
+	}
+	n, err := strconv.Atoi(u.Port())
+	if err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	return (u.Scheme != "http" || n != 80) && (u.Scheme != "https" || n != 443)
 }
 
 // CORS lets pages served from origins call the API from a browser. Without

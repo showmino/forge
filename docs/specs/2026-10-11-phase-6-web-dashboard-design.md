@@ -24,7 +24,7 @@ Not in this phase: resource pages (resources are switched off on k3s; their roll
 
 1. **CORS.** A flag `--cors-origins` (env `FORGE_CORS_ORIGINS`), a comma-separated list of exact origins. Empty means off, which is today's behaviour. No wildcard and no credentials mode: the dashboard sends a bearer token, never a cookie. It applies to the main listener only, never to the runner listener.
 2. **A second accepted audience.** A flag `--oidc-web-client-id` (env `FORGE_OIDC_WEB_CLIENT_ID`). A token is accepted when its audience holds the CLI's client ID or this one. Empty means only the CLI's, as today.
-3. **Discovery.** `GetServerInfo` already returns the issuer, the CLI's client ID and the scopes without a login. `OIDCConfig` gains `web_client_id`, so the dashboard needs only the API's address.
+3. **Discovery.** `GetServerInfo` already returns the issuer, the CLI's client ID and the scopes without a login. `OIDCConfig` gains `web_client_id` and `web_scopes` (the scopes without `offline_access`, so a browser is never handed a refresh token), so the dashboard needs only the API's address.
 4. **Dex and the manifests.** `render.sh` takes `FORGE_WEB_ORIGINS` (a comma-separated list). When set, it adds the Dex client `forge-web` (public, redirect URI `<origin>/auth/callback` for each origin), puts the origins in Dex's `web.allowedOrigins`, and sets the two forge-api variables above. Unset, the rendered output does not change.
 
 Live progress needs nothing new: `WatchOperation` is already a Connect server stream, which a browser can read.
