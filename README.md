@@ -227,6 +227,33 @@ the API (`FORGE_API_URL`). forge-api checks the token's audience against
 forge-api serves the matching CLI for Linux at `$FORGE_API_URL/cli/forge-linux-amd64`
 (and `-arm64`), so a job needs no token for the forge repo.
 
+### Versions
+
+Every commit Forge deploys gets a version, as a tag and a GitHub release in
+the service's repo:
+
+- **Staging:** a release candidate, `v0.3.1-rc.2`, published as a GitHub
+  pre-release. Deploying the same commit again keeps its number.
+- **Production:** the final version, `v0.3.1`, on the same commit, marked
+  Latest, with notes since the last final version. A promotion is a patch
+  unless you pick more: `forge deploy promote payments --bump minor` (or
+  `major`). A commit that was released before keeps its version, so a
+  rollback shows the version it restores. A service's first release is
+  `v0.1.0`.
+
+`forge deploy status` and `forge deploy history` show the version next to the
+commit, and `--dry-run` says which version a deploy or promotion would cut.
+
+Pods keep running the image CI built for the commit (`:<sha7>`). The
+`release.yml` workflow that comes with every template adds the version to
+that same image when Forge pushes the tag, so `ghcr.io/<org>/<service>:v0.3.1`
+is the image production runs. Forge cuts versions with its GitHub App
+(contents: write). The tag is the version: a deploy fails with
+`release_failed` before it changes anything if the tag cannot be made, so run
+it again. A GitHub release that cannot be made does not stop the deploy; the
+operation says so and the next deploy of the commit makes it. `--bump` is for
+production: a staging deploy refuses it.
+
 ### Audit log
 
 Every write call to the Forge API is recorded, refused calls included, with

@@ -83,6 +83,10 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if w := workloadOf(ctx); w != nil && src.commit != w.SHA {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolved %s to %s, not the CI token's commit %s", ref, shortSHA(src.commit), shortSHA(w.SHA)))
 	}
+	bump, err := bumpOf(m.GetBump(), m.GetEnv())
+	if err != nil {
+		return nil, err
+	}
 	env, actor := m.GetEnv(), actorOf(ctx)
 	v := deployValues{
 		Name: src.serviceID, Env: env, Image: src.image, Port: src.port, Health: src.health, Replicas: 1,
@@ -93,6 +97,9 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		return nil, err
 	}
 	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, src.serviceID+"-"+m.GetEnv()); err != nil {
+		return nil, err
+	}
+	if v.Forge.Version, err = d.plannedVersion(ctx, src.owner, src.repo, src.commit, env, bump); err != nil {
 		return nil, err
 	}
 	preview := d.deploymentFrom(src.serviceID, env, v, "", AppStatus{})
@@ -118,6 +125,12 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		if err := waitForImage(ctx, d.o.GitHub, d.o.Images, src, d.o.ImageTimeout, d.o.ImagePoll, emit); err != nil {
 			return err
 		}
+		// Only now: a version is for a build that exists.
+		version, err := d.cutVersion(ctx, src.owner, src.repo, src.commit, env, bump, emit)
+		if err != nil {
+			return err
+		}
+		v.Forge.Version = version
 		return d.apply(ctx, src.serviceID, env, v, emit)
 	})
 	d.running[target] = op.GetName()

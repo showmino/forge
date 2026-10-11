@@ -43,6 +43,38 @@ func tag(image string) string {
 	return image
 }
 
+// versionCell is a table cell for a deploy's version; older deploys have none.
+func versionCell(v string) string {
+	if v == "" {
+		return "-"
+	}
+	return v
+}
+
+// parseBump reads --bump; empty leaves the choice (a patch) to the API.
+func parseBump(s string) (forgev1.Bump, error) {
+	switch s {
+	case "":
+		return forgev1.Bump_BUMP_UNSPECIFIED, nil
+	case "patch":
+		return forgev1.Bump_BUMP_PATCH, nil
+	case "minor":
+		return forgev1.Bump_BUMP_MINOR, nil
+	case "major":
+		return forgev1.Bump_BUMP_MAJOR, nil
+	}
+	return 0, exitcode.Usagef("--bump %q must be patch, minor or major", s)
+}
+
+// asVersion is " as v0.3.1" for a dry run that says which version it would
+// cut; empty when the API cuts none.
+func asVersion(d *forgev1.Deployment) string {
+	if d.GetVersion() == "" {
+		return ""
+	}
+	return " as " + d.GetVersion()
+}
+
 func newDeployCmd(f *Factory) *cobra.Command {
 	cmd := group("deploy", "Deploy services to staging and production", "deploys")
 	cmd.Long = `Deploy a service's CI image to staging or production. Every change is a
@@ -54,17 +86,24 @@ service name defaults to forge.yaml's.`
 }
 
 func newDeployStartCmd(f *Factory) *cobra.Command {
-	var env, ref string
+	var env, ref, bump string
 	var dryRun, wait bool
 	cmd := &cobra.Command{
 		Use:   "start [service] --env staging|production",
 		Short: "Deploy a ref of a service to an environment",
+		Long: `Deploy a ref of a service to an environment. Every commit that reaches
+staging gets a release candidate version (v0.3.1-rc.2); one that reaches
+production gets a final version (v0.3.1), each with a GitHub release.`,
 		Example: `  forge deploy start payments --env staging
   forge deploy start --env staging --ref v1.4.2    # in a service repo`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if env == "" {
 				return exitcode.Usagef("--env is required (staging or production)")
+			}
+			level, err := parseBump(bump)
+			if err != nil {
+				return err
 			}
 			svc, err := f.deployService(args)
 			if err != nil {
@@ -86,7 +125,7 @@ func newDeployStartCmd(f *Factory) *cobra.Command {
 				return err
 			}
 			resp, err := c.Deploys.StartDeploy(ctx, connect.NewRequest(&forgev1.StartDeployRequest{
-				Service: "services/" + svc, Env: env, Ref: ref, RequestId: client.NewRequestID(), ValidateOnly: dryRun,
+				Service: "services/" + svc, Env: env, Ref: ref, RequestId: client.NewRequestID(), ValidateOnly: dryRun, Bump: level,
 			}))
 			if err != nil {
 				return err
@@ -96,7 +135,7 @@ func newDeployStartCmd(f *Factory) *cobra.Command {
 				if format != output.Table {
 					return f.printDeployment(format, d)
 				}
-				_, err := fmt.Fprintf(f.IO.Out, "Would deploy %s (%s at %s) to %s at %s\n", d.GetImage(), d.GetRef(), sha7(d.GetCommit()), d.GetName(), d.GetUrl())
+				_, err := fmt.Fprintf(f.IO.Out, "Would deploy %s (%s at %s) to %s at %s%s\n", d.GetImage(), d.GetRef(), sha7(d.GetCommit()), d.GetName(), d.GetUrl(), asVersion(d))
 				return err
 			}
 			return f.finishDeploy(ctx, c, format, resp.Msg.GetOperation(), svc, env, wait)
@@ -106,6 +145,7 @@ func newDeployStartCmd(f *Factory) *cobra.Command {
 	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit (default $GITHUB_SHA in GitHub Actions, else main)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check and resolve without deploying")
 	cmd.Flags().BoolVar(&wait, "wait", true, "watch the deploy until it ends")
+	cmd.Flags().StringVar(&bump, "bump", "", "for a first deploy of a commit to production: patch (default), minor or major")
 	return cmd
 }
 
@@ -142,6 +182,7 @@ func (f *Factory) printDeployment(format output.Format, d *forgev1.Deployment) e
 	add("name", d.GetName())
 	add("service", d.GetService())
 	add("env", d.GetEnv())
+	add("version", d.GetVersion())
 	add("image", d.GetImage())
 	add("ref", d.GetRef())
 	add("commit", d.GetCommit())
@@ -212,13 +253,13 @@ service, and elsewhere every service.`,
 				f.infof("No deployments.")
 				return nil
 			}
-			v := output.View{Headers: []string{"service", "env", "image", "sync", "health", "deployed", "by", "url"}, Data: resp.Msg}
+			v := output.View{Headers: []string{"service", "env", "version", "image", "sync", "health", "deployed", "by", "url"}, Data: resp.Msg}
 			if len(ds) == 0 {
 				v.Data = map[string]any{"deployments": []any{}} // keep '.deployments[]' working in jq
 			}
 			for _, d := range ds {
 				v.Rows = append(v.Rows, []string{
-					strings.TrimPrefix(d.GetService(), "services/"), d.GetEnv(), tag(d.GetImage()),
+					strings.TrimPrefix(d.GetService(), "services/"), d.GetEnv(), versionCell(d.GetVersion()), tag(d.GetImage()),
 					lowerEnum(d.GetSync(), "SYNC_STATUS_"), lowerEnum(d.GetHealth(), "HEALTH_"),
 					age(f.Now().Sub(d.GetDeployTime().AsTime())), d.GetDeployedBy(), d.GetUrl(),
 				})
@@ -266,13 +307,13 @@ func newDeployHistoryCmd(f *Factory) *cobra.Command {
 				f.infof("No deploys.")
 				return nil
 			}
-			v := output.View{Headers: []string{"deploy", "kind", "image", "commit", "actor", "age"}, Data: resp.Msg}
+			v := output.View{Headers: []string{"deploy", "kind", "version", "image", "commit", "actor", "age"}, Data: resp.Msg}
 			if len(recs) == 0 {
 				v.Data = map[string]any{"records": []any{}}
 			}
 			for _, r := range recs {
 				v.Rows = append(v.Rows, []string{
-					sha7(r.GetDeployCommit()), r.GetKind(), tag(r.GetImage()), sha7(r.GetCommit()), r.GetActor(),
+					sha7(r.GetDeployCommit()), r.GetKind(), versionCell(r.GetVersion()), tag(r.GetImage()), sha7(r.GetCommit()), r.GetActor(),
 					age(f.Now().Sub(r.GetTime().AsTime())),
 				})
 				v.Names = append(v.Names, sha7(r.GetDeployCommit()))
@@ -345,17 +386,26 @@ deployment name unless --yes.`,
 }
 
 func newDeployPromoteCmd(f *Factory) *cobra.Command {
-	var from, to string
+	var from, to, bump string
 	var yes, dryRun, wait bool
 	cmd := &cobra.Command{
 		Use:   "promote [service]",
 		Short: "Deploy what runs in one environment to the next",
 		Long: `Promote the image running in --from (default staging) to --to (default
-production). Promoting to production asks for the service name unless --yes.`,
+production). Promoting to production asks for the service name unless --yes.
+
+The promotion releases the commit: it gets the next final version (a patch,
+or what --bump says), a tag and a GitHub release with notes since the last
+one. A commit that was released before keeps its version.`,
 		Example: `  forge deploy promote payments --yes
+  forge deploy promote payments --bump minor
   forge deploy promote payments --dry-run`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			level, err := parseBump(bump)
+			if err != nil {
+				return err
+			}
 			svc, err := f.deployService(args)
 			if err != nil {
 				return err
@@ -375,7 +425,7 @@ production). Promoting to production asks for the service name unless --yes.`,
 			if err != nil {
 				return err
 			}
-			resp, err := c.Deploys.PromoteDeploy(ctx, connect.NewRequest(&forgev1.PromoteDeployRequest{Service: "services/" + svc, From: from, To: to, ValidateOnly: dryRun}))
+			resp, err := c.Deploys.PromoteDeploy(ctx, connect.NewRequest(&forgev1.PromoteDeployRequest{Service: "services/" + svc, From: from, To: to, ValidateOnly: dryRun, Bump: level}))
 			if err != nil {
 				return err
 			}
@@ -383,7 +433,7 @@ production). Promoting to production asks for the service name unless --yes.`,
 				if format != output.Table {
 					return f.printDeployment(format, resp.Msg.GetDeployment())
 				}
-				_, err := fmt.Fprintf(f.IO.Out, "Would promote %s from %s to %s\n", resp.Msg.GetDeployment().GetImage(), from, to)
+				_, err := fmt.Fprintf(f.IO.Out, "Would promote %s from %s to %s%s\n", resp.Msg.GetDeployment().GetImage(), from, to, asVersion(resp.Msg.GetDeployment()))
 				return err
 			}
 			return f.finishDeploy(ctx, c, format, resp.Msg.GetOperation(), svc, to, wait)
@@ -395,5 +445,6 @@ production). Promoting to production asks for the service name unless --yes.`,
 	fl.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	fl.BoolVar(&dryRun, "dry-run", false, "check without promoting")
 	fl.BoolVar(&wait, "wait", true, "watch the promotion until it ends")
+	fl.StringVar(&bump, "bump", "", "how far the version goes up: patch (default), minor or major")
 	return cmd
 }

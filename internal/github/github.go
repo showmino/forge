@@ -124,26 +124,13 @@ func (c *Client) doJSON(ctx context.Context, method, path string, in, out any) e
 
 // ListTags returns every tag name of owner/repo.
 func (c *Client) ListTags(ctx context.Context, owner, repo string) ([]string, error) {
-	var names []string
-	for page := 1; page <= maxPages; page++ {
-		resp, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/repos/%s/%s/tags?per_page=%d&page=%d", url.PathEscape(owner), url.PathEscape(repo), pageSize, page), nil)
-		if err != nil {
-			return nil, err
-		}
-		var tags []struct {
-			Name string `json:"name"`
-		}
-		err = json.NewDecoder(resp.Body).Decode(&tags)
-		_ = resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("decode tags of %s/%s: %w", owner, repo, err)
-		}
-		for _, t := range tags {
-			names = append(names, t.Name)
-		}
-		if len(tags) < pageSize {
-			break
-		}
+	tags, err := c.ListTagCommits(ctx, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(tags))
+	for i, t := range tags {
+		names[i] = t.Name
 	}
 	return names, nil
 }
