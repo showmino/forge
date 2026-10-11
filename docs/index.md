@@ -34,7 +34,7 @@ Three users shape the design: an application developer who wants a service runni
 
 ## Command surface
 
-The v1 CLI has ten command groups; each maps one-to-one to an API resource so the dashboard can reuse the same endpoints. The Phase column ties each group to the delivery plan below.
+The v1 CLI has eleven command groups; each maps one-to-one to an API resource so the dashboard can reuse the same endpoints. The Phase column ties each group to the delivery plan below.
 
 | Group | Verbs | Example | Phase |
 | --- | --- | --- | --- |
@@ -49,6 +49,7 @@ The v1 CLI has ten command groups; each maps one-to-one to an API resource so th
 | `resource` | `plan`, `apply`, `list`, `get` | `forge resource plan --env staging` | 5 |
 | `audit` | `list`, `get` | `forge audit list --service payments --since 7d` | 5 |
 | `op` | `list`, `watch`, `cancel` | `forge op watch op_9f2c` | 3 |
+| `docs` | `list`, `get`, `lint` | `forge docs get payments runbook.md` | 7 |
 
 Utility commands ship in Phase 1: `forge version`, `forge completion <shell>`, `forge doctor` (checks config, auth, API reachability and version skew) and `forge init` (writes `forge.yaml` for an existing repo).
 
@@ -241,7 +242,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy (`docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`): the API, policy rules, CLI and the runner that makes real databases are built, and proven end to end on a throwaway cluster; the rollout to k3s is deferred (resources stay switched off there) until a service first needs a database. Phase 6 has started (`docs/specs/2026-10-11-phase-6-web-dashboard-design.md`): the API side is live on k3s, and the dashboard lives in `showmino/forge-web`. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in seven phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy (`docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`): the API, policy rules, CLI and the runner that makes real databases are built, and proven end to end on a throwaway cluster; the rollout to k3s is deferred (resources stay switched off there) until a service first needs a database. Phase 6 has started (`docs/specs/2026-10-11-phase-6-web-dashboard-design.md`): the API side is live on k3s, and the dashboard lives in `showmino/forge-web`. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |
@@ -251,6 +252,7 @@ Build in six phases, sequenced rather than dated, and move on only when a phase'
 | 4 · Deployments (done) | deploy start / status / history; rollback and promote through Argo CD; deploys from CI with workload identity | A team ships to staging from CI without kubectl or Argo access |
 | 5 · Resources and audit (audit log done) | resource plan / apply via the OpenTofu runner; policy checks on every plan; audit list / get | Every mutating action is traceable in the audit log by user and service |
 | 6 · Web dashboard | a browser UI on the same Forge API: GitHub login through Dex; catalog and service pages; templates and create; environments; deploys with promote and rollback; operations with live progress; audit log | A writer creates, previews and promotes a service from the browser, and a reader sees the same data, all without a terminal |
+| 7 · TechDocs | documentation as code: Markdown in each service's repo (`docs/`), read live from GitHub by the API and rendered in the dashboard; a Docs tab per service and a Docs page; docs list / get / lint; starter docs in the templates; search across all docs | A developer adds a Markdown page to a service's repo and merges it, and a reader finds and reads it in the dashboard within a minute, without a terminal and without a build |
 
 Each phase grows the API and the CLI together, so the CLI never ships a command the server cannot back. The command table above tags every group with its phase.
 
@@ -260,6 +262,13 @@ Each phase grows the API and the CLI together, so the CLI never ships a command 
 - **Login:** the authorization code flow with PKCE against Dex, as a public client (`forge-web`). The ID token is the bearer, as for the CLI; readers and writers get the permissions they have in the CLI.
 - **Live updates:** long operations stream progress the way `forge op watch` does.
 - **In the API (done):** CORS for the dashboard's exact origins (`--cors-origins`), tokens issued to the dashboard's client accepted next to the CLI's (`--oidc-web-client-id`), and `GetServerInfo` names that client. `WatchOperation` is already a Connect server stream, which a browser reads as it is.
+
+**Phase 7, TechDocs,** puts a service's documentation next to its code and shows it in the dashboard (`docs/specs/2026-10-11-phase-7-techdocs-design.md`):
+
+- **Source:** Markdown under `docs/` in the service's repo, `docs/index.md` first; an optional `docs:` list in `forge.yaml` sets the order.
+- **No build:** forge-api reads the files from GitHub with its App and caches them by commit; the dashboard renders the Markdown in its own look. A page is current the moment its change merges.
+- **Safe to render:** raw HTML in a page is shown as text, images come through the API, and only files under `docs/` can be read.
+- **Not in this phase:** docs that belong to no service, MkDocs sites and plugins, docs per release.
 
 **Phase 1 starting point:**
 
@@ -284,3 +293,4 @@ Each has a working default in this draft; an answer changes the plan only where 
 - [x] **Local development:** Decided: Phase 1 targets the existing k3s cluster, so no `kind`-based local Forge stack is needed for demos.
 - [x] **Template format:** Decided: the Forge format, `template.yaml` with typed parameters plus a `skeleton/` folder rendered with Go `text/template`, versioned by repo-wide tags in one templates repo. No Backstage importer (see `docs/specs/2026-10-08-phase-2-templates-design.md`).
 - [x] **Dashboard stack (Phase 6):** Decided: a Next.js app scaffolded from Forge's own `nextjs` template, with its own repo, and deployed by Forge like any other service. A static single-page app served by forge-api is ruled out.
+- [x] **Docs (Phase 7):** Decided: Markdown under `docs/` in each service's repo, read live from GitHub by forge-api and rendered by the dashboard. Building MkDocs sites in CI and serving them from storage, as Backstage TechDocs does, is ruled out: it needs a build step in every repo and storage, and would not look like Forge.
