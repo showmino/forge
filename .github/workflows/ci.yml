@@ -74,6 +74,14 @@ jobs:
           buf generate
           git diff --exit-code -- gen/ || (echo "::error::run 'make generate' and commit gen/" && exit 1)
 
+  runner-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The build fetches the provider into the image's mirror and runs
+      # `tofu validate` on the module from it: an invalid module fails here.
+      - run: docker build -f deploy/runner/Dockerfile -t forge-runner:ci .
+
   goreleaser-check:
     runs-on: ubuntu-latest
     steps:

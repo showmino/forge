@@ -240,7 +240,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy: its API, policy rules and CLI are built and tested against a fake runner (`docs/plans/2026-10-10-phase-5-m2a-resources-api-policy.md`); the runner that makes real databases, and the exit gate on k3s, are next. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in six phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy (`docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`): the API, policy rules, CLI and the runner that makes real databases are built, and proven end to end on a throwaway cluster; the rollout and exit gate on k3s are next. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |
