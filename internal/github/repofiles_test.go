@@ -17,7 +17,8 @@ type gitServer struct {
 	trees   map[string]string // tree sha -> base tree sha (for asserting base_tree)
 	commits map[string]map[string]any
 	updates []map[string]any
-	moved   bool // answer the next ref update with 422
+	moved   bool     // answer the next ref update with 422
+	removed []string // paths a tree was asked to drop
 }
 
 func (g *gitServer) handler() http.Handler {
@@ -37,6 +38,19 @@ func (g *gitServer) handler() http.Handler {
 			Tree     []map[string]any `json:"tree"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
+		// A removal: the entry names the path with a null sha and no content.
+		if sha, has := in.Tree[0]["sha"]; len(in.Tree) == 1 && has && sha == nil {
+			if _, content := in.Tree[0]["content"]; content || in.Tree[0]["mode"] != "100644" || in.Tree[0]["type"] != "blob" {
+				http.Error(w, "bad removal", http.StatusBadRequest)
+				return
+			}
+			g.mu.Lock()
+			g.trees["t3"] = in.BaseTree
+			g.removed = append(g.removed, in.Tree[0]["path"].(string))
+			g.mu.Unlock()
+			write(w, map[string]string{"sha": "t3"})
+			return
+		}
 		if len(in.Tree) != 1 || in.Tree[0]["path"] != "services/payments/staging/values.yaml" || in.Tree[0]["content"] != "image: x\n" {
 			http.Error(w, "bad tree", http.StatusBadRequest)
 			return
@@ -117,5 +131,35 @@ func TestRepoFiles(t *testing.T) {
 	hist, err := r.History(ctx, "services/payments/staging/values.yaml", 2)
 	if err != nil || len(hist) != 2 || hist[0].SHA != "c2" || hist[0].Message != "deploy b" || hist[0].Time.Day() != 9 {
 		t.Errorf("History = %+v %v", hist, err)
+	}
+}
+
+func TestRepoFilesDeleteFile(t *testing.T) {
+	t.Parallel()
+	g := &gitServer{head: "c1", trees: map[string]string{}, commits: map[string]map[string]any{}}
+	srv := httptest.NewServer(g.handler())
+	t.Cleanup(srv.Close)
+	r := &RepoFiles{Client: &Client{BaseURL: srv.URL}, Owner: "showmino", Name: "forge-deploys", Branch: "main"}
+	ctx := context.Background()
+
+	sha, err := r.DeleteFile(ctx, "c1", "tree-of-c1", "services/payments/production/values.yaml", "remove payments from production")
+	if err != nil || sha != "c2" {
+		t.Fatalf("DeleteFile = %q %v", sha, err)
+	}
+	if len(g.removed) != 1 || g.removed[0] != "services/payments/production/values.yaml" || g.trees["t3"] != "tree-of-c1" {
+		t.Errorf("removed %v on base %q", g.removed, g.trees["t3"])
+	}
+	if c := g.commits["c2"]; c["tree"] != "t3" || c["message"] != "remove payments from production" || c["parents"].([]any)[0] != "c1" {
+		t.Errorf("commit %v", c)
+	}
+	if u := g.updates[0]; u["sha"] != "c2" || u["force"] != false {
+		t.Errorf("ref update %v (must not force)", u)
+	}
+
+	g.mu.Lock()
+	g.moved = true
+	g.mu.Unlock()
+	if _, err := r.DeleteFile(ctx, "c2", "tree-of-c2", "services/payments/staging/values.yaml", "again"); !errors.Is(err, ErrNotFastForward) {
+		t.Errorf("moved branch: %v, want ErrNotFastForward", err)
 	}
 }

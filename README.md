@@ -144,6 +144,12 @@ GitHub OAuth App owned by the org with the callback
 `forge-db` (2 instances, `longhorn-retain`), which holds the service catalog
 and Dex's logins; it needs the CloudNativePG operator. There are no backups yet.
 
+`forge service delete <name>` (and Delete in the dashboard) removes a service
+and everything it runs: its previews, its staging and production deployments
+with their namespaces, and last its catalog entry. The GitHub repo is kept. If
+it fails half way the service stays in the catalog and the delete can be run
+again.
+
 A service belongs to a team of the GitHub organization. `forge team list` (and
 the dashboard's Create form) read the teams from GitHub as the App, which needs
 the organization permission "Members: read" for it.

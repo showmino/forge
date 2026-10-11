@@ -26,6 +26,8 @@ func (h *harness) serveDeploys(unhealthy map[string]string) *envtest.Repo {
 		ImagePoll: 5 * time.Millisecond, Poll: 5 * time.Millisecond,
 		ImageTimeout: 5 * time.Second, SyncTimeout: 300 * time.Millisecond, NamespaceTimeout: 5 * time.Second,
 	})
+	// As forge-api wires it: deleting a service takes its deployments down first.
+	h.catalog.EnableTeardown(h.deploys, h.envs, h.ops)
 	h.startAPI(h.authn)
 	argo := &envtest.Argo{Kube: cluster.Kube, Dynamic: cluster.Dynamic, Repo: repo, Namespace: "argocd", Unhealthy: unhealthy}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -105,4 +107,33 @@ func TestDeployFailureAndOff(t *testing.T) {
 	if r := h.ok("deploy", "start", "--env", "staging", "--dry-run"); !strings.Contains(r.out, "deployments/payments/staging") {
 		t.Errorf("service from forge.yaml: %q", r.out)
 	}
+}
+
+// Deleting a service that is deployed takes it down first, and shows the work.
+func TestServiceDeleteTakesDeploymentsDown(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	repo := h.serveDeploys(map[string]string{})
+	h.ok("service", "register", "payments", "--team", "billing", "--repo", "https://github.com/showmino/payments")
+	h.ok("deploy", "start", "payments", "--env", "staging")
+	if _, err := repo.Read(context.Background(), "services/payments/staging/values.yaml", ""); err != nil {
+		t.Fatalf("not deployed: %v", err)
+	}
+
+	// A dry run changes nothing.
+	h.ok("service", "delete", "payments", "--dry-run")
+	if _, err := repo.Read(context.Background(), "services/payments/staging/values.yaml", ""); err != nil {
+		t.Fatalf("the dry run removed the deployment: %v", err)
+	}
+
+	r := h.ok("service", "delete", "payments", "--yes")
+	for _, want := range []string{"Deleting services/payments (operations/op_", "removed payments from staging", "Argo CD removed payments-staging", "removed payments-staging", "its GitHub repo is kept", "services/payments deleted."} {
+		if !strings.Contains(r.err, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, r.err)
+		}
+	}
+	if _, err := repo.Read(context.Background(), "services/payments/staging/values.yaml", ""); err == nil {
+		t.Error("the deployment is still in the deploy repo")
+	}
+	h.fails(3, "service", "get", "payments")
 }

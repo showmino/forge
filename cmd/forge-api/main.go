@@ -204,6 +204,8 @@ func run() error {
 		// Ends runs nobody watches any more (a restart) and expires old plans.
 		go res.RunSweeper(ctx, time.Minute)
 	}
+	// Deleting a service takes down its previews and deployments first.
+	catalog.EnableTeardown(deps, envs, ops)
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,

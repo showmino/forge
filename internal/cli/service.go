@@ -579,9 +579,14 @@ func newServiceDeleteCmd(f *Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <name>",
 		Aliases: []string{"rm"},
-		Short:   "Remove a service from the catalog",
-		Long: `Remove a service from the catalog. You must type the service's name to
-confirm, or pass --yes. The name is never taken from forge.yaml.`,
+		Short:   "Delete a service and everything it runs",
+		Long: `Delete a service: its preview environments, its staging and production
+deployments with their namespaces, and last its catalog entry. The GitHub
+repo is kept. The work is shown as it happens; if it fails half way the
+service stays in the catalog and the delete can be run again.
+
+You must type the service's name to confirm, or pass --yes. The name is
+never taken from forge.yaml.`,
 		Example: `  forge service delete payments
   forge service delete payments --yes
   forge service delete payments --dry-run`,
@@ -603,18 +608,30 @@ confirm, or pass --yes. The name is never taken from forge.yaml.`,
 			if err != nil {
 				return err
 			}
-			if _, err := c.Catalog.DeleteService(ctx, connect.NewRequest(&forgev1.DeleteServiceRequest{Name: name, ValidateOnly: dryRun})); err != nil {
+			resp, err := c.Catalog.DeleteService(ctx, connect.NewRequest(&forgev1.DeleteServiceRequest{Name: name, ValidateOnly: dryRun}))
+			if err != nil {
 				return err
 			}
 			if dryRun {
 				f.infof("%s would be deleted (dry run, nothing changed).", name)
 				return nil
 			}
+			// A service that runs something is taken down by an operation first.
+			if op := resp.Msg.GetOperation(); op != nil {
+				f.infof("Deleting %s (%s):", name, op.GetName())
+				done, err := f.watchOperation(ctx, c, op.GetName())
+				if err != nil {
+					return err
+				}
+				if err := opFailure(done); err != nil {
+					return exitcode.From(err).WithHint(fmt.Sprintf("%s is still in the catalog; run 'forge service delete %s' again", name, shortName(name)))
+				}
+			}
 			f.infof("%s deleted.", name)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check that the delete would succeed without deleting")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check that the delete would be accepted without deleting anything")
 	return cmd
 }

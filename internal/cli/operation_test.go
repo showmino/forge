@@ -221,6 +221,10 @@ func TestOpCancel(t *testing.T) {
 
 	waited := h.startOp("environments/a", func(ctx context.Context, _ func(string, string)) error {
 		<-ctx.Done()
+		// Work takes a moment to stop. Without this the operation can end
+		// before the cancel call has answered, and the CLI then reports it as
+		// already finished (exit 0) instead of waiting for it (exit 7).
+		time.Sleep(50 * time.Millisecond)
 		return ctx.Err()
 	})
 	r = h.fails(7, "op", "cancel", waited, "--yes", "--wait")

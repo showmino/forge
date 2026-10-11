@@ -87,6 +87,36 @@ func (r *RepoFiles) CommitFile(ctx context.Context, parent, tree, path string, c
 	return commit.SHA, nil
 }
 
+// DeleteFile commits the removal of path on top of parent (whose tree is
+// tree) and moves the branch to it without forcing, as CommitFile does. The
+// path must exist in tree.
+func (r *RepoFiles) DeleteFile(ctx context.Context, parent, tree, path, message string) (string, error) {
+	var newTree, commit struct {
+		SHA string `json:"sha"`
+	}
+	// A tree entry with a null sha removes the path from the base tree.
+	in := map[string]any{
+		"base_tree": tree,
+		"tree":      []map[string]any{{"path": path, "mode": "100644", "type": "blob", "sha": nil}},
+	}
+	if err := r.Client.doJSON(ctx, http.MethodPost, r.git()+"/trees", in, &newTree); err != nil {
+		return "", fmt.Errorf("create the tree: %w", err)
+	}
+	if err := r.Client.doJSON(ctx, http.MethodPost, r.git()+"/commits",
+		map[string]any{"message": message, "tree": newTree.SHA, "parents": []string{parent}}, &commit); err != nil {
+		return "", fmt.Errorf("create the commit: %w", err)
+	}
+	err := r.Client.doJSON(ctx, http.MethodPatch, r.git()+"/refs/heads/"+escapeRef(r.Branch), map[string]any{"sha": commit.SHA, "force": false}, nil)
+	var se *StatusError
+	if errors.As(err, &se) && se.Status == http.StatusUnprocessableEntity {
+		return "", fmt.Errorf("%w: %w", ErrNotFastForward, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("update %s: %w", r.Branch, err)
+	}
+	return commit.SHA, nil
+}
+
 // History returns up to limit commits that changed path, newest first.
 func (r *RepoFiles) History(ctx context.Context, path string, limit int) ([]CommitInfo, error) {
 	var out []struct {

@@ -33,6 +33,8 @@ type Catalog struct {
 	// resources, when set, is asked before a service is deleted: a service
 	// that still has resources stays.
 	resources store.ResourceStore
+	// teardown, when set, takes down what a service runs before it is deleted.
+	teardown *teardown
 }
 
 // GuardResources makes DeleteService refuse a service that still has
@@ -316,30 +318,14 @@ func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev
 				name, strings.Join(names, ", ")))
 		}
 	}
-	err = c.store.Write(ctx, func(tx store.Tx) error {
-		cur, _, err := tx.Get(ctx, name)
-		if errors.Is(err, store.ErrNotFound) {
-			return notFound(name)
-		}
+	if c.teardown != nil {
+		op, err := c.startTeardown(ctx, name, req.Msg.GetEtag(), req.Msg.GetValidateOnly())
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if e := req.Msg.GetEtag(); e != "" && e != cur.GetEtag() {
-			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, e, cur.GetEtag()))
-		}
-		deps, err := tx.Dependents(ctx, name)
-		if err != nil {
-			return err
-		}
-		if len(deps) > 0 {
-			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is a dependency of %s", name, deps[0]))
-		}
-		if req.Msg.GetValidateOnly() {
-			return nil
-		}
-		return tx.Delete(ctx, name)
-	})
-	if err != nil {
+		return connect.NewResponse(&forgev1.DeleteServiceResponse{Operation: op}), nil
+	}
+	if err := c.deleteChecked(ctx, name, req.Msg.GetEtag(), req.Msg.GetValidateOnly()); err != nil {
 		return nil, storeErr(err)
 	}
 	return connect.NewResponse(&forgev1.DeleteServiceResponse{}), nil

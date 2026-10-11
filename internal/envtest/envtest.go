@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -244,6 +245,29 @@ func (r *Repo) CommitFile(_ context.Context, parent, _, p string, content []byte
 	return r.push(p, content, message), nil
 }
 
+// DeleteFile commits the removal of path on parent, which must be the head.
+func (r *Repo) DeleteFile(_ context.Context, parent, _, p, message string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	head := r.commits[len(r.commits)-1]
+	if head.sha != parent {
+		return "", github.ErrNotFastForward
+	}
+	if _, ok := head.files[p]; !ok {
+		return "", fmt.Errorf("%s: %w", p, github.ErrNotFound)
+	}
+	files := make(map[string][]byte, len(head.files))
+	for k, v := range head.files {
+		if k != p {
+			files[k] = v
+		}
+	}
+	sha := fmt.Sprintf("%040x", len(r.commits))
+	r.commits = append(r.commits, repoCommit{sha: sha, files: files, message: message, time: time.Now()})
+	return sha, nil
+}
+
 // History returns the commits that changed path, newest first.
 func (r *Repo) History(_ context.Context, p string, limit int) ([]github.CommitInfo, error) {
 	r.mu.Lock()
@@ -283,7 +307,9 @@ func (r *Repo) files() (string, []string) {
 // Argo plays Argo CD until Run's ctx ends: for every
 // services/<svc>/<env>/values.yaml at the repo head it makes namespace
 // <svc>-<env> and, Lag after first seeing that head, marks Application
-// <svc>-<env> synced to it.
+// <svc>-<env> synced to it. An Application whose values file is gone from
+// the head is removed, Lag after that head was first seen, as the
+// ApplicationSet does; its namespace stays, as in Argo CD.
 type Argo struct {
 	Kube      kubernetes.Interface
 	Dynamic   dynamic.Interface
@@ -328,6 +354,18 @@ func (a *Argo) Run(ctx context.Context) {
 		head, paths := a.Repo.files()
 		if _, ok := seen[head]; !ok {
 			seen[head] = time.Now()
+		}
+		if time.Since(seen[head]) >= a.lag() {
+			for name := range synced {
+				svc, env := name[:strings.LastIndex(name, "-")], name[strings.LastIndex(name, "-")+1:]
+				if slices.Contains(paths, "services/"+svc+"/"+env+"/values.yaml") {
+					continue
+				}
+				err := a.Dynamic.Resource(Applications).Namespace(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+				if err == nil || apierrors.IsNotFound(err) {
+					delete(synced, name)
+				}
+			}
 		}
 		for _, p := range paths {
 			parts := strings.Split(p, "/")

@@ -35,6 +35,7 @@ type DeployRepo interface {
 	Read(ctx context.Context, path, ref string) ([]byte, error)
 	Head(ctx context.Context) (string, string, error)
 	CommitFile(ctx context.Context, parent, tree, path string, content []byte, message string) (string, error)
+	DeleteFile(ctx context.Context, parent, tree, path, message string) (string, error)
 	History(ctx context.Context, path string, limit int) ([]github.CommitInfo, error)
 }
 
