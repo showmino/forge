@@ -88,14 +88,14 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		return nil, err
 	}
 	env, actor := m.GetEnv(), actorOf(ctx)
-	addr, moved, err := d.addressFor(ctx, src.serviceID, env, src.domain, d.currentValues(ctx, src.serviceID, env))
+	addr, moved, err := d.addressFor(ctx, src.serviceID, env, wanted{domain: src.domain, host: src.host}, d.currentValues(ctx, src.serviceID, env))
 	if err != nil {
 		return nil, err
 	}
 	v := deployValues{
 		Name: src.serviceID, Env: env, Image: src.image, Port: src.port, Health: src.health, Replicas: 1,
 		Host: addr.host, Listener: addr.listener, DNS: addr.dns,
-		Forge: deployRecord{Service: servicePrefix + src.serviceID, Env: env, Ref: src.ref, Commit: src.commit, Actor: actor, Kind: kindDeploy, Domain: src.domain},
+		Forge: deployRecord{Service: servicePrefix + src.serviceID, Env: env, Ref: src.ref, Commit: src.commit, Actor: actor, Kind: kindDeploy, Domain: src.domain, Host: src.host},
 	}
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, src.serviceID, m.GetEnv()); err != nil {
 		return nil, err

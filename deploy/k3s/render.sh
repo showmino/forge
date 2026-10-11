@@ -224,6 +224,18 @@ if [ -n "$web_origins" ]; then
 else
   web_marks='/#web$/d'
 fi
+# The login's own address. Dex has one, its issuer: what you, the CLI, the
+# dashboard and forge-api's pods all use. By default it is the LAN address
+# http://<dex host>; FORGE_LOGIN_URL gives it a public HTTPS name, which a
+# dashboard served over HTTPS needs (a tunnel or proxy must send that name to
+# Dex, and the GitHub OAuth app's callback must be <FORGE_LOGIN_URL>/dex/callback).
+login_url=${FORGE_LOGIN_URL:-}
+dex_url=http://$dex_host
+if [ -n "$login_url" ]; then
+  printf '%s' "$login_url" | grep -Eq '^https?://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(:[0-9]{1,5})?$' ||
+    { echo "invalid FORGE_LOGIN_URL: $login_url (a scheme and a host, lower case, no path, like https://login.example.com)" >&2; exit 2; }
+  dex_url=$login_url
+fi
 # Public addresses: services reached under real domains, through the
 # platform's DNS records and tunnel. Each item is <domain>=<DNS zone name>.
 public_domains=${FORGE_PUBLIC_DOMAINS:-}
@@ -318,7 +330,7 @@ fi
     cat "$dir/resources.yaml.tmpl"
   fi
 } | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
-        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
+        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |
   PUBLIC_LISTENERS=$public_listeners awk '/#public-listeners$/ { printf "%s", ENVIRON["PUBLIC_LISTENERS"]; next } { print }'

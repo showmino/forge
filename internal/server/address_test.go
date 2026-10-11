@@ -39,6 +39,7 @@ func TestAddress(t *testing.T) {
 		name           string
 		d              *Deploys
 		svc, env, want string
+		as             string // run.host
 		host, url      string
 		dns            string // "<name> <zone> <tunnel>", "" for none
 		refused        string // in the error
@@ -51,11 +52,19 @@ func TestAddress(t *testing.T) {
 		{name: "the other domain", d: pub, svc: "payments", env: "production", want: "deogratias.cloud", host: "payments.deogratias.cloud", url: "https://payments.deogratias.cloud", dns: "payments deogratias-cloud production"},
 		{name: "none keeps the internal address", d: pub, svc: "forge-web", env: "staging", want: "none", host: "forge-web.staging.10.150.1.222.nip.io", url: "http://forge-web.staging.10.150.1.222.nip.io"},
 		{name: "a domain the platform does not have", d: pub, svc: "payments", env: "staging", want: "example.org", refused: "use showmino.com or deogratias.cloud"},
-		{name: "a name that is another service's staging address", d: pub, svc: "payments-staging", env: "production", refused: `where the service "payments" is reached in staging`},
+		{name: "a name that is another service's staging address", d: pub, svc: "payments-staging", env: "production", refused: `a service named payments-staging cannot have a public address: payments-staging.showmino.com is where "payments" is reached in staging`},
 		{name: "that name is fine without a public address", d: pub, svc: "payments-staging", env: "production", want: "none", host: "payments-staging.production.10.150.1.222.nip.io", url: "http://payments-staging.production.10.150.1.222.nip.io"},
 		{name: "a name too long with its suffix", d: pub, svc: strings.Repeat("a", 60), env: "staging", refused: "too long"},
+		// run.host: the name before the domain is not the service's own.
+		{name: "another name, production", d: pub, svc: "forge-web", env: "production", as: "forge", host: "forge.showmino.com", url: "https://forge.showmino.com", dns: "forge showmino-com production"},
+		{name: "another name, staging", d: pub, svc: "forge-web", env: "staging", as: "forge", host: "forge-staging.showmino.com", url: "https://forge-staging.showmino.com", dns: "forge-staging showmino-com production"},
+		{name: "another name on the other domain", d: pub, svc: "forge-web", env: "production", as: "forge", want: "deogratias.cloud", host: "forge.deogratias.cloud", url: "https://forge.deogratias.cloud", dns: "forge deogratias-cloud production"},
+		{name: "the service's own name as run.host", d: pub, svc: "payments", env: "production", as: "payments", host: "payments.showmino.com", url: "https://payments.showmino.com", dns: "payments showmino-com production"},
+		{name: "another name that is someone's staging address", d: pub, svc: "forge-web", env: "production", as: "shop-staging", refused: `run.host shop-staging cannot have a public address`},
+		{name: "another name means nothing for an internal address", d: pub, svc: "forge-web", env: "staging", as: "forge", want: "none", host: "forge-web.staging.10.150.1.222.nip.io", url: "http://forge-web.staging.10.150.1.222.nip.io"},
+		{name: "another name without public domains", d: lan, svc: "forge-web", env: "staging", as: "forge", host: "forge-web.staging.10.150.1.222.nip.io", url: "http://forge-web.staging.10.150.1.222.nip.io"},
 	} {
-		a, err := tc.d.address(tc.svc, tc.env, tc.want)
+		a, err := tc.d.address(tc.svc, tc.env, wanted{domain: tc.want, host: tc.as})
 		if tc.refused != "" {
 			if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), tc.refused) {
 				t.Errorf("%s: %v, want a refusal with %q", tc.name, err, tc.refused)
@@ -278,5 +287,59 @@ func TestResolvesInDNS(t *testing.T) {
 	}
 	if taken {
 		t.Error("a name that cannot exist resolves")
+	}
+}
+
+// A service may be reached under another name than its own (run.host), but
+// not under the name of another service.
+func TestPublicAddressOtherName(t *testing.T) {
+	t.Parallel()
+	dns := &taken{hosts: map[string]bool{}}
+	manifest := func(run string) []byte {
+		return []byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n  port: 9090\n" + run)
+	}
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		o.PublicDomains = []PublicDomain{{Name: "showmino.com", Zone: "showmino-com"}}
+		o.HostTaken = dns.check
+		files := o.GitHub.(*envtest.GitHub).Files
+		files[envSHA+":forge.yaml"] = manifest("  host: pay\n")
+		files[ciOldSHA+":forge.yaml"] = manifest("  host: ledger\n")
+	})
+	ctx := context.Background()
+	if _, err := f.catalog.RegisterService(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{
+		ServiceId: "ledger", Service: &forgev1.Service{OwnerTeam: "billing", RepoUrl: "https://github.com/showmino/ledger"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	// The name of another service is refused, deployed or not, also in a dry run.
+	for _, dry := range []bool{true, false} {
+		_, err := f.client.StartDeploy(ctx, as("writer", &forgev1.StartDeployRequest{Service: "services/payments", Env: "staging", Ref: "release", ValidateOnly: dry}))
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "run.host ledger is the name of another service") {
+			t.Fatalf("another service's name (dry run %v): %v", dry, err)
+		}
+	}
+
+	// A free name: staging and, by promotion, production carry it.
+	op := f.deployRef(t, "staging", "")
+	if op.GetError() != nil || stepMessage(op, "address") != "https://pay-staging.showmino.com (public: reachable from the internet)" {
+		t.Fatalf("deploy: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	if op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED); op.GetError() != nil || !strings.HasPrefix(stepMessage(op, "address"), "https://pay.showmino.com ") {
+		t.Fatalf("promote: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	data, err := f.repo.Read(ctx, valuesPath("payments", "production"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, _ := parseValues(data)
+	if v.Host != "pay.showmino.com" || v.DNS == nil || v.DNS.Name != "pay" || v.Forge.Host != "pay" || v.Name != "payments" {
+		t.Errorf("production values: %+v dns %+v", v, v.DNS)
+	}
+	// The DNS check asked for the names it handed out, not the service's own.
+	dns.mu.Lock()
+	defer dns.mu.Unlock()
+	if strings.Join(dns.asked, " ") != "pay-staging.showmino.com pay.showmino.com" {
+		t.Errorf("asked DNS for %v", dns.asked)
 	}
 }

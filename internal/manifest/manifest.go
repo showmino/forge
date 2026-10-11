@@ -56,6 +56,19 @@ type Run struct {
 	// Empty means the platform's default; DomainNone keeps the service on
 	// the platform's internal address.
 	Domain string `yaml:"domain,omitempty"`
+	// Host is the name before the domain in the service's public addresses,
+	// when it is not the service's own: with "shop" a service called
+	// web-storefront is reached at shop.<domain> in production and at
+	// shop-staging.<domain> in staging.
+	Host string `yaml:"host,omitempty"`
+}
+
+// RunHost returns run.host as it is written: "" for the service's name.
+func (m *Manifest) RunHost() string {
+	if m.Run == nil {
+		return ""
+	}
+	return m.Run.Host
 }
 
 // DomainNone is the run.domain of a service without a public address.
@@ -173,6 +186,9 @@ func (m *Manifest) Validate() error {
 		}
 		if r.Health != "" && !strings.HasPrefix(r.Health, "/") {
 			return fmt.Errorf("run.health %q must be an absolute path such as /healthz", r.Health)
+		}
+		if r.Host != "" && !ValidID(r.Host) {
+			return fmt.Errorf("run.host %q must be a lowercase DNS label (a-z, 0-9, '-', max 63), the name before the domain", r.Host)
 		}
 		if r.Domain != "" && r.Domain != DomainNone && !domainName.MatchString(r.Domain) {
 			return fmt.Errorf("run.domain %q must be a domain such as example.com, or %q", r.Domain, DomainNone)

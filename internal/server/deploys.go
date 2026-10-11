@@ -154,9 +154,11 @@ type deployRecord struct {
 	Time      string `yaml:"time"`
 	// Version is the tag the commit ran as; empty before Forge cut versions.
 	Version string `yaml:"version,omitempty"`
-	// Domain is run.domain of the commit's forge.yaml, kept so that a
-	// promotion gives the next environment the address the service asked for.
+	// Domain and Host are run.domain and run.host of the commit's forge.yaml,
+	// kept so that a promotion gives the next environment the address the
+	// service asked for.
 	Domain string `yaml:"domain,omitempty"`
+	Host   string `yaml:"host,omitempty"`
 	// Image and DeployCommit come from the commit, not the values file.
 	Image        string `yaml:"-"`
 	DeployCommit string `yaml:"-"`
@@ -500,7 +502,7 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	// restored commit asked for, under today's settings. An older deploy's
 	// address may be one the platform no longer hands out, or someone else's
 	// by now, and a rollback must not take a public service off the internet.
-	addr, moved, err := d.addressFor(ctx, svc, env, v.Forge.Domain, d.currentValues(ctx, svc, env))
+	addr, moved, err := d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host}, d.currentValues(ctx, svc, env))
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +562,7 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	addr, moved, err := d.addressFor(ctx, svc, to, src.Forge.Domain, d.currentValues(ctx, svc, to))
+	addr, moved, err := d.addressFor(ctx, svc, to, wanted{domain: src.Forge.Domain, host: src.Forge.Host}, d.currentValues(ctx, svc, to))
 	if err != nil {
 		return nil, err
 	}
