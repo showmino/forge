@@ -148,3 +148,25 @@ kubectl -n argocd delete appproject forge-services
 kubectl -n argocd delete role,rolebinding forge-api-applications
 kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   # the finalizer does not remove namespaces
 ```
+
+## The web dashboard (Phase 6)
+
+Live on k3s since 2026-10-11: forge-api `a846a98` and Dex with the client `forge-web`. From now on every
+render must also carry `FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io`
+(next to `FORGE_DEPLOYS=1`, the chart revision, the App and both 1Password items); a render without it removes
+the dashboard's login client and its CORS access. Restart Dex after a change to its config
+(`kubectl -n forge rollout restart deploy/dex`): it reads the config only at start.
+
+Check the login path without a browser, against local Dex and `make api` (or a throwaway Dex on another port):
+
+```sh
+python3 -I .claude/skills/forge/scripts/web-login-check.py                 # http://localhost:8080, origin http://localhost:3000
+```
+
+It walks discovery, the PKCE code flow with the static password, the token exchange without a client secret,
+the preflight and a call with the dashboard's token: 14 lines, all `ok`. On k3s logins go through GitHub, so
+there only the first part can be checked by script (GetServerInfo, the preflight and Dex's discovery with an
+`Origin` header); the rest needs a person in a browser.
+
+The dashboard's repo is `showmino/forge-web` (checkout `/home/mino/code/forge-web`); after an API change run
+`sh scripts/sync-proto.sh ../forge` there.

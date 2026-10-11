@@ -40,8 +40,8 @@ dex: ## Start the local Dex identity provider on :5556
 db: ## Start a local PostgreSQL on :55432 for the store tests (FORGE_TEST_DATABASE_URL)
 	docker run -d --name forge-test-db -p 55432:5432 -e POSTGRES_PASSWORD=forge mirror.gcr.io/library/postgres:18
 
-api: build ## Run forge-api against local Dex
-	$(BIN)/forge-api --oidc-issuer http://localhost:5556/dex
+api: build ## Run forge-api against local Dex, accepting the web dashboard on localhost:3000
+	$(BIN)/forge-api --oidc-issuer http://localhost:5556/dex --oidc-web-client-id forge-web --cors-origins http://localhost:3000
 
 api-dev: build ## Run forge-api without an identity provider (token "dev")
 	$(BIN)/forge-api --insecure-dev-token

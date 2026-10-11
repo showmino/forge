@@ -10,6 +10,8 @@ storage:
 
 web:
   http: 0.0.0.0:5556
+  # The web dashboard in development (npm run dev) calls Dex from the browser.
+  allowedOrigins: ["http://localhost:3000"]
 
 oauth2:
   grantTypes:
@@ -32,6 +34,12 @@ staticClients:
     redirectURIs:
       - /device/callback
       - http://127.0.0.1:8085/callback
+  # Public client of the web dashboard (showmino/forge-web) in development.
+  - id: forge-web
+    name: Forge dashboard
+    public: true
+    redirectURIs:
+      - http://localhost:3000/auth/callback
 
 enablePasswordDB: true
 staticPasswords:

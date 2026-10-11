@@ -37,7 +37,8 @@ Live progress needs nothing new: `WatchOperation` is already a Connect server st
 - The demo cluster is plain HTTP, where the browser's `crypto.subtle` is not available. The SHA-256 for the challenge comes from `@noble/hashes`; randomness comes from `crypto.getRandomValues`, which works everywhere.
 - No refresh token in milestones 1 and 2. When the token has expired (one hour) or the API answers "unauthenticated", the app sends the user through login again and returns them to the page they were on. Milestone 3 decides whether that is good enough.
 - The app never judges permissions itself. It calls `GetStatus` and uses the answer only to hide buttons a reader cannot use; the API still decides every call.
-- The app sets a Content-Security-Policy that allows scripts from itself only, and connections to forge-api and Dex only.
+- The app sets a Content-Security-Policy that limits scripts, styles, fonts and images to the app itself and forbids framing. As built in milestone 1 it allows connections to any address: the login service's address is known only at run time (from `GetServerInfo`), and the pages are built before that. Naming forge-api and the login service in it, and dropping inline scripts, is left for milestone 3.
+- Previews of the dashboard cannot log in: only the staging and production addresses are registered with the login service.
 
 ## The app
 
