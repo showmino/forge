@@ -513,7 +513,7 @@ func (d *Deploys) startMutation(ctx context.Context, kind, svc, env string, v de
 	target := svc + "/" + env
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err := d.lock(target, "an operation"); err != nil {
+	if err := d.claim(ctx, svc, env); err != nil {
 		return nil, err
 	}
 	op := d.o.Operations.Start(ctx, kind, deployNamePrefix+target, v.Forge.Actor, func(ctx context.Context, emit func(string, string)) error {

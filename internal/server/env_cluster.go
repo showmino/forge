@@ -495,37 +495,36 @@ func (c *Cluster) EnsureServiceNamespace(ctx context.Context, service, env strin
 	return err
 }
 
-// ApplicationExists reports whether Argo CD still has the Application.
-func (c *Cluster) ApplicationExists(ctx context.Context, argoNamespace, name string) (bool, error) {
-	_, err := c.Dynamic.Resource(applications).Namespace(argoNamespace).Get(ctx, name, metav1.GetOptions{})
+// ForgeApplicationExists reports whether Argo CD has an Application of that
+// name that is Forge's (the ApplicationSet labels them). One that is not
+// Forge's is someone else's: it does not count and is never waited for.
+func (c *Cluster) ForgeApplicationExists(ctx context.Context, argoNamespace, name string) (bool, error) {
+	app, err := c.Dynamic.Resource(applications).Namespace(argoNamespace).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	return app.GetLabels()[labelManagedBy] == "forge", nil
 }
 
-// ServiceNamespaceExists reports whether <service>-<env> exists and is
-// Forge's. A namespace of that name that is not Forge's is an error: it is
-// someone else's and must never be touched.
-func (c *Cluster) ServiceNamespaceExists(ctx context.Context, service, env string) (bool, error) {
-	err := c.checkServiceNamespace(ctx, service, env)
-	if errors.Is(err, errNoEnv) && !errors.Is(err, errUnlabelled) {
-		return false, nil
-	}
-	if errors.Is(err, errUnlabelled) {
-		return false, fmt.Errorf("namespace %s-%s exists and is not Forge's (it lacks Forge's labels)", service, env)
-	}
-	return err == nil, err
-}
-
-// DeleteServiceNamespace starts deleting <service>-<env>, which must be
-// Forge's; a namespace that is already gone is fine.
+// DeleteServiceNamespace starts deleting <service>-<env>. A namespace that is
+// already gone is fine; one that is not Forge's is refused with
+// errUnlabelled and never touched. The delete names the namespace it looked
+// at by UID, so a namespace recreated in between is not the one deleted.
 func (c *Cluster) DeleteServiceNamespace(ctx context.Context, service, env string) error {
-	there, err := c.ServiceNamespaceExists(ctx, service, env)
-	if err != nil || !there {
+	ns, err := c.Kube.CoreV1().Namespaces().Get(ctx, service+"-"+env, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	err = c.Kube.CoreV1().Namespaces().Delete(ctx, service+"-"+env, metav1.DeleteOptions{})
+	if l := ns.Labels; l[labelManagedBy] != "forge" || l[labelService] != service || l[labelDeployEnv] != env {
+		return errUnlabelled
+	}
+	err = c.Kube.CoreV1().Namespaces().Delete(ctx, ns.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &ns.UID}})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}

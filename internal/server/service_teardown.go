@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/github"
@@ -35,9 +36,13 @@ func (c *Catalog) EnableTeardown(d *Deploys, e *Environments, ops *Operations) {
 	c.teardown = &teardown{deploys: d, envs: e, ops: ops}
 }
 
+func (t *teardown) hasDeploys() bool  { return t.deploys != nil }
+func (t *teardown) hasPreviews() bool { return t.envs != nil }
+
 // teardownPlan is what a service runs right now.
 type teardownPlan struct {
-	// previews are environment ids.
+	// previews are environment ids: the service's preview namespaces, and
+	// creates of it that have not made their namespace yet.
 	previews []string
 	// envs are deploy environments, in promotion order.
 	envs []string
@@ -45,23 +50,54 @@ type teardownPlan struct {
 
 func (p teardownPlan) empty() bool { return len(p.previews) == 0 && len(p.envs) == 0 }
 
+// removes names what the plan takes down, for the caller to read.
+func (p teardownPlan) removes(svc string) []string {
+	var out []string
+	for _, id := range p.previews {
+		out = append(out, envNamePrefix+id)
+	}
+	for _, env := range slices.Backward(p.envs) {
+		out = append(out, deployNamePrefix+svc+"/"+env)
+	}
+	return out
+}
+
+// previewsOf lists the previews of the service with id svc: its namespaces
+// and its creates still waiting for an image.
+func (e *Environments) previewsOf(ctx context.Context, svc string) ([]string, error) {
+	nss, err := e.o.Cluster.Envs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for i := range nss {
+		if nss[i].Labels[labelService] == svc {
+			ids = append(ids, nss[i].Labels[labelEnvironment])
+		}
+	}
+	e.mu.Lock()
+	for id, of := range e.pending {
+		if of == svc && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	e.mu.Unlock()
+	slices.Sort(ids)
+	return ids, nil
+}
+
 // plan finds what the service called name ("services/x") runs.
 func (t *teardown) plan(ctx context.Context, name string) (teardownPlan, error) {
 	var p teardownPlan
 	svc := strings.TrimPrefix(name, servicePrefix)
-	if t.envs != nil && t.envs.ready() == nil {
-		nss, err := t.envs.o.Cluster.Envs(ctx)
+	if t.hasPreviews() {
+		ids, err := t.envs.previewsOf(ctx, svc)
 		if err != nil {
 			return p, connect.NewError(connect.CodeUnavailable, fmt.Errorf("list the previews of %s: %w", name, err))
 		}
-		for i := range nss {
-			if env := t.envs.envFromNamespace(&nss[i]); env.GetService() == name {
-				p.previews = append(p.previews, strings.TrimPrefix(env.GetName(), envNamePrefix))
-			}
-		}
-		slices.Sort(p.previews)
+		p.previews = ids
 	}
-	if t.deploys != nil && t.deploys.ready() == nil {
+	if t.hasDeploys() {
 		for _, env := range deployEnvs {
 			there, err := t.deploys.deployed(ctx, svc, env)
 			if err != nil {
@@ -75,16 +111,17 @@ func (t *teardown) plan(ctx context.Context, name string) (teardownPlan, error) 
 	return p, nil
 }
 
-// deployed reports whether anything of svc/env is left: its values in the
-// deploy repo, its Argo CD application, or its namespace. A namespace of that
-// name that is not Forge's does not count: it is someone else's.
+// deployed reports whether anything of svc/env is left that is Forge's: its
+// values in the deploy repo, its Argo CD application, or its namespace. An
+// application or a namespace of that name that is not Forge's does not
+// count: it is someone else's, and is left alone.
 func (d *Deploys) deployed(ctx context.Context, svc, env string) (bool, error) {
 	if _, err := d.o.Repo.Read(ctx, valuesPath(svc, env), ""); err == nil {
 		return true, nil
 	} else if !errors.Is(err, github.ErrNotFound) {
 		return false, err
 	}
-	if there, err := d.o.Cluster.ApplicationExists(ctx, d.o.ArgoNamespace, svc+"-"+env); err != nil || there {
+	if there, err := d.o.Cluster.ForgeApplicationExists(ctx, d.o.ArgoNamespace, svc+"-"+env); err != nil || there {
 		return there, err
 	}
 	err := d.o.Cluster.checkServiceNamespace(ctx, svc, env)
@@ -94,21 +131,39 @@ func (d *Deploys) deployed(ctx context.Context, svc, env string) (bool, error) {
 	return err == nil, err
 }
 
-// waitGone polls gone until it reports true or timeout passes; it returns
-// false when time ran out.
-func waitGone(ctx context.Context, timeout, poll time.Duration, gone func() (bool, error)) (bool, error) {
+// waitGone polls gone until it reports true or timeout passes. It returns
+// whether the thing is gone and, when it is not, the last error of the check
+// (nil when every check answered "still there"). A check the API refuses
+// ends the wait at once: asking again will not change the answer.
+func waitGone(ctx context.Context, timeout, poll time.Duration, gone func(context.Context) (bool, error)) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	var last error
 	for {
-		if ok, err := gone(); err == nil && ok {
+		ok, err := gone(ctx)
+		if err == nil && ok {
 			return true, nil
+		}
+		if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+			return false, err
+		}
+		if ctx.Err() == nil {
+			last = err
 		}
 		select {
 		case <-ctx.Done():
-			return false, context.Cause(ctx)
+			return false, last
 		case <-time.After(poll):
 		}
 	}
+}
+
+// notGone words why a wait ended without the thing being gone.
+func notGone(what string, timeout time.Duration, last error) string {
+	if last != nil {
+		return fmt.Sprintf("could not check whether %s is gone: %v", what, last)
+	}
+	return fmt.Sprintf("%s still exists after %s", what, timeout)
 }
 
 // undeploy removes svc from env: its values leave the deploy repo, Argo CD
@@ -117,7 +172,7 @@ func waitGone(ctx context.Context, timeout, poll time.Duration, gone func() (boo
 // asked for again.
 func (d *Deploys) undeploy(ctx context.Context, svc, env string, emit func(string, string)) error {
 	path, target := valuesPath(svc, env), svc+"-"+env
-	removed := false
+	removed, commit := false, ""
 	for attempt := 0; attempt < 3 && !removed; attempt++ {
 		if attempt > 0 {
 			emit("commit", "the deploy repo moved; retrying on the new head")
@@ -140,37 +195,53 @@ func (d *Deploys) undeploy(ctx context.Context, svc, env string, emit func(strin
 			return fmt.Errorf("remove %s from the deploy repo: %w", path, err)
 		}
 		emit("commit", fmt.Sprintf("forge-deploys %s: removed %s from %s", shortSHA(sha), svc, env))
-		removed = true
+		removed, commit = true, sha
 	}
 	if !removed {
 		return &OpError{Code: "git_conflict", Message: "the deploy repo kept moving; delete again"}
 	}
+	// From here on the takedown is under way whatever happens to this
+	// operation: Argo CD acts on the deploy repo, not on us. A cancel must say so.
+	stands := func(err error) error {
+		if ctx.Err() == nil {
+			return err
+		}
+		at := ""
+		if commit != "" {
+			at = " (commit " + shortSHA(commit) + ")"
+		}
+		return &OpError{Code: OpCodeCancelled, Message: fmt.Sprintf(
+			"cancelled; %s is already removed from %s in the deploy repo%s and Argo CD is taking it down. Deploy again to restore it, or delete again to finish",
+			svc, env, at)}
+	}
 
-	gone, err := waitGone(ctx, d.o.SyncTimeout, d.o.Poll, func() (bool, error) {
-		there, err := d.o.Cluster.ApplicationExists(ctx, d.o.ArgoNamespace, target)
+	gone, last := waitGone(ctx, d.o.SyncTimeout, d.o.Poll, func(ctx context.Context) (bool, error) {
+		there, err := d.o.Cluster.ForgeApplicationExists(ctx, d.o.ArgoNamespace, target)
 		return !there, err
 	})
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
 	if !gone {
-		return &OpError{Code: "sync_timeout", Message: fmt.Sprintf(
-			"Argo CD still has the application %s after %s (%v); its workloads may still be running. Delete again once it is gone", target, d.o.SyncTimeout, err)}
+		return stands(&OpError{Code: "sync_timeout", Message: notGone("the Argo CD application "+target, d.o.SyncTimeout, last) +
+			"; its workloads may still be running. Delete again once it is gone"})
 	}
 	emit("argo", "Argo CD removed "+target+" and its workloads")
 
-	if err := d.o.Cluster.DeleteServiceNamespace(ctx, svc, env); err != nil {
-		return fmt.Errorf("delete namespace %s: %w", target, err)
+	switch err := d.o.Cluster.DeleteServiceNamespace(ctx, svc, env); {
+	case errors.Is(err, errUnlabelled):
+		// A namespace of this name that is not Forge's is someone else's.
+		emit("namespace", "left "+target+" alone: it is not Forge's")
+		return nil
+	case err != nil:
+		return stands(fmt.Errorf("delete namespace %s: %w", target, err))
 	}
-	gone, err = waitGone(ctx, d.o.NamespaceTimeout, d.o.Poll, func() (bool, error) {
-		there, err := d.o.Cluster.ServiceNamespaceExists(ctx, svc, env)
-		return !there, err
+	gone, last = waitGone(ctx, d.o.NamespaceTimeout, d.o.Poll, func(ctx context.Context) (bool, error) {
+		err := d.o.Cluster.checkServiceNamespace(ctx, svc, env)
+		if errors.Is(err, errNoEnv) { // gone, or replaced by one that is not Forge's
+			return true, nil
+		}
+		return false, err
 	})
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
 	if !gone {
-		return &OpError{Code: "namespace_timeout", Message: fmt.Sprintf("namespace %s still exists after %s (%v); delete again once it is gone", target, d.o.NamespaceTimeout, err)}
+		return stands(&OpError{Code: "namespace_timeout", Message: notGone("namespace "+target, d.o.NamespaceTimeout, last) + "; delete again once it is gone"})
 	}
 	emit("namespace", "removed "+target)
 	return nil
@@ -201,7 +272,7 @@ func (d *Deploys) lockService(svc string) (func(), error) {
 // transaction, that it exists, that etag (when given) still matches and that
 // nothing depends on it. With dry it only checks.
 func (c *Catalog) deleteChecked(ctx context.Context, name, etag string, dry bool) error {
-	return c.store.Write(ctx, func(tx store.Tx) error {
+	return storeErr(c.store.Write(ctx, func(tx store.Tx) error {
 		cur, _, err := tx.Get(ctx, name)
 		if errors.Is(err, store.ErrNotFound) {
 			return notFound(name)
@@ -223,7 +294,7 @@ func (c *Catalog) deleteChecked(ctx context.Context, name, etag string, dry bool
 			return nil
 		}
 		return tx.Delete(ctx, name)
-	})
+	}))
 }
 
 // teardownWork takes down what plan names, then removes name from the
@@ -235,6 +306,14 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 		defer release()
 		t := c.teardown
 		for _, id := range plan.previews {
+			// Looked at again: the plan may be minutes old by now.
+			mine, err := t.envs.previewsOf(ctx, svc)
+			if err != nil {
+				return fmt.Errorf("list the previews of %s: %w", name, err)
+			}
+			if !slices.Contains(mine, id) {
+				continue // destroyed meanwhile
+			}
 			emit("preview", "destroying "+id)
 			if err := t.envs.destroyWork(id)(ctx, emit); err != nil {
 				return err
@@ -245,6 +324,19 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 			if err := t.deploys.undeploy(ctx, svc, env, emit); err != nil {
 				return err
 			}
+		}
+		// Nothing new may be started for a service being deleted, but a
+		// request that was already past its checks can still have landed.
+		// Look once more before the entry goes: whatever is there now would
+		// otherwise run on unseen.
+		if again, err := t.plan(ctx, name); err != nil {
+			return err
+		} else if !again.empty() {
+			return &OpError{Code: "changed", Message: fmt.Sprintf(
+				"%s got something new while it was being deleted (%s); it is still in the catalog. Delete again", name, strings.Join(again.removes(svc), ", "))}
+		}
+		if err := c.checkNoResources(ctx, name); err != nil {
+			return &OpError{Code: "changed", Message: err.Error()}
 		}
 		if err := c.deleteChecked(ctx, name, "", false); err != nil {
 			if connect.CodeOf(err) == connect.CodeNotFound {
@@ -257,32 +349,70 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 	}
 }
 
-// startTeardown locks the service's deploys, looks at what it runs and either
-// removes it from the catalog at once (nothing runs) or starts the operation
-// that takes it down first. op is nil when the service was removed at once.
-func (c *Catalog) startTeardown(ctx context.Context, name, etag string, dry bool) (*forgev1.Operation, error) {
+// startTeardown claims the service, looks at what it runs and either removes
+// it from the catalog at once (nothing runs) or starts the operation that
+// takes it down first. op is nil when the service was removed at once, and
+// for a dry run; removes names what the delete takes (or would take) down.
+func (c *Catalog) startTeardown(ctx context.Context, name, etag string, dry bool) (op *forgev1.Operation, removes []string, err error) {
 	t := c.teardown
 	svc := strings.TrimPrefix(name, servicePrefix)
-	release := func() {}
-	if t.deploys != nil && t.deploys.ready() == nil && !dry {
-		var err error
-		if release, err = t.deploys.lockService(svc); err != nil {
-			return nil, err
+	// Asking again while a delete runs gets that delete, not a refusal.
+	if t.ops != nil && !dry {
+		for _, running := range t.ops.List(name, true) {
+			if running.GetKind() == kindDeleteService {
+				return running, nil, nil
+			}
 		}
 	}
+	// A dry run claims nothing, but says so when a real delete would be refused.
+	if dry {
+		if err := c.refuseDeleting(name); err != nil {
+			return nil, nil, err
+		}
+	} else if !c.markDeleting(name, "a delete") {
+		return nil, nil, c.refuseDeleting(name)
+	}
+	release := func() {}
+	if t.hasDeploys() {
+		unlock, err := t.deploys.lockService(svc)
+		if err != nil {
+			if !dry {
+				c.unmarkDeleting(name)
+			}
+			return nil, nil, err
+		}
+		release = unlock
+	}
+	if !dry {
+		unlock := release
+		release = func() { unlock(); c.unmarkDeleting(name) }
+	}
+	// Until the operation owns them, the claims are given back on every way out.
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			release()
+		}
+	}()
+
 	plan, err := t.plan(ctx, name)
 	if err != nil {
-		release()
-		return nil, err
+		return nil, nil, err
 	}
+	removes = plan.removes(svc)
 	if dry || plan.empty() {
-		defer release()
-		return nil, storeErr(c.deleteChecked(ctx, name, etag, dry))
+		return nil, removes, c.deleteChecked(ctx, name, etag, dry)
 	}
 	// Checked now, so a delete that cannot end well does not take anything down.
 	if err := c.deleteChecked(ctx, name, etag, true); err != nil {
-		release()
-		return nil, storeErr(err)
+		return nil, nil, err
 	}
-	return t.ops.Start(ctx, kindDeleteService, name, actorOf(ctx), c.teardownWork(name, plan, release)), nil
+	handedOff = true
+	op = t.ops.Start(ctx, kindDeleteService, name, actorOf(ctx), c.teardownWork(name, plan, release))
+	c.delMu.Lock()
+	if _, still := c.deleting[name]; still {
+		c.deleting[name] = op.GetName()
+	}
+	c.delMu.Unlock()
+	return op, removes, nil
 }

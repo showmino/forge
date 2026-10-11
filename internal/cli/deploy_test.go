@@ -120,8 +120,13 @@ func TestServiceDeleteTakesDeploymentsDown(t *testing.T) {
 		t.Fatalf("not deployed: %v", err)
 	}
 
-	// A dry run changes nothing.
-	h.ok("service", "delete", "payments", "--dry-run")
+	// A dry run changes nothing, and says what a delete would take down.
+	dry := h.ok("service", "delete", "payments", "--dry-run")
+	for _, want := range []string{"Deleting services/payments takes down:", "  deployments/payments/staging", "Its GitHub repo is kept.", "nothing changed"} {
+		if !strings.Contains(dry.err, want) {
+			t.Errorf("dry run lacks %q:\n%s", want, dry.err)
+		}
+	}
 	if _, err := repo.Read(context.Background(), "services/payments/staging/values.yaml", ""); err != nil {
 		t.Fatalf("the dry run removed the deployment: %v", err)
 	}

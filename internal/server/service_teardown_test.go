@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,8 @@ import (
 type teardownFixture struct {
 	*deployFixture
 	envs *Environments
+	// removes is what the last delete said it takes down.
+	removes []string
 }
 
 func newTeardownFixture(t *testing.T, tweak func(*DeployOptions, *envtest.Argo)) *teardownFixture {
@@ -63,6 +66,7 @@ func (f *teardownFixture) delete(ctx context.Context, req *forgev1.DeleteService
 	if err != nil {
 		return nil, err
 	}
+	f.removes = resp.Msg.GetRemoves()
 	return resp.Msg.GetOperation(), nil
 }
 
@@ -75,7 +79,7 @@ func (f *teardownFixture) left(t *testing.T) string {
 		if _, err := f.repo.Read(ctx, valuesPath("payments", env), ""); err == nil {
 			out = append(out, "values:"+env)
 		}
-		if there, _ := f.cluster.ApplicationExists(ctx, "argocd", "payments-"+env); there {
+		if there, _ := f.cluster.ForgeApplicationExists(ctx, "argocd", "payments-"+env); there {
 			out = append(out, "app:"+env)
 		}
 		if _, err := f.cluster.Kube.CoreV1().Namespaces().Get(ctx, "payments-"+env, metav1.GetOptions{}); err == nil {
@@ -114,6 +118,10 @@ func TestDeleteServiceTakesEverythingDown(t *testing.T) {
 	if got := f.left(t); got != everything {
 		t.Fatalf("after a dry run: %s", got)
 	}
+	// It names what a delete takes down: the preview, production before staging. Not another service's preview.
+	if got := strings.Join(f.removes, " "); got != "environments/pr-1 deployments/payments/production deployments/payments/staging" {
+		t.Errorf("a dry run names: %s", got)
+	}
 
 	op, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"})
 	if err != nil {
@@ -121,6 +129,13 @@ func TestDeleteServiceTakesEverythingDown(t *testing.T) {
 	}
 	if op.GetKind() != kindDeleteService || op.GetTarget() != "services/payments" || op.GetCreator() != "ana" {
 		t.Errorf("operation: %v", op)
+	}
+	// While it runs nothing can be started for the service, and asking again gets the same delete.
+	if _, err := f.start(t, "staging"); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("a deploy during the delete: %v", err)
+	}
+	if again, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"}); err != nil || again.GetName() != op.GetName() {
+		t.Errorf("a second delete while the first runs: %v %v, want %s", again.GetName(), err, op.GetName())
 	}
 	done := wait(t, f.ops, op.GetName())
 	if done.GetError() != nil {
@@ -147,6 +162,13 @@ func TestDeleteServiceTakesEverythingDown(t *testing.T) {
 	f.deploys.mu.Unlock()
 	if running != 0 {
 		t.Errorf("%d deploy targets still locked", running)
+	}
+	if err := f.catalog.refuseDeleting("services/payments"); err != nil {
+		t.Errorf("still marked as being deleted: %v", err)
+	}
+	// A deploy for a service that is gone is refused, not started.
+	if _, err := f.start(t, "staging"); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Errorf("a deploy after the delete: %v", err)
 	}
 }
 
@@ -194,19 +216,31 @@ func TestDeleteServiceRefusals(t *testing.T) {
 		}
 	})
 	t.Run("a deploy is running", func(t *testing.T) {
-		release, err := f.deploys.lockService("payments")
+		// A real one, held up by an Argo CD that does not react.
+		f.argo.SetLag(time.Hour)
+		f.images.Add("ghcr.io/showmino/payments:9f8e7d6")
+		resp, err := f.client.StartDeploy(context.Background(), as("writer", &forgev1.StartDeployRequest{Service: "services/payments", Env: "staging", Ref: "release"}))
 		if err != nil {
 			t.Fatal(err)
 		}
 		_, err = f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"})
-		release()
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "already running") {
 			t.Errorf("got %v", err)
 		}
+		// A dry run says the same: it must not promise a delete that would be refused.
+		if _, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments", ValidateOnly: true}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+			t.Errorf("dry run during a deploy: %v", err)
+		}
+		f.ops.Cancel(resp.Msg.GetOperation().GetName())
+		wait(t, f.ops, resp.Msg.GetOperation().GetName())
+		f.argo.SetLag(0)
 	})
-	// Every refusal came before anything was taken down, and left no lock behind.
+	// Every refusal came before anything was taken down, and left no lock or mark behind.
 	if got := f.left(t); got != everything {
 		t.Errorf("after the refusals: %s", got)
+	}
+	if err := f.catalog.refuseDeleting("services/payments"); err != nil {
+		t.Errorf("a refused delete left its mark: %v", err)
 	}
 	if release, err := f.deploys.lockService("payments"); err != nil {
 		t.Errorf("a refused delete left a lock: %v", err)
@@ -219,8 +253,7 @@ func TestDeleteServiceRefusals(t *testing.T) {
 // visible and the delete can be asked for again; the second one finishes.
 func TestDeleteServiceCanBeRetried(t *testing.T) {
 	t.Parallel()
-	f := newTeardownFixture(t, func(o *DeployOptions, _ *envtest.Argo) { o.SyncTimeout = 150 * time.Millisecond })
-	f.deploys.o.SyncTimeout = 5 * time.Second
+	f := newTeardownFixture(t, nil)
 	f.deployBoth(t)
 	// Argo CD stops reacting: the applications stay.
 	f.argo.SetLag(time.Hour)
@@ -231,8 +264,9 @@ func TestDeleteServiceCanBeRetried(t *testing.T) {
 		t.Fatal(err)
 	}
 	failed := wait(t, f.ops, op.GetName())
-	if failed.GetError().GetCode() != "sync_timeout" || !strings.Contains(failed.GetError().GetMessage(), "payments-production") {
-		t.Fatalf("got %v", failed.GetError())
+	if e := failed.GetError(); e.GetCode() != "sync_timeout" || !strings.Contains(e.GetMessage(), "the Argo CD application payments-production still exists after") ||
+		strings.Contains(e.GetMessage(), "deadline") {
+		t.Fatalf("got %v", e)
 	}
 	// Production's values are out of the repo; the rest, and the entry, are still there.
 	if got := f.left(t); got != "values:staging app:staging ns:staging app:production ns:production catalog" {
@@ -250,6 +284,94 @@ func TestDeleteServiceCanBeRetried(t *testing.T) {
 	}
 	if got := f.left(t); got != "" {
 		t.Errorf("after the second delete: %s", got)
+	}
+}
+
+// Cancelling after the service left the deploy repo cannot stop Argo CD from
+// taking it down, and the operation says so instead of a bare "cancelled".
+func TestDeleteServiceCancelledHalfWay(t *testing.T) {
+	t.Parallel()
+	f := newTeardownFixture(t, nil)
+	f.deployBoth(t)
+	f.argo.SetLag(time.Hour) // the applications stay: the delete waits for Argo CD
+
+	op, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Wait until production's values are out of the repo, then cancel.
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if _, err := f.repo.Read(context.Background(), valuesPath("payments", "production"), ""); err != nil {
+			break
+		}
+	}
+	f.ops.Cancel(op.GetName())
+	cancelled := wait(t, f.ops, op.GetName())
+	e := cancelled.GetError()
+	if e.GetCode() != OpCodeCancelled || !strings.Contains(e.GetMessage(), "payments is already removed from production in the deploy repo (commit ") ||
+		!strings.Contains(e.GetMessage(), "delete again to finish") {
+		t.Fatalf("got %v", e)
+	}
+	// The service is still in the catalog and nothing is left claimed: the delete can be finished.
+	if got := f.left(t); !strings.HasSuffix(got, "catalog") {
+		t.Errorf("left: %s", got)
+	}
+	f.argo.SetLag(0)
+	op, err = f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done := wait(t, f.ops, op.GetName()); done.GetError() != nil {
+		t.Fatalf("finishing the delete: %v", done.GetError())
+	}
+	if got := f.left(t); got != "" {
+		t.Errorf("after finishing: %s", got)
+	}
+}
+
+// A preview that is still waiting for its image has no namespace yet. The
+// delete takes it down too, and no preview can be started meanwhile.
+func TestDeleteServiceWithAPreviewBeingCreated(t *testing.T) {
+	t.Parallel()
+	f := newTeardownFixture(t, nil)
+	f.deployBoth(t)
+	// As CreateEnvironment leaves it while the create waits for its image.
+	f.envs.mu.Lock()
+	f.envs.pending["pr-9"] = "payments"
+	f.envs.pending["other"] = "ledger"
+	f.envs.mu.Unlock()
+	if _, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments", ValidateOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.removes, " "); !strings.HasPrefix(got, "environments/pr-9 ") || strings.Contains(got, "other") {
+		t.Errorf("a dry run names: %s", got)
+	}
+	// And while a service is being deleted, nothing new is started for it.
+	if !f.catalog.markDeleting("services/payments", "operations/op_test") {
+		t.Fatal("could not mark")
+	}
+	if err := f.catalog.refuseDeleting("services/payments"); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "being deleted") {
+		t.Errorf("got %v", err)
+	}
+	if _, err := f.start(t, "staging"); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "being deleted") {
+		t.Errorf("a deploy: %v", err)
+	}
+	f.catalog.unmarkDeleting("services/payments")
+}
+
+// With deploys and previews switched off there is nothing to take down:
+// delete removes the catalog entry, as before.
+func TestDeleteServiceWithoutDeploysOrPreviews(t *testing.T) {
+	t.Parallel()
+	c := NewCatalog(nil)
+	c.EnableTeardown(nil, nil, NewOperations(nil))
+	register(t, c, "payments")
+	resp, err := c.DeleteService(writerCtx(), connect.NewRequest(&forgev1.DeleteServiceRequest{Name: "services/payments"}))
+	if err != nil || resp.Msg.GetOperation() != nil || len(resp.Msg.GetRemoves()) != 0 {
+		t.Fatalf("got %v %v", resp, err)
+	}
+	if has, _ := c.has(context.Background(), "services/payments"); has {
+		t.Error("still in the catalog")
 	}
 }
 
@@ -276,7 +398,47 @@ func TestDeleteServiceLeavesForeignNamespaces(t *testing.T) {
 	if _, err := f.cluster.Kube.CoreV1().Namespaces().Get(ctx, "payments-staging", metav1.GetOptions{}); apierrors.IsNotFound(err) {
 		t.Error("the foreign namespace was deleted")
 	}
-	if err := f.cluster.DeleteServiceNamespace(ctx, "payments", "staging"); err == nil {
-		t.Error("deleting a foreign namespace must be refused")
+	if err := f.cluster.DeleteServiceNamespace(ctx, "payments", "staging"); !errors.Is(err, errUnlabelled) {
+		t.Errorf("deleting a foreign namespace must be refused, got %v", err)
+	}
+}
+
+// The same when the service is deployed and its namespace was taken over by
+// someone else meanwhile: the delete removes what is Forge's and leaves that
+// namespace alone.
+func TestDeleteServiceLeavesANamespaceThatIsNoLongerForges(t *testing.T) {
+	t.Parallel()
+	f := newTeardownFixture(t, nil)
+	resp, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait(t, f.ops, resp.GetOperation().GetName())
+	ctx := context.Background()
+	ns, err := f.cluster.Kube.CoreV1().Namespaces().Get(ctx, "payments-staging", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ns.Labels = map[string]string{"owner": "someone-else"}
+	if _, err := f.cluster.Kube.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// The fake Argo CD would relabel the namespace on its next pass: it only creates, so the labels stay.
+	op, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := wait(t, f.ops, op.GetName())
+	if done.GetError() != nil {
+		t.Fatalf("delete: %v", done.GetError())
+	}
+	if got := eventSteps(done); got != "commit,argo,namespace,catalog" {
+		t.Errorf("steps: %s", got)
+	}
+	if _, err := f.cluster.Kube.CoreV1().Namespaces().Get(ctx, "payments-staging", metav1.GetOptions{}); err != nil {
+		t.Errorf("the namespace that is not Forge's was deleted: %v", err)
+	}
+	if has, _ := f.catalog.has(ctx, "services/payments"); has {
+		t.Error("still in the catalog")
 	}
 }

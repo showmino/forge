@@ -51,7 +51,12 @@ func (e *Environments) CreateEnvironment(ctx context.Context, req *connect.Reque
 	if err != nil {
 		return nil, envErr(p.id, err)
 	}
-	if e.pending[p.id] || slicesContainsEnv(nss, p.id) {
+	// Under e.mu, so a delete of the service either sees this create as
+	// pending or has already claimed the service.
+	if err := e.o.Catalog.refuseDeleting(servicePrefix + p.serviceID); err != nil {
+		return nil, err
+	}
+	if _, pending := e.pending[p.id]; pending || slicesContainsEnv(nss, p.id) {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s%s already exists", envNamePrefix, p.id))
 	}
 	if n := e.countEnvs(nss); n >= e.o.Max {
@@ -62,7 +67,7 @@ func (e *Environments) CreateEnvironment(ctx context.Context, req *connect.Reque
 		preview.ExpireTime = timestamppb.New(e.o.Now().Add(p.ttl))
 		return connect.NewResponse(&forgev1.CreateEnvironmentResponse{Environment: preview}), nil
 	}
-	e.pending[p.id] = true
+	e.pending[p.id] = p.serviceID
 	op := e.o.Operations.Start(ctx, kindCreateEnv, envNamePrefix+p.id, p.creator, e.createWork(p))
 	if key := m.GetRequestId(); key != "" {
 		e.requests[key] = op.GetName()

@@ -39,7 +39,11 @@ func (g *gitServer) handler() http.Handler {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&in)
 		// A removal: the entry names the path with a null sha and no content.
-		if sha, has := in.Tree[0]["sha"]; len(in.Tree) == 1 && has && sha == nil {
+		if len(in.Tree) != 1 {
+			http.Error(w, "bad tree", http.StatusBadRequest)
+			return
+		}
+		if sha, has := in.Tree[0]["sha"]; has && sha == nil {
 			if _, content := in.Tree[0]["content"]; content || in.Tree[0]["mode"] != "100644" || in.Tree[0]["type"] != "blob" {
 				http.Error(w, "bad removal", http.StatusBadRequest)
 				return

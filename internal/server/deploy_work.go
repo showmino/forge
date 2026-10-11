@@ -24,6 +24,28 @@ func (d *Deploys) lock(target, opName string) error {
 	return nil
 }
 
+// claim locks svc/env and then checks, with the lock held, that the service
+// is still in the catalog and is not being deleted: a delete holds these
+// locks while it runs and removes the entry before it lets go. d.mu must be
+// held.
+func (d *Deploys) claim(ctx context.Context, svc, env string) error {
+	target := svc + "/" + env
+	if err := d.lock(target, "an operation"); err != nil {
+		return err
+	}
+	err := d.o.Catalog.refuseDeleting(servicePrefix + svc)
+	if err == nil {
+		var ok bool
+		if ok, err = d.o.Catalog.has(ctx, servicePrefix+svc); err == nil && !ok {
+			err = notFound(servicePrefix + svc)
+		}
+	}
+	if err != nil {
+		delete(d.running, target)
+	}
+	return err
+}
+
 func (d *Deploys) unlock(target string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -87,7 +109,7 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 			}
 		}
 	}
-	if err := d.lock(target, "an operation"); err != nil {
+	if err := d.claim(ctx, src.serviceID, env); err != nil {
 		return nil, err
 	}
 	op := d.o.Operations.Start(ctx, opDeploy, deployNamePrefix+target, actor, func(ctx context.Context, emit func(string, string)) error {

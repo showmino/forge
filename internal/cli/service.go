@@ -597,24 +597,35 @@ never taken from forge.yaml.`,
 			if err != nil {
 				return err
 			}
-			if !dryRun {
-				if err := f.confirmDestructive("delete", name, yes); err != nil {
-					return err
-				}
-			}
 			ctx, cancel := f.withTimeout(cmd.Context())
 			defer cancel()
 			c, err := f.Client(ctx, true)
 			if err != nil {
 				return err
 			}
-			resp, err := c.Catalog.DeleteService(ctx, connect.NewRequest(&forgev1.DeleteServiceRequest{Name: name, ValidateOnly: dryRun}))
+			// Ask first what the delete would take down: it is shown before
+			// the confirmation, and it is all a dry run does.
+			check, err := c.Catalog.DeleteService(ctx, connect.NewRequest(&forgev1.DeleteServiceRequest{Name: name, ValidateOnly: true}))
 			if err != nil {
 				return err
+			}
+			if removes := check.Msg.GetRemoves(); len(removes) > 0 {
+				f.infof("Deleting %s takes down:", name)
+				for _, r := range removes {
+					f.infof("  %s", r)
+				}
+				f.infof("Its GitHub repo is kept.")
 			}
 			if dryRun {
 				f.infof("%s would be deleted (dry run, nothing changed).", name)
 				return nil
+			}
+			if err := f.confirmDestructive("delete", name, yes); err != nil {
+				return err
+			}
+			resp, err := c.Catalog.DeleteService(ctx, connect.NewRequest(&forgev1.DeleteServiceRequest{Name: name}))
+			if err != nil {
+				return err
 			}
 			// A service that runs something is taken down by an operation first.
 			if op := resp.Msg.GetOperation(); op != nil {

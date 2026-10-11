@@ -238,6 +238,9 @@ func (r *Resources) PlanResources(ctx context.Context, req *connect.Request[forg
 	} else if !ok {
 		return nil, notFound(name)
 	}
+	if err := r.o.Catalog.refuseDeleting(name); err != nil {
+		return nil, err
+	}
 	settings, err := resource.Resolve(m.GetResources(), env)
 	if err != nil {
 		return nil, invalidArg("resources: %v", err)

@@ -137,6 +137,10 @@ message DeleteServiceResponse {
   // The teardown, when the service runs anything on the cluster; unset when
   // the service was removed at once (and for validate_only).
   Operation operation = 1;
+  // What the delete takes down besides the catalog entry, as resource names:
+  // "environments/pr-142", "deployments/payments/production". With
+  // validate_only it is what a delete would take down.
+  repeated string removes = 2;
 }
 
 message CreateServiceRequest {
