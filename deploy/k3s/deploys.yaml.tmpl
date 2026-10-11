@@ -33,6 +33,8 @@ spec:
     # shows a Deployment with nothing under it.
     - {group: apps, kind: ReplicaSet}
     - {group: "", kind: Pod}
+    # The DNS record of a public address (FORGE_PUBLIC_DOMAINS). #public
+    - {group: kro.run, kind: CloudflareRecordsApplication} #public
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet

@@ -1,0 +1,14 @@
+{{- with .Values.dns }}
+# The public address's DNS record: the platform's CloudflareRecordsApplication
+# makes a proxied CNAME <name>.<the zone's domain> to the cluster's Cloudflare
+# tunnel (a Crossplane Record underneath). It goes when the service goes.
+apiVersion: kro.run/v1alpha1
+kind: CloudflareRecordsApplication
+metadata:
+  name: {{ required "dns.name" .name }}
+spec:
+  name: {{ .name }}
+  environment: {{ required "dns.tunnel" .tunnel }}
+  dnsZones:
+    zones: {{ required "dns.zone" .zone }}
+{{- end }}

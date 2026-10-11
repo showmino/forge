@@ -94,7 +94,18 @@ func TestRun(t *testing.T) {
 	if m.RunPort() != 9090 || m.RunHealth() != "/ready" {
 		t.Errorf("set: %d %q", m.RunPort(), m.RunHealth())
 	}
-	for _, bad := range []string{"run:\n  port: 70000\n", "run:\n  port: -1\n", "run:\n  health: ready\n", "run:\n  nope: 1\n"} {
+	// run.domain: unset means the platform's default, "none" no public address.
+	if m.RunDomain() != "" {
+		t.Errorf("domain without one: %q", m.RunDomain())
+	}
+	for domain, want := range map[string]string{"deogratias.cloud": "deogratias.cloud", "none": "none", "a-b.example.co.uk": "a-b.example.co.uk"} {
+		d, err := Parse([]byte(base + "run:\n  domain: " + domain + "\n"))
+		if err != nil || d.RunDomain() != want {
+			t.Errorf("run.domain %s: %q %v", domain, d.RunDomain(), err)
+		}
+	}
+	for _, bad := range []string{"run:\n  port: 70000\n", "run:\n  port: -1\n", "run:\n  health: ready\n", "run:\n  nope: 1\n",
+		"run:\n  domain: Example.com\n", "run:\n  domain: localhost\n", "run:\n  domain: https://example.com\n", "run:\n  domain: \"*.example.com\"\n", "run:\n  domain: example.com.\n"} {
 		if _, err := Parse([]byte(base + bad)); err == nil {
 			t.Errorf("accepted %q", bad)
 		}

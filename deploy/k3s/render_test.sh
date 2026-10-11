@@ -173,4 +173,26 @@ check "web: upper case refused"                 bad_web http://Forge-Web.example
 check "web: a port that is not a number refused" bad_web http://forge-web.example.com:xx
 check "web: the scheme's own port refused"      bad_web http://forge-web.example.com:80
 check "web: a port is fine"                     sh -c "FORGE_WEB_ORIGINS=http://localhost:3000 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 | grep -qF 'allowedOrigins: [\"http://localhost:3000\"]'"
+
+# Public addresses: off unless FORGE_PUBLIC_DOMAINS is set ($dep is a render with deploys and without it).
+pub=$(FORGE_PUBLIC_DOMAINS=showmino.com=showmino-com,deogratias.cloud=deogratias-cloud FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+pub_has() { printf '%s\n' "$pub" | grep -qF -- "$1"; }
+pub_settings() {
+  pub_has '{name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud"}' &&
+    pub_has '{name: FORGE_PUBLIC_DNS_TUNNEL, value: "production"}' &&
+    pub_has '    - name: public' && pub_has '              - {key: forge.dev/deploy-env, operator: Exists}' &&
+    pub_has '    - {group: kro.run, kind: CloudflareRecordsApplication}'
+}
+no_pub() { ! printf '%s\n' "$dep" | grep -q -e FORGE_PUBLIC -e 'name: public' -e CloudflareRecordsApplication -e '#public'; }
+pub_only_adds() { d=$(mktemp) && p=$(mktemp) && printf '%s\n' "$dep" > "$d" && printf '%s\n' "$pub" > "$p"; n=$(diff "$d" "$p" | grep -c '^<'); rm -f "$d" "$p"; [ "$n" = 0 ]; }
+bad_pub() { ! FORGE_PUBLIC_DOMAINS=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1; }
+check "public: forge-api settings, the listener, the project entry" pub_settings
+check "public: nothing rendered without FORGE_PUBLIC_DOMAINS" no_pub
+check "public: adds lines and changes no others" pub_only_adds
+check "public: needs deploys"                    sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "public: a domain without a zone refused"  bad_pub example.com
+check "public: a zone that is a domain refused"  bad_pub example.com=example.com
+check "public: upper case refused"               bad_pub Example.com=example-com
+check "public: an empty item refused"            bad_pub example.com=example-com,,other.io=other-io
+check "public: a name without a dot refused"     bad_pub localhost=local
 exit $fail

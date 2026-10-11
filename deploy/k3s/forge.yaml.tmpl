@@ -148,6 +148,8 @@ spec:
             - {name: FORGE_PREVIEW_DOMAIN, value: preview.${PREVIEW_IP}.nip.io} #previews
             - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/${PULL_SECRET}} #previews
             - {name: FORGE_DEPLOYS, value: "1"} #deploys
+            - {name: FORGE_PUBLIC_DOMAINS, value: "${FORGE_PUBLIC_DOMAINS}"} #public
+            - {name: FORGE_PUBLIC_DNS_TUNNEL, value: "${FORGE_PUBLIC_DNS_TUNNEL}"} #public
             - {name: FORGE_RESOURCES, value: "1"} #resources
             - {name: FORGE_RUNNER_IMAGE, value: "${FORGE_RUNNER_IMAGE}"} #resources
           volumeMounts: #app

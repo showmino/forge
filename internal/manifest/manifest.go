@@ -51,6 +51,22 @@ type Run struct {
 	Port int `yaml:"port,omitempty"`
 	// Health is the HTTP path probed for readiness and liveness.
 	Health string `yaml:"health,omitempty"`
+	// Domain is the public domain of the service's staging and production
+	// addresses, one the platform offers: "payments.<domain>" in production.
+	// Empty means the platform's default; DomainNone keeps the service on
+	// the platform's internal address.
+	Domain string `yaml:"domain,omitempty"`
+}
+
+// DomainNone is the run.domain of a service without a public address.
+const DomainNone = "none"
+
+// RunDomain returns run.domain as it is written: "" for the default.
+func (m *Manifest) RunDomain() string {
+	if m.Run == nil {
+		return ""
+	}
+	return m.Run.Domain
 }
 
 // RunPort returns run.port or DefaultRunPort.
@@ -126,6 +142,12 @@ type Service struct {
 
 var dnsLabel = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
+// domainName is a lower-case domain of two or more labels.
+var domainName = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
+
+// ValidDomain reports whether s is a lower-case domain name such as example.com.
+func ValidDomain(s string) bool { return len(s) <= 253 && domainName.MatchString(s) }
+
 // ValidID reports whether s is a valid service id: a lowercase DNS label.
 func ValidID(s string) bool { return dnsLabel.MatchString(s) }
 
@@ -151,6 +173,9 @@ func (m *Manifest) Validate() error {
 		}
 		if r.Health != "" && !strings.HasPrefix(r.Health, "/") {
 			return fmt.Errorf("run.health %q must be an absolute path such as /healthz", r.Health)
+		}
+		if r.Domain != "" && r.Domain != DomainNone && !domainName.MatchString(r.Domain) {
+			return fmt.Errorf("run.domain %q must be a domain such as example.com, or %q", r.Domain, DomainNone)
 		}
 	}
 	if err := resource.Validate(m.Declarations()); err != nil {

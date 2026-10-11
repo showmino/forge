@@ -57,6 +57,15 @@ type DeployOptions struct {
 	Org string
 	// Domain: hosts are <service>.<env>.<Domain>.
 	Domain string
+	// PublicDomains are the domains services get public addresses under;
+	// the first is the default. Empty means internal addresses only.
+	PublicDomains []PublicDomain
+	// DNSTunnel names, to the platform's DNS records, the tunnel this
+	// cluster is reached through (default "production").
+	DNSTunnel string
+	// HostTaken reports whether a public address is in use already (it
+	// resolves); nil skips the check.
+	HostTaken func(ctx context.Context, host string) (bool, error)
 	// ArgoNamespace holds the Applications (default argocd).
 	ArgoNamespace string
 	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
@@ -84,6 +93,9 @@ type Deploys struct {
 func NewDeploys(o DeployOptions) *Deploys {
 	if o.ArgoNamespace == "" {
 		o.ArgoNamespace = "argocd"
+	}
+	if o.DNSTunnel == "" {
+		o.DNSTunnel = "production"
 	}
 	for _, d := range []struct {
 		v   *time.Duration
@@ -142,6 +154,9 @@ type deployRecord struct {
 	Time      string `yaml:"time"`
 	// Version is the tag the commit ran as; empty before Forge cut versions.
 	Version string `yaml:"version,omitempty"`
+	// Domain is run.domain of the commit's forge.yaml, kept so that a
+	// promotion gives the next environment the address the service asked for.
+	Domain string `yaml:"domain,omitempty"`
 	// Image and DeployCommit come from the commit, not the values file.
 	Image        string `yaml:"-"`
 	DeployCommit string `yaml:"-"`
@@ -156,6 +171,10 @@ type deployValues struct {
 	Health   string `yaml:"health"`
 	Replicas int    `yaml:"replicas"`
 	Host     string `yaml:"host"`
+	// Listener is the Gateway listener of the route when it is not the
+	// environment's own, and DNS the record of a public address.
+	Listener string     `yaml:"listener,omitempty"`
+	DNS      *deployDNS `yaml:"dns,omitempty"`
 	// Database is set when the service has a database in this environment.
 	Database *deployDatabase `yaml:"database,omitempty"`
 	Forge    deployRecord    `yaml:"forge"`
@@ -252,7 +271,7 @@ var healthStates = map[string]forgev1.Deployment_Health{
 func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit string, st AppStatus) *forgev1.Deployment {
 	dep := &forgev1.Deployment{
 		Name: deployNamePrefix + svc + "/" + env, Service: servicePrefix + svc, Env: env,
-		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: "http://" + d.host(svc, env),
+		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: hostURL(v.Host, v.DNS != nil),
 		Sync: forgev1.Deployment_SYNC_STATUS_UNKNOWN, Health: forgev1.Deployment_HEALTH_UNKNOWN,
 		Message: st.Message, DeployCommit: deployCommit, DeployedBy: v.Forge.Actor, Version: v.Forge.Version,
 	}
@@ -540,8 +559,15 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
+	addr, err := d.address(svc, to, src.Forge.Domain)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.hostFree(ctx, svc, to, addr); err != nil {
+		return nil, err
+	}
 	v := src
-	v.Env, v.Host = to, d.host(svc, to)
+	v.Env, v.Host, v.Listener, v.DNS = to, addr.host, addr.listener, addr.dns
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
 	// Staging's candidate number is not production's version: that is cut
 	// below, or there is none.

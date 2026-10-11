@@ -4,7 +4,9 @@ metadata:
   name: {{ .Values.name }}
 spec:
   parentRefs:
-    - {name: forge-previews, namespace: forge, sectionName: {{ required "env" .Values.env }}}
+    # A public address attaches to the Gateway's public listener; an internal
+    # one to the listener of its environment.
+    - {name: forge-previews, namespace: forge, sectionName: {{ .Values.listener | default (required "env" .Values.env) }}}
   hostnames: [{{ required "host" .Values.host | quote }}]
   rules:
     - backendRefs:

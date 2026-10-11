@@ -88,10 +88,17 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		return nil, err
 	}
 	env, actor := m.GetEnv(), actorOf(ctx)
+	addr, err := d.address(src.serviceID, env, src.domain)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.hostFree(ctx, src.serviceID, env, addr); err != nil {
+		return nil, err
+	}
 	v := deployValues{
 		Name: src.serviceID, Env: env, Image: src.image, Port: src.port, Health: src.health, Replicas: 1,
-		Host:  d.host(src.serviceID, env),
-		Forge: deployRecord{Service: servicePrefix + src.serviceID, Env: env, Ref: src.ref, Commit: src.commit, Actor: actor, Kind: kindDeploy},
+		Host: addr.host, Listener: addr.listener, DNS: addr.dns,
+		Forge: deployRecord{Service: servicePrefix + src.serviceID, Env: env, Ref: src.ref, Commit: src.commit, Actor: actor, Kind: kindDeploy, Domain: src.domain},
 	}
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, src.serviceID, m.GetEnv()); err != nil {
 		return nil, err
@@ -271,7 +278,11 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 		} else {
 			atRev := atRevision(st.Revisions)
 			if atRev && st.Sync == "Synced" && st.Health == "Healthy" {
-				emit("sync", "http://"+d.host(svc, env))
+				url := "http://" + d.host(svc, env)
+				if v, err := parseValues(content); err == nil && v.Host != "" {
+					url = hostURL(v.Host, v.DNS != nil)
+				}
+				emit("sync", url)
 				return nil
 			}
 			msg = fmt.Sprintf("%s, %s", st.Sync, st.Health)

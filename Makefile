@@ -18,6 +18,8 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/production.yaml | diff -u deploy/argocd/chart/testdata/production.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
 	  -f deploy/argocd/chart/testdata/database.yaml | diff -u deploy/argocd/chart/testdata/database.golden -
+	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
+	  -f deploy/argocd/chart/testdata/public.yaml | diff -u deploy/argocd/chart/testdata/public.golden -
 
 lint: ## Lint Go code and protos
 	golangci-lint run ./...

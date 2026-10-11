@@ -255,6 +255,39 @@ the API (`FORGE_API_URL`). forge-api checks the token's audience against
 forge-api serves the matching CLI for Linux at `$FORGE_API_URL/cli/forge-linux-amd64`
 (and `-arm64`), so a job needs no token for the forge repo.
 
+### Addresses
+
+Where a service is reached depends on whether the platform has public
+domains (`--public-domains`, e.g. `showmino.com=showmino-com,deogratias.cloud=deogratias-cloud`:
+each domain with the name of its DNS zone, the default first).
+
+- **Without them** a service has an internal address,
+  `http://<service>.<env>.<deploy domain>`.
+- **With them** a service has a public one, over HTTPS:
+  `https://payments.showmino.com` in production and
+  `https://payments-staging.showmino.com` in staging. One label under the
+  domain, because the edge's certificate for `*.showmino.com` covers nothing
+  deeper.
+- **A service chooses** in `forge.yaml`:
+
+  ```yaml
+  run:
+    domain: deogratias.cloud   # another of the platform's domains
+    # domain: none             # no public address: the internal one
+  ```
+
+The deploy chart makes the DNS record with the deployment: a
+`CloudflareRecordsApplication` (the platform's own kind; a Crossplane `Record`
+underneath, a proxied CNAME to the cluster's Cloudflare tunnel). It is removed
+with the service. The tunnel sends the domains' hosts to Forge's Gateway,
+whose `public` listener takes routes only from the namespaces of Forge
+deployments. Previews keep their internal addresses.
+
+Forge refuses an address before it writes anything when the name is already
+in use (it resolves in DNS and is not this environment's own), and it refuses
+a public address for a service called `<something>-staging`, which would be
+another service's staging address.
+
 ### Versions
 
 Every commit Forge deploys gets a version, as a tag and a GitHub release in

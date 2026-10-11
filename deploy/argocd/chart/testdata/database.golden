@@ -90,6 +90,8 @@ metadata:
   name: payments
 spec:
   parentRefs:
+    # A public address attaches to the Gateway's public listener; an internal
+    # one to the listener of its environment.
     - {name: forge-previews, namespace: forge, sectionName: staging}
   hostnames: ["payments.staging.10.150.1.222.nip.io"]
   rules:
