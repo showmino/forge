@@ -151,7 +151,7 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   #
 
 ## The web dashboard (Phase 6)
 
-Live on k3s since 2026-10-11: forge-api `57a118e` (first `a846a98`; `57a118e` adds `TeamService`) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
+Live on k3s since 2026-10-11: forge-api `3f2c8d3` (first `a846a98`; `57a118e` added `TeamService`; `3f2c8d3` makes `DeleteService` take down what a service runs) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
 render must also carry `FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io`
 (next to `FORGE_DEPLOYS=1`, the chart revision, the App and both 1Password items); a render without it removes
 the dashboard's login client and its CORS access. Restart Dex after a change to its config
@@ -170,3 +170,10 @@ there only the first part can be checked by script (GetServerInfo, the preflight
 
 The dashboard's repo is `showmino/forge-web` (checkout `/home/mino/code/forge-web`); after an API change run
 `sh scripts/sync-proto.sh ../forge` there.
+
+Deleting a service (live since forge-api `3f2c8d3`): `bin/forge service delete <svc> --dry-run` prints what would be
+taken down and changes nothing; forge-api's own account must be allowed both of
+`kubectl auth can-i delete namespaces --as=system:serviceaccount:forge:forge-api` and
+`kubectl auth can-i get applications.argoproj.io -n argocd --as=system:serviceaccount:forge:forge-api` (both yes
+on 2026-10-11). A real delete waits for Argo CD's ApplicationSet (it looks at the deploy repo every 30s) to remove
+each application, so expect about a minute per environment.
