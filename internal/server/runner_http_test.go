@@ -179,6 +179,27 @@ func TestRunnerHTTPCalls(t *testing.T) {
 			t.Errorf("%s: %d, want 400", name, resp.StatusCode)
 		}
 	}
+	// The token is checked before a body is read: a caller without a good
+	// one is refused whatever it sends, and never gets a word on its body.
+	huge := strings.Repeat("x", maxRunnerSmall+1)
+	for _, call := range []struct{ method, path string }{
+		{"POST", run.EventPath}, {"POST", run.CompletePath}, {"POST", run.StatePath}, {"LOCK", run.StatePath}, {"UNLOCK", run.StatePath},
+	} {
+		for _, auth := range []string{"", "Bearer nope"} {
+			req, _ := http.NewRequest(call.method, srv.URL+call.path, strings.NewReader(huge))
+			if auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			resp, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("%s %s with %q: %d, want 401", call.method, call.path, auth, resp.StatusCode)
+			}
+		}
+	}
 	// Only POST on the calls; the health check needs no token.
 	for path, want := range map[string]int{run.ClaimPath: http.StatusMethodNotAllowed, "/healthz": http.StatusOK} {
 		resp, err := srv.Client().Get(srv.URL + path)

@@ -25,6 +25,9 @@ type Runner struct {
 	FailPlan, FailApply string
 	// Crash makes a run end without reporting: Status says failed, with this log.
 	Crash string
+	// Stuck makes a run never start: Status says so with this text, and the
+	// run stays until it is stopped.
+	Stuck string
 	// Hang keeps a run going until it is stopped.
 	Hang bool
 	// Silent makes a run end cleanly without reporting a result.
@@ -38,6 +41,7 @@ type Runner struct {
 	databases map[string]run.Resource // "<namespace>/<name>"
 	runs      map[string]*fakeRun     // "<plan>/<mode>"
 	started   []run.Spec
+	stopped   []string // the stuck runs that were stopped, "<plan>/<mode>"
 	wg        sync.WaitGroup
 }
 
@@ -73,6 +77,10 @@ func (r *Runner) Start(_ context.Context, s run.Spec) error {
 	fr := &fakeRun{stop: cancel}
 	r.runs[s.Plan+"/"+s.Mode] = fr
 	r.started = append(r.started, s)
+	if r.Stuck != "" {
+		fr.status = run.Status{Done: true, Failed: true, Stuck: true, Log: r.Stuck}
+		return nil
+	}
 	r.wg.Go(func() {
 		defer cancel()
 		st := r.play(ctx, k, s)
@@ -99,6 +107,9 @@ func (r *Runner) Stop(_ context.Context, plan, mode string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if fr, ok := r.runs[plan+"/"+mode]; ok {
+		if fr.status.Stuck {
+			r.stopped = append(r.stopped, plan+"/"+mode)
+		}
 		fr.stop()
 	}
 	return nil
@@ -112,6 +123,13 @@ func (r *Runner) Close() {
 	}
 	r.mu.Unlock()
 	r.wg.Wait()
+}
+
+// StuckStopped is how many runs that never started were stopped.
+func (r *Runner) StuckStopped() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.stopped)
 }
 
 // Started returns the specs of every run started, in order.
