@@ -157,7 +157,7 @@ The render that is live (2026-10-11), to start every later rollout from; only `F
 FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app \
 FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOYS=1 \
 FORGE_DEPLOY_CHART_REVISION=e7f0b8ec2d2282814116bedc6e06c64e11009bca \
-FORGE_WEB_ORIGINS=https://forge.showmino.com,https://forge-staging.showmino.com,http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io \
+FORGE_WEB_ORIGINS=https://forge.showmino.com,https://forge-staging.showmino.com \
 FORGE_PUBLIC_DOMAINS=showmino.com=showmino-com,deogratias.cloud=deogratias-cloud \
 FORGE_LOGIN_URL=https://forge-login.showmino.com \
 FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.4.0 sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221
@@ -175,7 +175,7 @@ Forge's own public names (live since 2026-10-11, forge-api `v0.4.0`):
 The GitHub OAuth app Dex signs in with has the callback `https://forge-login.showmino.com/dex/callback` (changed by the
 owner at the switch; a login fails with a redirect_uri mismatch when the two disagree). The dashboard's image is built
 with the API's HTTPS address from the repo variable `FORGE_WEB_API_URL` on `showmino/forge-web`. The two old LAN origins
-are still in `FORGE_WEB_ORIGINS`; nothing serves them any more. Moving the issuer does not end Forge sessions: the CLI
+left `FORGE_WEB_ORIGINS` the same evening: the API and the login refuse them now. Moving the issuer does not end Forge sessions: the CLI
 stayed logged in through the switch. To check from outside: the dashboard's `Content-Security-Policy` names exactly the
 API and the login in `connect-src`; a preflight to the API from a dashboard origin answers 204 with that origin, from any
 other 403; Dex answers a form POST to `/dex/token` with `access-control-allow-origin` for a dashboard origin only (a
