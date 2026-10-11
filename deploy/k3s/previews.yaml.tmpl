@@ -115,18 +115,8 @@ spec:
             matchLabels: #deploys
               app.kubernetes.io/managed-by: forge #deploys
               forge.dev/deploy-env: production #deploys
-    # Public addresses (FORGE_PUBLIC_DOMAINS): every other host. The #public
-    # Cloudflare tunnel sends the public domains' hosts here; a route #public
-    # attaches by this listener's name, and only from a namespace of a #public
-    # Forge deployment, never from a preview. #public
-    - name: public #public
-      protocol: HTTP #public
-      port: 80 #public
-      allowedRoutes: #public
-        namespaces: #public
-          from: Selector #public
-          selector: #public
-            matchLabels: #public
-              app.kubernetes.io/managed-by: forge #public
-            matchExpressions: #public
-              - {key: forge.dev/deploy-env, operator: Exists} #public
+    # Public addresses (FORGE_PUBLIC_DOMAINS): one listener per domain, named #public
+    # public-<zone>, for the hosts the Cloudflare tunnel sends here. Each #public
+    # takes only hosts under its domain, and only routes from the namespace #public
+    # of a Forge deployment, never from a preview. #public
+    #public-listeners

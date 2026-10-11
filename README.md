@@ -279,14 +279,35 @@ each domain with the name of its DNS zone, the default first).
 The deploy chart makes the DNS record with the deployment: a
 `CloudflareRecordsApplication` (the platform's own kind; a Crossplane `Record`
 underneath, a proxied CNAME to the cluster's Cloudflare tunnel). It is removed
-with the service. The tunnel sends the domains' hosts to Forge's Gateway,
-whose `public` listener takes routes only from the namespaces of Forge
-deployments. Previews keep their internal addresses.
+with the service, and replaced when the service moves to another domain. The
+tunnel sends the domains' hosts to Forge's Gateway, which has one listener
+per domain (`public-<zone>`): it takes only hosts under that domain, and only
+routes from the namespaces of Forge deployments. Previews keep their internal
+addresses.
 
-Forge refuses an address before it writes anything when the name is already
-in use (it resolves in DNS and is not this environment's own), and it refuses
-a public address for a service called `<something>-staging`, which would be
-another service's staging address.
+What to know before switching it on:
+
+- **A service moves when it is next deployed or promoted**, not before, and
+  the operation says so in an `address` step: the new address, that it is
+  reachable from the internet, and the old address that stops working (a
+  route has one host). A service that must stay internal needs
+  `run.domain: none` first, and forge-api must already know the field: an
+  older one rejects a `forge.yaml` that has it.
+- **A name in use is refused** before anything is written: a new address must
+  not resolve in DNS yet. If DNS cannot be asked, the deploy is refused too
+  and can be run again. A service called `<something>-staging` gets no public
+  address, because that is another service's staging address.
+- **A rollback restores the commit, not the address.** The address is worked
+  out again from the domain that commit asked for, so rolling back to a deploy
+  from before public addresses does not take the service off the internet.
+- **The chart revision must make DNS records** (`render.sh` checks it), or
+  deployments would report success and be reachable nowhere.
+- **Not checked:** whether the DNS record itself became ready. Argo CD has no
+  health rule for the kind, so a deploy can finish a few seconds before the
+  name resolves, and a record the platform could not create shows up only in
+  the `CloudflareRecordsApplication`'s status.
+- **Switching it off again** strands what is public: those services are
+  refused on their next deploy until `run.domain` is removed or set to `none`.
 
 ### Versions
 

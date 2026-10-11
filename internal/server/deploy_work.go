@@ -88,11 +88,8 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		return nil, err
 	}
 	env, actor := m.GetEnv(), actorOf(ctx)
-	addr, err := d.address(src.serviceID, env, src.domain)
+	addr, moved, err := d.addressFor(ctx, src.serviceID, env, src.domain, d.currentValues(ctx, src.serviceID, env))
 	if err != nil {
-		return nil, err
-	}
-	if err := d.hostFree(ctx, src.serviceID, env, addr); err != nil {
 		return nil, err
 	}
 	v := deployValues{
@@ -129,6 +126,9 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	op := d.o.Operations.Start(ctx, opDeploy, deployNamePrefix+target, actor, func(ctx context.Context, emit func(string, string)) error {
 		defer d.unlock(target)
 		emit("resolve", fmt.Sprintf("%s is %s", src.ref, shortSHA(src.commit)))
+		if moved != "" {
+			emit("address", moved)
+		}
 		if err := waitForImage(ctx, d.o.GitHub, d.o.Images, src, d.o.ImageTimeout, d.o.ImagePoll, emit); err != nil {
 			return err
 		}

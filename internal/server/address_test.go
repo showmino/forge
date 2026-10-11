@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/envtest"
+	"github.com/showmino/forge/internal/github"
 )
 
 func TestParsePublicDomains(t *testing.T) {
@@ -64,7 +66,11 @@ func TestAddress(t *testing.T) {
 		if a.dns != nil {
 			dns = a.dns.Name + " " + a.dns.Zone + " " + a.dns.Tunnel
 		}
-		if err != nil || a.host != tc.host || a.url() != tc.url || dns != tc.dns || (a.listener == publicListener) != (tc.dns != "") {
+		listener := ""
+		if tc.dns != "" {
+			listener = "public-" + strings.Fields(tc.dns)[1] // one listener per domain
+		}
+		if err != nil || a.host != tc.host || a.url() != tc.url || dns != tc.dns || a.listener != listener {
 			t.Errorf("%s: %+v dns %q, %v", tc.name, a, dns, err)
 		}
 	}
@@ -75,13 +81,21 @@ type taken struct {
 	mu    sync.Mutex
 	hosts map[string]bool
 	asked []string
+	// err, when set, is DNS not answering.
+	err error
 }
 
 func (k *taken) check(_ context.Context, host string) (bool, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.asked = append(k.asked, host)
-	return k.hosts[host], nil
+	return k.hosts[host], k.err
+}
+
+func (k *taken) set(f func(*taken)) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	f(k)
 }
 
 func TestPublicAddresses(t *testing.T) {
@@ -108,14 +122,22 @@ func TestPublicAddresses(t *testing.T) {
 	}
 
 	// A name something else has is refused before anything is written, also in a dry run.
-	dns.hosts["payments-staging.showmino.com"] = true
+	dns.set(func(k *taken) { k.hosts["payments-staging.showmino.com"] = true })
 	for _, dry := range []bool{true, false} {
 		_, err := f.client.StartDeploy(ctx, as("writer", &forgev1.StartDeployRequest{Service: "services/payments", Env: "staging", ValidateOnly: dry}))
 		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "payments-staging.showmino.com is already in use") {
 			t.Fatalf("a taken address (dry run %v): %v", dry, err)
 		}
 	}
-	dns.hosts = map[string]bool{}
+	// When DNS cannot be asked, a new address is not handed out.
+	dns.set(func(k *taken) { k.hosts, k.err = map[string]bool{}, errors.New("no such host: timeout") })
+	if _, err := f.start(t, "staging"); connect.CodeOf(err) != connect.CodeUnavailable || !strings.Contains(err.Error(), "could not check whether payments-staging.showmino.com is free") {
+		t.Fatalf("DNS away: %v", err)
+	}
+	if _, err := f.repo.Read(ctx, valuesPath("payments", "staging"), ""); !errors.Is(err, github.ErrNotFound) {
+		t.Fatalf("a refused deploy wrote values: %v", err)
+	}
+	dns.set(func(k *taken) { k.err = nil })
 
 	// Staging gets one label under the default domain, over HTTPS, with its DNS record.
 	resp, err := f.start(t, "staging")
@@ -129,20 +151,28 @@ func TestPublicAddresses(t *testing.T) {
 	if op.GetError() != nil || stepMessage(op, "sync") != "https://payments-staging.showmino.com" {
 		t.Fatalf("deploy: %v, sync step %q", op.GetError(), stepMessage(op, "sync"))
 	}
+	// The operation says that the service is now on the internet.
+	if got := stepMessage(op, "address"); got != "https://payments-staging.showmino.com (public: reachable from the internet)" {
+		t.Errorf("address step %q", got)
+	}
 	v := values("staging")
-	if v.Host != "payments-staging.showmino.com" || v.Listener != "public" || v.DNS == nil || *v.DNS != (deployDNS{Name: "payments-staging", Zone: "showmino-com", Tunnel: "production"}) {
+	if v.Host != "payments-staging.showmino.com" || v.Listener != "public-showmino-com" || v.DNS == nil || *v.DNS != (deployDNS{Name: "payments-staging", Zone: "showmino-com", Tunnel: "production"}) {
 		t.Errorf("staging values: %+v dns %+v", v, v.DNS)
 	}
-	// Its own address resolves by now: a redeploy does not trip over it.
-	dns.hosts["payments-staging.showmino.com"] = true
-	f.deployOK(t, "staging")
+	// Its own address resolves by now, and DNS may even be away: a redeploy
+	// to the same address asks nothing and says nothing about it.
+	dns.set(func(k *taken) { k.hosts["payments-staging.showmino.com"], k.err = true, errors.New("timeout") })
+	if op := f.deployRef(t, "staging", ""); op.GetError() != nil || stepMessage(op, "address") != "" {
+		t.Fatalf("redeploy: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	dns.set(func(k *taken) { k.err = nil })
 
 	// Promotion gives production the service's own name.
 	if op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
 	v = values("production")
-	if v.Host != "payments.showmino.com" || v.DNS == nil || v.DNS.Name != "payments" || v.Listener != "public" {
+	if v.Host != "payments.showmino.com" || v.DNS == nil || v.DNS.Name != "payments" || v.Listener != "public-showmino-com" {
 		t.Errorf("production values: %+v dns %+v", v, v.DNS)
 	}
 	got, err := f.client.GetDeployment(ctx, as("reader", &forgev1.GetDeploymentRequest{Name: "deployments/payments/production"}))
@@ -150,12 +180,14 @@ func TestPublicAddresses(t *testing.T) {
 		t.Errorf("production: %v %v", got, err)
 	}
 
-	// A commit whose forge.yaml picks the other domain moves staging there,
-	// and a promotion carries the choice to production.
-	if op := f.deployRef(t, "staging", "release"); op.GetError() != nil {
-		t.Fatal(op.GetError())
+	// A commit whose forge.yaml picks the other domain moves staging there
+	// (the operation names both addresses), and a promotion carries the
+	// choice to production.
+	op = f.deployRef(t, "staging", "release")
+	if op.GetError() != nil || stepMessage(op, "address") != "https://payments-staging.deogratias.cloud (public: reachable from the internet); https://payments-staging.showmino.com stops working" {
+		t.Fatalf("moving domain: %v, address step %q", op.GetError(), stepMessage(op, "address"))
 	}
-	if v := values("staging"); v.Host != "payments-staging.deogratias.cloud" || v.DNS.Zone != "deogratias-cloud" || v.Forge.Domain != "deogratias.cloud" {
+	if v := values("staging"); v.Host != "payments-staging.deogratias.cloud" || v.DNS.Zone != "deogratias-cloud" || v.Listener != "public-deogratias-cloud" || v.Forge.Domain != "deogratias.cloud" {
 		t.Errorf("staging on the other domain: %+v dns %+v", v, v.DNS)
 	}
 	if op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED); op.GetError() != nil {
@@ -164,15 +196,87 @@ func TestPublicAddresses(t *testing.T) {
 	if v := values("production"); v.Host != "payments.deogratias.cloud" || v.DNS.Zone != "deogratias-cloud" {
 		t.Errorf("production on the other domain: %+v dns %+v", v, v.DNS)
 	}
-	// A rollback brings back the address of the deploy it restores.
+	// A rollback restores the commit and with it the domain that commit
+	// asked for, worked out again: here the default domain.
 	rb, err := f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: "deployments/payments/production"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op := wait(t, f.ops, rb.Msg.GetOperation().GetName()); op.GetError() != nil {
+	op = wait(t, f.ops, rb.Msg.GetOperation().GetName())
+	if op.GetError() != nil || !strings.HasPrefix(stepMessage(op, "address"), "https://payments.showmino.com (public") {
+		t.Fatalf("rollback: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	if v := values("production"); v.Host != "payments.showmino.com" || v.DNS.Zone != "showmino-com" || v.Forge.Kind != kindRollback {
+		t.Errorf("production after the rollback: %+v dns %+v", v, v.DNS)
+	}
+	// A rollback to an address that someone else has by now is refused.
+	dns.set(func(k *taken) { k.hosts["payments.deogratias.cloud"] = true })
+	if _, err := f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: "deployments/payments/production"})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("a rollback to a taken address: %v", err)
+	}
+}
+
+// Public domains are switched on for a platform whose services have
+// internal addresses: nothing moves until a service is deployed again, and a
+// rollback to a deploy from before does not take the service off the
+// internet again.
+func TestPublicAddressesTurnedOn(t *testing.T) {
+	t.Parallel()
+	f := newDeployFixture(t, false, nil)
+	ctx := context.Background()
+	host := func(env string) string {
+		t.Helper()
+		data, err := f.repo.Read(ctx, valuesPath("payments", env), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := parseValues(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.Host
+	}
+	f.deployOK(t, "staging")
+	if op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
-	if v := values("production"); v.Host != "payments.showmino.com" || v.DNS.Zone != "showmino-com" {
-		t.Errorf("production after the rollback: %+v dns %+v", v, v.DNS)
+	if host("staging") != "payments.staging.10.150.1.222.nip.io" || host("production") != "payments.production.10.150.1.222.nip.io" {
+		t.Fatalf("before: %s %s", host("staging"), host("production"))
+	}
+
+	// The setting is switched on (a restart of forge-api with it).
+	f.deploys.o.PublicDomains = []PublicDomain{{Name: "showmino.com", Zone: "showmino-com"}}
+	list, err := f.client.ListDeployments(ctx, as("reader", &forgev1.ListDeploymentsRequest{}))
+	if err != nil || len(list.Msg.GetDeployments()) != 2 || list.Msg.GetDeployments()[0].GetUrl() != "http://payments.staging.10.150.1.222.nip.io" {
+		t.Fatalf("what runs keeps its address until it is deployed again: %v %v", list, err)
+	}
+	// The next promotion moves production, and says so.
+	op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED)
+	if op.GetError() != nil || stepMessage(op, "address") != "https://payments.showmino.com (public: reachable from the internet); http://payments.production.10.150.1.222.nip.io stops working" {
+		t.Fatalf("promotion after the switch: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	// Rolling production back to the deploy from before keeps it public.
+	rb, err := f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: "deployments/payments/production"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, rb.Msg.GetOperation().GetName()); op.GetError() != nil || stepMessage(op, "address") != "" {
+		t.Fatalf("rollback: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	if host("production") != "payments.showmino.com" {
+		t.Errorf("production after the rollback: %s", host("production"))
+	}
+}
+
+func TestResolvesInDNS(t *testing.T) {
+	t.Parallel()
+	// A name under a reserved top-level domain never resolves, and that is
+	// "free", not an error.
+	taken, err := ResolvesInDNS(context.Background(), "nothing-here.forge-test.invalid")
+	if err != nil {
+		t.Skipf("no DNS to ask here: %v", err)
+	}
+	if taken {
+		t.Error("a name that cannot exist resolves")
 	}
 }

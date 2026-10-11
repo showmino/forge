@@ -347,15 +347,7 @@ func (d *Deploys) GetDeployment(ctx context.Context, req *connect.Request[forgev
 // productionOf is what svc runs in production; nil when that is nothing or
 // cannot be read.
 func (d *Deploys) productionOf(ctx context.Context, svc string) *deployValues {
-	data, err := d.o.Repo.Read(ctx, valuesPath(svc, finalEnv), "")
-	if err != nil {
-		return nil
-	}
-	v, err := parseValues(data)
-	if err != nil {
-		return nil
-	}
-	return &v
+	return d.currentValues(ctx, svc, finalEnv)
 }
 
 func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forgev1.ListDeploymentsRequest]) (*connect.Response[forgev1.ListDeploymentsResponse], error) {
@@ -504,6 +496,15 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	v.Forge.Kind, v.Forge.Actor = kindRollback, actorOf(ctx)
+	// The address is worked out now, like the database: from the domain the
+	// restored commit asked for, under today's settings. An older deploy's
+	// address may be one the platform no longer hands out, or someone else's
+	// by now, and a rollback must not take a public service off the internet.
+	addr, moved, err := d.addressFor(ctx, svc, env, v.Forge.Domain, d.currentValues(ctx, svc, env))
+	if err != nil {
+		return nil, err
+	}
+	v.Host, v.Listener, v.DNS = addr.host, addr.listener, addr.dns
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
 		return nil, err
 	}
@@ -514,7 +515,7 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
 	}
-	op, err := d.startMutation(ctx, kindRollback, svc, env, v, nil)
+	op, err := d.startMutation(ctx, kindRollback, svc, env, v, withAddressNote(moved, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -559,11 +560,8 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	addr, err := d.address(svc, to, src.Forge.Domain)
+	addr, moved, err := d.addressFor(ctx, svc, to, src.Forge.Domain, d.currentValues(ctx, svc, to))
 	if err != nil {
-		return nil, err
-	}
-	if err := d.hostFree(ctx, svc, to, addr); err != nil {
 		return nil, err
 	}
 	v := src
@@ -596,11 +594,40 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.PromoteDeployResponse{Deployment: preview}), nil
 	}
-	op, err := d.startMutation(ctx, kindPromote, svc, to, v, cut)
+	op, err := d.startMutation(ctx, kindPromote, svc, to, v, withAddressNote(moved, cut))
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&forgev1.PromoteDeployResponse{Operation: op, Deployment: preview}), nil
+}
+
+// currentValues is what svc runs in env now, nil when that is nothing or
+// cannot be read.
+func (d *Deploys) currentValues(ctx context.Context, svc, env string) *deployValues {
+	data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), "")
+	if err != nil {
+		return nil
+	}
+	v, err := parseValues(data)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+// withAddressNote tells the operation's reader that the address changes,
+// before whatever next does. next may be nil.
+func withAddressNote(note string, next func(context.Context, func(string, string)) (string, error)) func(context.Context, func(string, string)) (string, error) {
+	if note == "" {
+		return next
+	}
+	return func(ctx context.Context, emit func(string, string)) (string, error) {
+		emit("address", note)
+		if next == nil {
+			return "", nil
+		}
+		return next(ctx, emit)
+	}
 }
 
 // startMutation locks svc/env and starts an operation that applies v. cut,

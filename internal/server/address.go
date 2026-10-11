@@ -44,8 +44,9 @@ func ParsePublicDomains(list string) ([]PublicDomain, error) {
 	return out, nil
 }
 
-// publicListener is the Gateway listener the routes of public addresses attach to.
-const publicListener = "public"
+// publicListener is the Gateway listener the routes of a public domain's
+// addresses attach to: one per domain, which takes only hosts under it.
+func publicListener(d PublicDomain) string { return "public-" + d.Zone }
 
 // deployDNS is the DNS record of a public address, as the chart makes it.
 type deployDNS struct {
@@ -119,30 +120,58 @@ func (d *Deploys) address(svc, env, want string) (address, error) {
 		return refuse("the address %s.%s is too long: a name before the domain has at most 63 characters", label, domain.Name)
 	}
 	return address{
-		host: label + "." + domain.Name, listener: publicListener,
+		host: label + "." + domain.Name, listener: publicListener(domain),
 		dns: &deployDNS{Name: label, Zone: domain.Zone, Tunnel: d.o.DNSTunnel},
 	}, nil
 }
 
-// hostFree refuses a public address that is new to svc/env and already
-// resolves: something else is there (another system's record, a name taken
-// by hand). An address the environment already has is its own.
-func (d *Deploys) hostFree(ctx context.Context, svc, env string, a address) error {
-	if a.dns == nil || d.o.HostTaken == nil {
-		return nil
+// addressFor is address plus the checks a change of address needs: the new
+// one must be free, and the caller is told what changes. current is what
+// the environment has now, nil before its first deploy. The note says what
+// the reader of the operation must know: that the service is public, and
+// which address stops working. It is "" when nothing of that changes.
+func (d *Deploys) addressFor(ctx context.Context, svc, env, want string, current *deployValues) (address, string, error) {
+	a, err := d.address(svc, env, want)
+	if err != nil {
+		return a, "", err
 	}
-	if cur, _, err := d.current(ctx, svc, env); err == nil && cur.Host == a.host {
+	if current != nil && current.Host == a.host {
+		return a, "", nil
+	}
+	if err := d.hostFree(ctx, a); err != nil {
+		return a, "", err
+	}
+	moved := current != nil && current.Host != ""
+	if a.dns == nil && !moved {
+		return a, "", nil // a first deploy to an internal address: nothing to point out
+	}
+	note := a.url()
+	if a.dns != nil {
+		note += " (public: reachable from the internet)"
+	}
+	if moved {
+		note += "; " + hostURL(current.Host, current.DNS != nil) + " stops working"
+	}
+	return a, note, nil
+}
+
+// hostFree refuses a public address that already resolves: something else
+// is there (another system's record, a name taken by hand). It is asked only
+// for an address that is new to its environment. When DNS cannot be asked
+// the address is not handed out: a deploy can wait, a hijacked name cannot
+// be taken back.
+func (d *Deploys) hostFree(ctx context.Context, a address) error {
+	if a.dns == nil || d.o.HostTaken == nil {
 		return nil
 	}
 	taken, err := d.o.HostTaken(ctx, a.host)
 	if err != nil {
-		d.o.Log.Warn("could not check whether an address is free", "host", a.host, "error", err)
-		return nil // DNS being away is no reason to stop a deploy
+		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("could not check whether %s is free: %w; try again", a.host, err))
 	}
 	if taken {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
-			"%s is already in use (the name resolves, and not to %s%s in %s). Rename the service, pick another domain with run.domain in forge.yaml, or set it to %q",
-			a.host, servicePrefix, svc, env, manifest.DomainNone))
+			"%s is already in use (the name resolves in DNS). Rename the service, pick another domain with run.domain in forge.yaml, or set it to %q",
+			a.host, manifest.DomainNone))
 	}
 	return nil
 }
@@ -152,7 +181,10 @@ func (d *Deploys) hostFree(ctx context.Context, svc, env string, a address) erro
 func ResolvesInDNS(ctx context.Context, host string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	addrs, err := net.DefaultResolver.LookupHost(ctx, host)
+	// The trailing dot makes the name absolute: without it a resolver tries
+	// its search domains first, and a wildcard in one of them would make
+	// every name look taken.
+	addrs, err := net.DefaultResolver.LookupHost(ctx, strings.TrimSuffix(host, ".")+".")
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
 		return false, nil

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/server"
 	"github.com/showmino/forge/internal/store"
 )
@@ -71,6 +72,9 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 		return nil, fmt.Errorf("--public-domains: %w", err)
 	}
 	if len(public) > 0 {
+		if !manifest.ValidID(f.publicTunnel) {
+			return nil, fmt.Errorf("--public-dns-tunnel %q must be a name such as production", f.publicTunnel)
+		}
 		log.Info("services get public addresses", "domains", f.publicDomains, "tunnel", f.publicTunnel)
 	}
 	gh := &github.Client{Token: app.Token}
