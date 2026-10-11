@@ -68,7 +68,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	return server.NewDeploys(server.DeployOptions{
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
-		Catalog: catalog, Operations: ops, Resources: f.resources,
+		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,
 		Org: org, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,
 	}), nil
 }

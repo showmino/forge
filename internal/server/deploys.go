@@ -47,6 +47,9 @@ type DeployOptions struct {
 	Repo       DeployRepo
 	Catalog    *Catalog
 	Operations *Operations
+	// Releases, when set, gives every deployed commit a version: a tag and
+	// a GitHub release in the service's repo.
+	Releases ReleaseGitHub
 	// Resources, when set, says which database a service has in an
 	// environment, so its pods get DATABASE_URL.
 	Resources store.ResourceStore
@@ -73,6 +76,8 @@ type Deploys struct {
 	running map[string]string
 	// requests maps a caller's StartDeploy request_id (requestKey) to its operation.
 	requests map[string]string
+	// cutMu is held while a version is worked out and tagged.
+	cutMu sync.Mutex
 }
 
 // NewDeploys returns the deploy service.
@@ -135,6 +140,8 @@ type deployRecord struct {
 	Operation string `yaml:"operation"`
 	Kind      string `yaml:"kind"`
 	Time      string `yaml:"time"`
+	// Version is the tag the commit ran as; empty before Forge cut versions.
+	Version string `yaml:"version,omitempty"`
 	// Image and DeployCommit come from the commit, not the values file.
 	Image        string `yaml:"-"`
 	DeployCommit string `yaml:"-"`
@@ -182,10 +189,16 @@ var trailerKeys = []string{"Kind", "Service", "Env", "Image", "Ref", "Commit", "
 func commitMessage(r deployRecord) string {
 	svc := strings.TrimPrefix(r.Service, servicePrefix)
 	var b strings.Builder
+	if r.Version != "" {
+		svc += " " + r.Version
+	}
 	fmt.Fprintf(&b, "%s %s to %s: %s (%s)\n\n", r.Kind, svc, r.Env, r.Image, r.Actor)
 	vals := []string{r.Kind, r.Service, r.Env, r.Image, r.Ref, r.Commit, r.Actor, r.Operation}
 	for i, k := range trailerKeys {
 		fmt.Fprintf(&b, "Forge-%s: %s\n", k, vals[i])
+	}
+	if r.Version != "" {
+		fmt.Fprintf(&b, "Forge-Version: %s\n", r.Version)
 	}
 	return b.String()
 }
@@ -218,6 +231,8 @@ func parseRecord(sha, message string, t time.Time) (deployRecord, bool) {
 			r.Actor = v
 		case "Operation":
 			r.Operation = v
+		case "Version":
+			r.Version = v
 		}
 	}
 	return r, found > 0 && r.Kind != ""
@@ -239,7 +254,7 @@ func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit s
 		Name: deployNamePrefix + svc + "/" + env, Service: servicePrefix + svc, Env: env,
 		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: "http://" + d.host(svc, env),
 		Sync: forgev1.Deployment_SYNC_STATUS_UNKNOWN, Health: forgev1.Deployment_HEALTH_UNKNOWN,
-		Message: st.Message, DeployCommit: deployCommit, DeployedBy: v.Forge.Actor,
+		Message: st.Message, DeployCommit: deployCommit, DeployedBy: v.Forge.Actor, Version: v.Forge.Version,
 	}
 	if s, ok := syncStates[st.Sync]; ok {
 		dep.Sync = s
@@ -303,7 +318,25 @@ func (d *Deploys) GetDeployment(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("argo cd: %w", err))
 	}
-	return connect.NewResponse(&forgev1.GetDeploymentResponse{Deployment: d.deploymentFrom(svc, env, v, commit, st)}), nil
+	dep := d.deploymentFrom(svc, env, v, commit, st)
+	if env != finalEnv {
+		dep.Version = shownVersion(env, v, d.productionOf(ctx, svc))
+	}
+	return connect.NewResponse(&forgev1.GetDeploymentResponse{Deployment: dep}), nil
+}
+
+// productionOf is what svc runs in production; nil when that is nothing or
+// cannot be read.
+func (d *Deploys) productionOf(ctx context.Context, svc string) *deployValues {
+	data, err := d.o.Repo.Read(ctx, valuesPath(svc, finalEnv), "")
+	if err != nil {
+		return nil
+	}
+	v, err := parseValues(data)
+	if err != nil {
+		return nil
+	}
+	return &v
 }
 
 func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forgev1.ListDeploymentsRequest]) (*connect.Response[forgev1.ListDeploymentsResponse], error) {
@@ -327,6 +360,9 @@ func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forg
 		if s := req.Msg.GetService(); s != "" && s != servicePrefix+svc {
 			continue
 		}
+		var staged *forgev1.Deployment
+		var stagedValues deployValues
+		var production *deployValues
 		for _, env := range deployEnvs {
 			if e := req.Msg.GetEnv(); e != "" && e != env {
 				continue
@@ -342,7 +378,19 @@ func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forg
 			if err != nil {
 				return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("argo cd: %w", err))
 			}
-			out = append(out, d.deploymentFrom(svc, env, v, commit, st))
+			dep := d.deploymentFrom(svc, env, v, commit, st)
+			if env == finalEnv {
+				production = &v
+			} else {
+				staged, stagedValues = dep, v
+			}
+			out = append(out, dep)
+		}
+		if staged != nil {
+			if production == nil && req.Msg.GetEnv() != "" {
+				production = d.productionOf(ctx, svc)
+			}
+			staged.Version = shownVersion(staged.GetEnv(), stagedValues, production)
 		}
 	}
 	return connect.NewResponse(&forgev1.ListDeploymentsResponse{Deployments: out}), nil
@@ -372,7 +420,7 @@ func (d *Deploys) ListDeployHistory(ctx context.Context, req *connect.Request[fo
 	}
 	out := make([]*forgev1.DeployRecord, 0, len(recs))
 	for _, r := range recs {
-		pr := &forgev1.DeployRecord{DeployCommit: r.DeployCommit, Kind: r.Kind, Image: r.Image, Ref: r.Ref, Commit: r.Commit, Actor: r.Actor, Operation: r.Operation}
+		pr := &forgev1.DeployRecord{DeployCommit: r.DeployCommit, Kind: r.Kind, Image: r.Image, Ref: r.Ref, Commit: r.Commit, Actor: r.Actor, Operation: r.Operation, Version: r.Version}
 		if t, err := time.Parse(time.RFC3339, r.Time); err == nil {
 			pr.Time = timestamppb.New(t)
 		}
@@ -447,7 +495,7 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
 	}
-	op, err := d.startMutation(ctx, kindRollback, svc, env, v)
+	op, err := d.startMutation(ctx, kindRollback, svc, env, v, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -488,9 +536,27 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
+	bump, err := bumpOf(req.Msg.GetBump())
+	if err != nil {
+		return nil, err
+	}
 	v := src
 	v.Env, v.Host = to, d.host(svc, to)
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
+	var cut func(context.Context, func(string, string)) (string, error)
+	if d.o.Releases != nil {
+		owner, repo, err := d.serviceRepo(ctx, svc)
+		if err != nil {
+			return nil, err
+		}
+		commit := v.Forge.Commit
+		if v.Forge.Version, err = d.plannedVersion(ctx, owner, repo, commit, to, bump); err != nil {
+			return nil, err
+		}
+		cut = func(ctx context.Context, emit func(string, string)) (string, error) {
+			return d.cutVersion(ctx, owner, repo, commit, to, bump, emit)
+		}
+	}
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, to); err != nil {
 		return nil, err
 	}
@@ -501,15 +567,16 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.PromoteDeployResponse{Deployment: preview}), nil
 	}
-	op, err := d.startMutation(ctx, kindPromote, svc, to, v)
+	op, err := d.startMutation(ctx, kindPromote, svc, to, v, cut)
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&forgev1.PromoteDeployResponse{Operation: op, Deployment: preview}), nil
 }
 
-// startMutation locks svc/env and starts an operation that applies v.
-func (d *Deploys) startMutation(ctx context.Context, kind, svc, env string, v deployValues) (*forgev1.Operation, error) {
+// startMutation locks svc/env and starts an operation that applies v. cut,
+// when set, first makes sure the commit has its version and returns it.
+func (d *Deploys) startMutation(ctx context.Context, kind, svc, env string, v deployValues, cut func(context.Context, func(string, string)) (string, error)) (*forgev1.Operation, error) {
 	target := svc + "/" + env
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -518,6 +585,13 @@ func (d *Deploys) startMutation(ctx context.Context, kind, svc, env string, v de
 	}
 	op := d.o.Operations.Start(ctx, kind, deployNamePrefix+target, v.Forge.Actor, func(ctx context.Context, emit func(string, string)) error {
 		defer d.unlock(target)
+		if cut != nil {
+			version, err := cut(ctx, emit)
+			if err != nil {
+				return err
+			}
+			v.Forge.Version = version
+		}
 		return d.apply(ctx, svc, env, v, emit)
 	})
 	d.running[target] = op.GetName()

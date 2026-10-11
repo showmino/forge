@@ -35,6 +35,14 @@ service DeployService {
   rpc PromoteDeploy(PromoteDeployRequest) returns (PromoteDeployResponse) {}
 }
 
+// Bump is the part of the version a final release raises.
+enum Bump {
+  BUMP_UNSPECIFIED = 0;
+  BUMP_PATCH = 1;
+  BUMP_MINOR = 2;
+  BUMP_MAJOR = 3;
+}
+
 // Deployment is what runs for one service in one environment.
 message Deployment {
   // SyncStatus is Argo CD's sync status.
@@ -76,6 +84,10 @@ message Deployment {
   google.protobuf.Timestamp deploy_time = 13;
   // The newest operation on it, while forge-api still has it in memory.
   string operation = 14;
+  // The version tag on commit: "v0.3.1-rc.2" for a release candidate,
+  // "v0.3.1" once it was released to production. Empty for deploys from
+  // before Forge cut versions.
+  string version = 15;
 }
 
 // DeployRecord is one change of one environment.
@@ -89,6 +101,8 @@ message DeployRecord {
   string actor = 6;
   google.protobuf.Timestamp time = 7;
   string operation = 8;
+  // The version this deploy ran as; see Deployment.version.
+  string version = 9;
 }
 
 message StartDeployRequest {
@@ -102,6 +116,9 @@ message StartDeployRequest {
   string request_id = 4;
   // Check and resolve only; change nothing.
   bool validate_only = 5;
+  // For a deploy straight to production of a commit without a final
+  // version: how far the version goes up. Default patch.
+  Bump bump = 6;
 }
 
 message StartDeployResponse {
@@ -164,6 +181,9 @@ message PromoteDeployRequest {
   // Default "production".
   string to = 3;
   bool validate_only = 4;
+  // How far the version goes up when this promotion cuts a final version.
+  // Default patch. A commit that already has a final version keeps it.
+  Bump bump = 5;
 }
 
 message PromoteDeployResponse {

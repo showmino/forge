@@ -21,8 +21,9 @@ func (h *harness) serveDeploys(unhealthy map[string]string) *envtest.Repo {
 	repo := &envtest.Repo{}
 	h.deploys = server.NewDeploys(server.DeployOptions{
 		Cluster: cluster, Images: images, Repo: repo, Catalog: h.catalog, Operations: h.ops,
-		GitHub: &envtest.GitHub{Refs: map[string]string{"main": cliSHA}},
-		Org:    "showmino", Domain: "10.150.1.222.nip.io",
+		GitHub:   &envtest.GitHub{Refs: map[string]string{"main": cliSHA}},
+		Releases: &envtest.Releases{},
+		Org:      "showmino", Domain: "10.150.1.222.nip.io",
 		ImagePoll: 5 * time.Millisecond, Poll: 5 * time.Millisecond,
 		ImageTimeout: 5 * time.Second, SyncTimeout: 300 * time.Millisecond, NamespaceTimeout: 5 * time.Second,
 	})
@@ -48,11 +49,11 @@ func TestDeployLifecycle(t *testing.T) {
 	h.fails(2, "deploy", "start", "--env", "staging") // no service outside a repo
 	h.fails(3, "deploy", "status", "payments", "--env", "staging")
 
-	if r := h.ok("deploy", "start", "payments", "--env", "staging", "--dry-run"); r.out != "Would deploy ghcr.io/showmino/payments:1a2b3c4 (main at 1a2b3c4) to deployments/payments/staging at http://payments.staging.10.150.1.222.nip.io\n" {
+	if r := h.ok("deploy", "start", "payments", "--env", "staging", "--dry-run"); r.out != "Would deploy ghcr.io/showmino/payments:1a2b3c4 (main at 1a2b3c4) to deployments/payments/staging at http://payments.staging.10.150.1.222.nip.io as v0.1.0-rc.1\n" {
 		t.Errorf("dry run: %q", r.out)
 	}
 	r := h.ok("deploy", "start", "payments", "--env", "staging")
-	for _, step := range []string{"resolve", "image", "commit", "namespace", "sync"} {
+	for _, step := range []string{"resolve", "image", "release", "commit", "namespace", "sync"} {
 		if !strings.Contains(r.err, "  "+step) {
 			t.Errorf("no %s event:\n%s", step, r.err)
 		}
@@ -82,10 +83,19 @@ func TestDeployLifecycle(t *testing.T) {
 	}
 
 	h.fails(2, "deploy", "promote", "payments") // to production: needs --yes
-	if r := h.ok("deploy", "promote", "payments", "--dry-run"); r.out != "Would promote ghcr.io/showmino/payments:1a2b3c4 from staging to production\n" {
+	h.fails(2, "deploy", "promote", "payments", "--yes", "--bump", "huge")
+	if r := h.ok("deploy", "promote", "payments", "--dry-run"); r.out != "Would promote ghcr.io/showmino/payments:1a2b3c4 from staging to production as v0.1.0\n" {
 		t.Errorf("promote dry run: %q", r.out)
 	}
-	h.ok("deploy", "promote", "payments", "--yes")
+	if r := h.ok("deploy", "promote", "payments", "--dry-run", "--bump", "minor"); !strings.HasSuffix(r.out, " as v0.1.0\n") {
+		t.Errorf("the first release is v0.1.0 for a patch and a minor alike: %q", r.out)
+	}
+	if r := h.ok("deploy", "promote", "payments", "--dry-run", "--bump", "major"); !strings.HasSuffix(r.out, " as v1.0.0\n") {
+		t.Errorf("promote dry run, major: %q", r.out)
+	}
+	if r := h.ok("deploy", "promote", "payments", "--yes"); !strings.Contains(r.out, "v0.1.0") {
+		t.Errorf("promote: %q", r.out)
+	}
 	if r := h.ok("deploy", "status", "payments", "--env", "production", "-o", "json"); !strings.Contains(r.out, `"env": "production"`) || !strings.Contains(r.out, `"health": "HEALTH_HEALTHY"`) {
 		t.Errorf("production json:\n%s", r.out)
 	}

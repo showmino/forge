@@ -56,7 +56,7 @@ signs:
 dockers_v2:
   - ids: [forge-api, forge]
     images: ["ghcr.io/showmino/forge-api"]
-    tags: ["{{ .Version }}", latest]
+    tags: ["{{ .Tag }}", latest]
     dockerfile: build/forge-api.Dockerfile
     platforms: [linux/amd64, linux/arm64]
     labels:
