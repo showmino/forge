@@ -481,8 +481,22 @@ func TestLoginSession(t *testing.T) {
 		t.Errorf("status as JSON: %s", r.out)
 	}
 
-	// A second login is a second session; the first is still there, and can
-	// be ended from here.
+	// Logging in again on this machine replaces its session: the old one ends.
+	h.ok("auth", "login")
+	if r := h.ok("auth", "session", "list", "-o", "name"); strings.Count(r.out, "sessions/ses_") != 1 {
+		t.Fatalf("after a second login here: %q", r.out)
+	}
+	h.env["FORGE_TOKEN"] = first
+	h.fails(4, "service", "list")
+	delete(h.env, "FORGE_TOKEN")
+
+	// A login on another machine is a second session, which can be ended
+	// from here. (Another machine: this one's stored login is not there.)
+	creds, _ = h.store.Get(h.api.URL)
+	first = creds.SessionToken
+	if err := h.store.Delete(h.api.URL); err != nil {
+		t.Fatal(err)
+	}
 	h.ok("auth", "login")
 	r := h.ok("auth", "session", "list")
 	if strings.Count(r.out, "ses_") != 2 || strings.Count(r.out, "(this one)") != 1 || !strings.Contains(r.out, "cli") {

@@ -80,10 +80,14 @@ keychain (a 0600 file on headless Linux):
   goes on with what was last known for at most a day.
 - **What is stored:** the SHA-256 of the token, never the token
   (`fgs_...`), in the `sessions` table. A session is made only from a login
-  less than ten minutes old, and never from another session or a CI token.
+  less than ten minutes old, once per login, and never from another session
+  or a CI token. With sessions the CLI asks for no refresh token, and a new
+  login on a machine ends the session that machine had.
 
-An API without sessions answers `Unimplemented` and the CLI keeps the ID and
-refresh tokens, as before.
+forge-api keeps sessions only when it has the GitHub App, because that is how
+it knows a person has left (`GetServerInfo` says `sessions: true`). Without
+it, and against an older API, `CreateSession` answers `Unimplemented` and the
+CLI keeps the ID and refresh tokens, as before.
 
 ## On k3s
 

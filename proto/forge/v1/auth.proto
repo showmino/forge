@@ -91,6 +91,9 @@ message GetServerInfoResponse {
   // Oldest CLI version the server accepts.
   string min_client_version = 2;
   OIDCConfig oidc = 3;
+  // True when the server turns a login into a session (CreateSession). A
+  // client then needs no refresh token from the identity provider.
+  bool sessions = 4;
 }
 
 // OIDCConfig is what a public client needs to log in: the CLI runs the

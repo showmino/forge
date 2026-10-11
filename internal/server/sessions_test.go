@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/coreos/go-oidc/v3/oidc"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
@@ -44,12 +45,21 @@ type fakeMembers struct {
 	org, team map[string]bool
 	err       error
 	calls     int
+	// slow is how long GitHub takes to answer.
+	slow time.Duration
 }
 
-func (m *fakeMembers) OrgMember(_ context.Context, _, login string) (bool, error) {
+func (m *fakeMembers) OrgMember(ctx context.Context, _, login string) (bool, error) {
+	m.mu.Lock()
+	m.calls++
+	slow := m.slow
+	m.mu.Unlock()
+	time.Sleep(slow)
+	if err := ctx.Err(); err != nil {
+		return false, err // as an HTTP client: a caller that left gets no answer
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.calls++
 	return m.org[login], m.err
 }
 
@@ -100,9 +110,11 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 			"bo-login":    {Subject: "sub-bo", Email: "bo@example.com", Login: "bo", Groups: []string{"showmino:other"}, Client: ClientCLI},
 			"other-login": ana, // not made by a Forge client
 			"no-name":     {Subject: "sub-cy", Email: "cy@example.com", Client: ClientCLI},
+			"once-login":  {Subject: "sub-ana", Email: "ana@example.com", Login: "ana", Client: ClientCLI, LoginID: "the hash of one ID token"},
 			"ci":          {Subject: "github:showmino/payments", Workload: &Workload{Repository: "showmino/payments", Service: "payments"}},
 		}},
 		Authorizer: Authorizer{WriterGroups: []string{"showmino:platform"}},
+		Audit:      f.store,
 		Sessions: NewSessions(SessionOptions{
 			Store: f.store, Members: f.members, Org: "showmino", Teams: []string{"showmino:platform", "elsewhere:team"}, Now: f.now,
 		}),
@@ -174,6 +186,28 @@ func TestSessionCreateAndUse(t *testing.T) {
 	for name, bad := range map[string]string{"made up": "fgs_" + strings.Repeat("A", 43), "the id": strings.TrimPrefix(ses.GetName(), "sessions/"), "empty": "fgs_"} {
 		if _, err := f.status(bad); connect.CodeOf(err) != connect.CodeUnauthenticated {
 			t.Errorf("%s token: %v", name, err)
+		}
+	}
+
+	// One login makes one session: a copy of its ID token is of no use.
+	if _, ses := f.login("once-login", ""); ses.GetName() == "" {
+		t.Fatal("no session from a login used once")
+	}
+	if _, err := f.auth.CreateSession(ctx, as("once-login", &forgev1.CreateSessionRequest{})); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "already turned into a session") {
+		t.Errorf("a login used twice: %v", err)
+	}
+	// Clients are told the API keeps sessions, and the audit log says which
+	// client a session was made for, not what it was called.
+	if info, err := f.auth.GetServerInfo(ctx, connect.NewRequest(&forgev1.GetServerInfoRequest{})); err != nil || !info.Msg.GetSessions() {
+		t.Errorf("server info: %v %v", info, err)
+	}
+	evs, err := f.store.ListAuditEvents(ctx, store.AuditQuery{Action: "auth.session.create", Limit: 10})
+	if err != nil || len(evs) == 0 {
+		t.Fatalf("audit events: %v %v", evs, err)
+	}
+	for _, ev := range evs {
+		if ev.GetResult().GetCode() == "ok" && (!strings.HasPrefix(ev.GetTarget(), "sessions/ses_") || ev.GetDetails()["client"] != "cli" || strings.Contains(ev.String(), "laptop") || strings.Contains(ev.String(), "fgs_")) {
+			t.Errorf("audit event %v", ev)
 		}
 	}
 
@@ -300,6 +334,72 @@ func TestSessionMembership(t *testing.T) {
 	if list, _ := f.store.ListSessions(context.Background(), "sub-ana"); len(list) != 0 {
 		t.Errorf("sessions of someone who left: %d", len(list))
 	}
+	// forge-api ended it on its own, and says so in the audit log.
+	evs, err := f.store.ListAuditEvents(context.Background(), store.AuditQuery{Action: "auth.session.end", Limit: 10})
+	if err != nil || len(evs) != 1 || evs[0].GetActor().GetKind() != actorSystem || !strings.HasPrefix(evs[0].GetTarget(), "sessions/ses_") ||
+		evs[0].GetDetails()["email"] != "ana@example.com" || evs[0].GetDetails()["reason"] != "no longer a member of showmino" {
+		t.Errorf("audit of the ended session: %v %v", evs, err)
+	}
+}
+
+// A caller cannot make the check fail by leaving early, and so keep rights
+// its person lost: the check has its own time limit.
+func TestSessionCheckOutlivesTheCaller(t *testing.T) {
+	t.Parallel()
+	f := newSessionFixture(t)
+	token, _ := f.login("cli-login", "laptop")
+	f.members.set(func(m *fakeMembers) { m.org["ana"], m.slow = false, 20*time.Millisecond })
+	f.advance(61 * time.Minute)
+	sessions := NewSessions(SessionOptions{Store: f.store, Members: f.members, Org: "showmino", Teams: []string{"showmino:platform"}, Now: f.now})
+	gone, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := sessions.Authenticate(gone, token); err == nil {
+		t.Fatal("a caller that left was let in")
+	}
+	// The check went on without the caller, and ended the session.
+	for end := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		if list, _ := f.store.ListSessions(context.Background(), "sub-ana"); len(list) == 0 {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("the session of someone who left is still there")
+		}
+	}
+	if _, err := f.status(token); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("after the check: %v", err)
+	}
+}
+
+// A page that makes many calls at once, on a session not used for days:
+// they all wait for the one check and get in.
+func TestSessionParallelCheck(t *testing.T) {
+	t.Parallel()
+	f := newSessionFixture(t)
+	token, _ := f.login("web-login", "Firefox")
+	f.members.set(func(m *fakeMembers) { m.slow = 30 * time.Millisecond })
+	f.advance(3 * 24 * time.Hour)
+	var wg sync.WaitGroup
+	errs := make([]error, 12)
+	for i := range errs {
+		wg.Go(func() {
+			st, err := f.status(token)
+			if err == nil && !canWrite(st) {
+				err = errors.New("no write permission")
+			}
+			errs[i] = err
+		})
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("call %d: %v", i, err)
+		}
+	}
+	f.members.mu.Lock()
+	defer f.members.mu.Unlock()
+	if f.members.calls < 1 || f.members.calls > 3 {
+		t.Errorf("GitHub was asked %d times for one session", f.members.calls)
+	}
 }
 
 func TestSessionListAndDelete(t *testing.T) {
@@ -376,17 +476,62 @@ func TestSessionsOffAndTrim(t *testing.T) {
 		t.Errorf("a session token without sessions: %v", err)
 	}
 
-	// One person keeps at most maxSessions; the one unused for longest goes.
+	// One person keeps at most maxSessions; the one unused for longest
+	// goes, which is not the same as the oldest.
 	f := newSessionFixture(t)
 	first, _ := f.login("cli-login", "first")
-	for range maxSessions {
+	f.advance(time.Minute)
+	second, _ := f.login("cli-login", "second")
+	for range maxSessions - 2 {
 		f.advance(time.Minute)
 		f.login("cli-login", "more")
 	}
+	f.advance(10 * time.Minute)
+	if _, err := f.status(first); err != nil { // the oldest is used again
+		t.Fatal(err)
+	}
+	f.login("cli-login", "one too many")
 	if list, _ := f.store.ListSessions(context.Background(), "sub-ana"); len(list) != maxSessions {
 		t.Errorf("%d sessions kept, want %d", len(list), maxSessions)
 	}
-	if _, err := f.status(first); connect.CodeOf(err) != connect.CodeUnauthenticated {
-		t.Errorf("the oldest session survived: %v", err)
+	if _, err := f.status(first); err != nil {
+		t.Errorf("the oldest session, used a moment ago, was removed: %v", err)
+	}
+	if _, err := f.status(second); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("the session unused for longest survived: %v", err)
+	}
+}
+
+// The identity provider's token decides what kind of login it is: which
+// client it was issued to, how old it is and which GitHub user it names.
+func TestOIDCLoginFacts(t *testing.T) {
+	t.Parallel()
+	iss := newActionsIssuer(t)
+	ctx := context.Background()
+	a := &OIDCAuthenticator{
+		verifier:  oidc.NewVerifier(iss.srv.URL, oidc.NewRemoteKeySet(ctx, iss.srv.URL+"/.well-known/jwks"), &oidc.Config{SkipClientIDCheck: true}),
+		audiences: []string{"forge-cli", "forge-web"},
+	}
+	a.SetWebClient("forge-web")
+	issued := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
+	token := func(aud any) string {
+		return iss.sign(t, iss.key, map[string]any{
+			"iss": iss.srv.URL, "aud": aud, "sub": "sub-ana", "email": "ana@example.com", "preferred_username": "ana-gh",
+			"groups": []string{"showmino:platform"}, "iat": issued.Unix(), "exp": time.Now().Add(time.Hour).Unix(),
+		})
+	}
+	cli := token("forge-cli")
+	p, err := a.Authenticate(ctx, cli)
+	if err != nil || p.Client != ClientCLI || p.Login != "ana-gh" || !p.IssuedAt.Equal(issued) || p.LoginID != hashToken(cli) || p.Session != "" || p.Email != "ana@example.com" {
+		t.Fatalf("a CLI login: %+v %v", p, err)
+	}
+	// A token issued to the dashboard is a web login, also when it names both.
+	for _, aud := range []any{"forge-web", []string{"forge-cli", "forge-web"}} {
+		if p, err := a.Authenticate(ctx, token(aud)); err != nil || p.Client != ClientWeb {
+			t.Errorf("audience %v: %+v %v", aud, p, err)
+		}
+	}
+	if _, err := a.Authenticate(ctx, token("someone-else")); err == nil {
+		t.Error("a token for another client was accepted")
 	}
 }

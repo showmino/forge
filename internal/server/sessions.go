@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -80,10 +81,19 @@ type Sessions struct {
 	o SessionOptions
 
 	mu sync.Mutex
-	// tried maps a session ID to the last time its memberships were asked
-	// for, so that a GitHub outage is not hammered by every request.
-	tried map[string]time.Time
+	// checks are the membership checks under way, by session ID.
+	checks map[string]*check
+	// failed maps a session ID to when GitHub last could not be asked about
+	// it, so that an outage is not hammered by every request.
+	failed map[string]time.Time
+	// used holds the logins (LoginID) already turned into a session, until
+	// they are too old to be used anyway: a login makes one session.
+	used map[string]time.Time
+
+	audit atomic.Pointer[auditor]
 }
+
+func (s *Sessions) setAuditor(a *auditor) { s.audit.Store(a) }
 
 // NewSessions returns the sessions kept in o.Store.
 func NewSessions(o SessionOptions) *Sessions {
@@ -101,7 +111,7 @@ func NewSessions(o SessionOptions) *Sessions {
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Sessions{o: o, tried: map[string]time.Time{}}
+	return &Sessions{o: o, checks: map[string]*check{}, failed: map[string]time.Time{}, used: map[string]time.Time{}}
 }
 
 // errSessionEnded is what every bad session token gets: unknown, signed
@@ -163,48 +173,94 @@ func (s *Sessions) end(ctx context.Context, ses store.Session, why string) {
 	s.o.Log.Info("session ended", "session", ses.ID, "email", ses.Email, "reason", why)
 }
 
+// checkTimeout is how long one membership check may take. It is its own
+// limit, not the request's: a caller must not be able to make the check fail
+// by going away early.
+const checkTimeout = 10 * time.Second
+
+// check is one membership check under way, shared by the requests that
+// arrive while it runs.
+type check struct {
+	done chan struct{}
+	ses  store.Session
+	err  error
+}
+
 // recheck asks GitHub, when it is time, whether ses's person is still in the
 // organization and which of the teams that matter they are in, and returns
 // ses with its groups brought up to date. A person who left loses the
-// session. When GitHub cannot be asked the session goes on with what it
-// knew, for at most MaxStale.
+// session. Requests that arrive while a check runs wait for its answer.
+// When GitHub cannot be asked the session goes on with what it knew, for at
+// most MaxStale, and GitHub is asked again after a minute.
 func (s *Sessions) recheck(ctx context.Context, ses store.Session, now time.Time) (store.Session, error) {
 	if s.o.Members == nil || now.Sub(ses.CheckedAt) < s.o.Recheck {
 		return ses, nil
 	}
-	stale := func() (store.Session, error) {
-		if now.Sub(ses.CheckedAt) >= s.o.MaxStale {
-			return ses, connect.NewError(connect.CodeUnavailable,
-				fmt.Errorf("your membership of %s on GitHub could not be confirmed for %s; try again shortly", s.o.Org, s.o.MaxStale))
+	s.mu.Lock()
+	c, running := s.checks[ses.ID]
+	if !running {
+		if failed, ok := s.failed[ses.ID]; ok && now.Sub(failed) < time.Minute {
+			s.mu.Unlock()
+			return s.stale(ses, now) // GitHub could not be asked a moment ago
 		}
-		return ses, nil
+		c = &check{done: make(chan struct{})}
+		s.checks[ses.ID] = c
+		go s.runCheck(ctx, c, ses, now)
 	}
-	s.mu.Lock()
-	last, tried := s.tried[ses.ID]
-	if tried && now.Sub(last) < time.Minute {
-		s.mu.Unlock()
-		return stale() // asked a moment ago, by this or another request
-	}
-	s.tried[ses.ID] = now
 	s.mu.Unlock()
+	select {
+	case <-c.done:
+		return c.ses, c.err
+	case <-ctx.Done():
+		return ses, connect.NewError(connect.CodeCanceled, ctx.Err())
+	}
+}
 
+// stale is the answer for a session whose memberships could not be checked:
+// it goes on as it is until the last good check is MaxStale old.
+func (s *Sessions) stale(ses store.Session, now time.Time) (store.Session, error) {
+	if now.Sub(ses.CheckedAt) >= s.o.MaxStale {
+		return ses, connect.NewError(connect.CodeUnavailable,
+			fmt.Errorf("your membership of %s on GitHub could not be confirmed for %s; try again shortly", s.o.Org, s.o.MaxStale))
+	}
+	return ses, nil
+}
+
+// runCheck does one membership check and hands its answer to everyone
+// waiting on c.
+func (s *Sessions) runCheck(ctx context.Context, c *check, ses store.Session, now time.Time) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkTimeout)
+	defer cancel()
 	groups, member, err := s.memberships(ctx, ses)
-	if err != nil {
+	switch {
+	case err != nil:
 		s.o.Log.Warn("checking a session's memberships", "session", ses.ID, "error", err)
-		return stale()
+		c.ses, c.err = s.stale(ses, now)
+	case !member:
+		s.end(ctx, ses, "no longer a member of "+s.o.Org)
+		// Nobody asked for this end: forge-api says in the audit log that it did it.
+		s.audit.Load().append(ctx, &forgev1.AuditEvent{
+			Kind: auditRequest, Action: "auth.session.end", Actor: &forgev1.AuditActor{Kind: actorSystem},
+			Target: sessionPrefix + ses.ID, Result: &forgev1.AuditResult{Code: "ok"},
+			Details: details("reason", "no longer a member of "+s.o.Org, "email", ses.Email, "client", ses.Kind),
+		})
+		c.ses, c.err = ses, errSessionEnded()
+	default:
+		if err := s.o.Store.SetSessionGroups(ctx, ses.ID, groups, now); err != nil {
+			s.o.Log.Warn("recording a session's groups", "session", ses.ID, "error", err)
+		}
+		ses.Groups, ses.CheckedAt = groups, now
+		c.ses = ses
 	}
 	s.mu.Lock()
-	delete(s.tried, ses.ID)
+	delete(s.checks, ses.ID)
+	if err != nil {
+		s.failed[ses.ID] = now
+	} else {
+		delete(s.failed, ses.ID)
+	}
 	s.mu.Unlock()
-	if !member {
-		s.end(ctx, ses, "no longer a member of "+s.o.Org)
-		return ses, errSessionEnded()
-	}
-	if err := s.o.Store.SetSessionGroups(ctx, ses.ID, groups, now); err != nil {
-		s.o.Log.Warn("recording a session's groups", "session", ses.ID, "error", err)
-	}
-	ses.Groups, ses.CheckedAt = groups, now
-	return ses, nil
+	close(c.done)
 }
 
 // memberships returns ses's groups with the teams that matter brought up to
@@ -244,11 +300,30 @@ func (s *Sessions) RunSweeper(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if n, err := s.o.Store.DeleteExpiredSessions(ctx, s.o.Now()); err != nil {
+			now := s.o.Now()
+			if n, err := s.o.Store.DeleteExpiredSessions(ctx, now); err != nil {
 				s.o.Log.Warn("sweeping sessions", "error", err)
 			} else if n > 0 {
 				s.o.Log.Info("ended sessions removed", "count", n)
 			}
+			s.forget(now)
+		}
+	}
+}
+
+// forget drops what is only remembered for a while: failed checks older
+// than their minute and logins too old to be used again.
+func (s *Sessions) forget(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, at := range s.failed {
+		if now.Sub(at) >= time.Minute {
+			delete(s.failed, id)
+		}
+	}
+	for id, at := range s.used {
+		if now.Sub(at) > maxLoginAge {
+			delete(s.used, id)
 		}
 	}
 }
@@ -279,11 +354,22 @@ func (s *Sessions) create(ctx context.Context, p *Principal, label string) (stor
 	case s.o.Members != nil && p.Login == "":
 		return store.Session{}, "", connect.NewError(connect.CodeFailedPrecondition, errors.New("the login does not say which GitHub user it is, so its memberships could not be kept current"))
 	}
+	now := s.o.Now()
+	// A login makes one session: a copy of the ID token is of no use to
+	// anyone once its owner has traded it in.
+	if p.LoginID != "" {
+		s.mu.Lock()
+		_, used := s.used[p.LoginID]
+		s.used[p.LoginID] = p.IssuedAt
+		s.mu.Unlock()
+		if used {
+			return store.Session{}, "", connect.NewError(connect.CodeFailedPrecondition, errors.New("this login was already turned into a session; sign in again"))
+		}
+	}
 	id, token, err := newSessionToken()
 	if err != nil {
 		return store.Session{}, "", connect.NewError(connect.CodeInternal, errors.New("no random bytes for a session"))
 	}
-	now := s.o.Now()
 	ses := store.Session{
 		ID: id, TokenHash: hashToken(token), Kind: p.Client, Label: sessionLabel(label),
 		Subject: p.Subject, Email: p.Email, Login: p.Login, Groups: slices.Clone(p.Groups),
@@ -308,8 +394,11 @@ func (s *Sessions) trim(ctx context.Context, subject string, now time.Time) {
 	}
 	slices.SortFunc(all, func(a, b store.Session) int { return b.LastUsedAt.Compare(a.LastUsedAt) })
 	for i, ses := range all {
-		if i >= maxSessions || !now.Before(ses.ExpiresAt) {
-			_ = s.o.Store.DeleteSession(ctx, subject, ses.ID)
+		switch {
+		case !now.Before(ses.ExpiresAt):
+			s.end(ctx, ses, "expired")
+		case i >= maxSessions:
+			s.end(ctx, ses, fmt.Sprintf("more than %d sessions", maxSessions))
 		}
 	}
 }
@@ -345,6 +434,7 @@ func (a *authService) CreateSession(ctx context.Context, req *connect.Request[fo
 		return nil, err
 	}
 	noteAuditTarget(ctx, sessionPrefix+ses.ID)
+	noteAuditDetail(ctx, "client", ses.Kind)
 	return connect.NewResponse(&forgev1.CreateSessionResponse{Session: sessionProto(ses, ""), Token: token}), nil
 }
 

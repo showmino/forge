@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func (f *Factory) startSession(ctx context.Context, api interface {
 	case connect.CodeOf(err) == connect.CodeUnimplemented:
 		return
 	case err != nil:
-		f.infof("warning: no long-lived session (%v); this login lasts as long as the identity provider keeps it.", exitcode.From(err))
+		f.infof("warning: no long-lived session (%v); this login lasts as long as the identity provider's token, about an hour.", exitcode.From(err))
 		return
 	}
 	creds.SessionToken = resp.Msg.GetToken()
@@ -98,6 +99,11 @@ browser.`,
 				Scopes:     info.Msg.GetOidc().GetScopes(),
 				HTTPClient: f.HTTPClient,
 			}
+			if info.Msg.GetSessions() {
+				// The login is traded for a session at once: a refresh token
+				// would only be a second, unused way in.
+				cfg.Scopes = slices.DeleteFunc(slices.Clone(cfg.Scopes), func(s string) bool { return s == "offline_access" })
+			}
 			if issuer != "" {
 				cfg.Issuer = issuer
 			}
@@ -124,6 +130,11 @@ browser.`,
 				return exitcode.New(exitcode.Unauthenticated, "%v", err)
 			}
 			f.startSession(ctx, c.Auth, creds)
+			// A new login replaces the one this machine had: end that
+			// session rather than leave it to its 90 days.
+			if old, err := f.CredentialStore().Get(r.CredentialKey()); err == nil && old.SessionToken != "" && creds.SessionToken != "" {
+				_, _ = c.Auth.DeleteSession(ctx, bearer(old.SessionToken, &forgev1.DeleteSessionRequest{Name: "sessions/current"}))
+			}
 			if err := f.CredentialStore().Set(r.CredentialKey(), creds); err != nil {
 				return fmt.Errorf("save credentials to %s: %w", f.CredentialStore().Name(), err)
 			}

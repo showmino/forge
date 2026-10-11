@@ -38,6 +38,9 @@ type Principal struct {
 	Client string
 	// IssuedAt is when the ID token was issued; zero for any other token.
 	IssuedAt time.Time
+	// LoginID names the ID token of the call without holding it (a hash);
+	// empty for any other token.
+	LoginID string
 	// Session is the ID of the session the call was made with; empty for a
 	// call with an ID token.
 	Session string
@@ -231,7 +234,10 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, token string) (*Pr
 	if a.web != "" && slices.Contains(idt.Audience, a.web) {
 		client = ClientWeb
 	}
-	return &Principal{Subject: idt.Subject, Email: claims.Email, Groups: claims.Groups, Login: claims.Username, Client: client, IssuedAt: idt.IssuedAt}, nil
+	return &Principal{
+		Subject: idt.Subject, Email: claims.Email, Groups: claims.Groups, Login: claims.Username,
+		Client: client, IssuedAt: idt.IssuedAt, LoginID: hashToken(token),
+	}, nil
 }
 
 // StaticAuthenticator maps fixed tokens to principals. For tests and local

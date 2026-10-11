@@ -100,6 +100,9 @@ func New(o Options) (http.Handler, error) {
 
 	aud := &auditor{store: o.Audit, log: o.Logger}
 	o.Operations.setAuditor(aud)
+	if o.Sessions != nil {
+		o.Sessions.setAuditor(aud)
+	}
 	if o.Resources != nil {
 		o.Resources.setAuditor(aud)
 		o.Catalog.GuardResources(o.Resources.o.Store)
@@ -173,6 +176,7 @@ func (a *authService) GetServerInfo(context.Context, *connect.Request[forgev1.Ge
 	return connect.NewResponse(&forgev1.GetServerInfoResponse{
 		ServerVersion:    a.o.Version,
 		MinClientVersion: a.o.MinClientVersion,
+		Sessions:         a.o.Sessions != nil,
 		Oidc: &forgev1.OIDCConfig{
 			Issuer:      a.o.OIDC.Issuer,
 			ClientId:    a.o.OIDC.ClientID,

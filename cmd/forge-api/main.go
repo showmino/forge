@@ -211,8 +211,20 @@ func run() error {
 	catalog.EnableTeardown(deps, envs, ops)
 	// A login becomes a session of Forge's own, which lasts without the
 	// identity provider; forge-api keeps its person's teams current itself.
-	sessions := server.NewSessions(server.SessionOptions{Store: st, Members: members(app), Org: *githubOrg, Teams: groups, Log: log})
-	go sessions.RunSweeper(ctx, time.Hour)
+	// Only with the GitHub App: without it nobody could tell that a
+	// session's person has left, and the CLI keeps the tokens of its login.
+	var sessions *server.Sessions
+	if app != nil {
+		for _, g := range groups {
+			if org, slug, ok := strings.Cut(g, ":"); !ok || slug == "" || !strings.EqualFold(org, *githubOrg) {
+				log.Warn("a writer group is not a team of the GitHub organization: a session keeps it as its login gave it", "group", g, "org", *githubOrg)
+			}
+		}
+		sessions = server.NewSessions(server.SessionOptions{Store: st, Members: members(app), Org: *githubOrg, Teams: groups, Log: log})
+		go sessions.RunSweeper(ctx, time.Hour)
+	} else {
+		log.Info("sessions are off: they need the GitHub App to keep memberships current")
+	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,
