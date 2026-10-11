@@ -45,7 +45,7 @@ func TestGetListExtend(t *testing.T) {
 	}
 	env := got.Msg.GetEnvironment()
 	if env.GetState() != forgev1.Environment_STATE_READY || env.GetService() != "services/payments" || env.GetCommit() != envSHA ||
-		env.GetUrl() != "http://a.preview.example" || env.GetNamespace() != "preview-a" || env.GetCreator() != "ana" ||
+		env.GetUrl() != "http://a.preview.example" || env.GetNamespace() != "preview-a" || env.GetCreator() != "ana@example.com" ||
 		env.GetOperation() == "" || env.GetExpireTime() == nil {
 		t.Errorf("get: %v", env)
 	}

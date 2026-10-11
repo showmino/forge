@@ -314,8 +314,8 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 		return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Environment: env}), nil
 	}
 	creator := ""
-	if p, ok := PrincipalFrom(ctx); ok {
-		creator = p.Subject
+	if _, ok := PrincipalFrom(ctx); ok {
+		creator = actorOf(ctx)
 	}
 	op := e.startDestroy(ctx, id, creator)
 	if op == nil {

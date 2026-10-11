@@ -100,8 +100,10 @@ func (e *Environments) plan(ctx context.Context, m *forgev1.CreateEnvironmentReq
 		return p, err
 	}
 	p.source = src
-	if pr, ok := PrincipalFrom(ctx); ok {
-		p.creator = pr.Subject
+	// A person by email, as deploys record them: the token's subject is an
+	// opaque id nobody can read.
+	if _, ok := PrincipalFrom(ctx); ok {
+		p.creator = actorOf(ctx)
 	}
 	return p, nil
 }
