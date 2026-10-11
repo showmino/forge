@@ -15,7 +15,7 @@ Exit gate (from `docs/index.md`): a writer creates, previews and promotes a serv
 | Where it lives | Its own repo, `showmino/forge-web`, made by `forge create --template nextjs` and deployed by Forge like any other service |
 | How it talks to the API | The browser calls forge-api directly over ConnectRPC (Connect's web client). No dashboard-only endpoints and no proxy |
 | Login | Authorization code flow with PKCE against Dex, public client `forge-web`. The ID token is the bearer, as for the CLI |
-| UI | Tailwind 4 from the template and a few small components of our own |
+| UI | Tailwind 4 from the template and a few small components of our own, built from the Forge design system (https://claude.ai/artifact/9BE6LhhUayv1FtFs4GGQGq): its tokens become the app's Tailwind theme, and its seven components are the specification for ours |
 | Milestones | 1: login and read-only pages, live on k3s. 2: actions. 3: polish and the exit gate |
 
 Not in this phase: resource pages (resources are switched off on k3s; their rollout is deferred), HTTPS for the demo cluster, a production identity provider.
