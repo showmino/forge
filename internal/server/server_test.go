@@ -267,6 +267,26 @@ func TestOIDCAuthenticator(t *testing.T) {
 	if pr.Subject != "ana" || pr.Email != "ana@example.com" || len(pr.Groups) != 1 {
 		t.Errorf("principal: %+v", pr)
 	}
+	// The dashboard's tokens are accepted only when its client ID is given.
+	web := p.token(t, "forge-web", time.Now().Add(time.Hour))
+	if _, err := a.Authenticate(context.Background(), web); err == nil {
+		t.Error("a token for forge-web was accepted without the web client ID")
+	}
+	both, err := NewOIDCAuthenticator(context.Background(), p.srv.URL, "forge-cli", "forge-web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, aud := range []string{"forge-cli", "forge-web"} {
+		if _, err := both.Authenticate(context.Background(), p.token(t, aud, time.Now().Add(time.Hour))); err != nil {
+			t.Errorf("audience %s: %v", aud, err)
+		}
+	}
+	if _, err := both.Authenticate(context.Background(), p.token(t, "someone-else", time.Now().Add(time.Hour))); err == nil {
+		t.Error("a token for another client was accepted")
+	}
+	if _, err := NewOIDCAuthenticator(context.Background(), p.srv.URL, ""); err == nil {
+		t.Error("no client ID was accepted")
+	}
 	for name, tok := range map[string]string{
 		"wrong audience": p.token(t, "someone-else", time.Now().Add(time.Hour)),
 		"expired":        p.token(t, "forge-cli", time.Now().Add(-time.Hour)),
@@ -282,7 +302,11 @@ func TestOIDCAuthenticator(t *testing.T) {
 // including gRPC over cleartext HTTP/2.
 func TestProtocols(t *testing.T) {
 	t.Parallel()
-	h, err := New(Options{Version: "0.1.0", Authenticator: StaticAuthenticator{"tok": {Subject: "ana"}}})
+	const web = "http://forge-web.production.example.com"
+	h, err := New(Options{
+		Version: "0.1.0", Authenticator: StaticAuthenticator{"tok": {Subject: "ana"}},
+		OIDC: OIDC{Issuer: "http://dex.example.com/dex", ClientID: "forge-cli", WebClientID: "forge-web"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +314,7 @@ func TestProtocols(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := HTTPServer("", h)
+	srv := HTTPServer("", CORS([]string{web}, h))
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
 	base := "http://" + ln.Addr().String()
@@ -316,9 +340,11 @@ func TestProtocols(t *testing.T) {
 		}
 	}
 
-	// Plain JSON over HTTP/1.1, as curl or a browser would send it.
+	// Plain JSON over HTTP/1.1, as curl or a browser would send it: the web
+	// dashboard learns its client ID here, from its own origin.
 	req, _ := http.NewRequest(http.MethodPost, base+"/forge.v1.AuthService/GetServerInfo", strings.NewReader("{}"))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", web)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -328,5 +354,11 @@ func TestProtocols(t *testing.T) {
 	_ = json.NewDecoder(res.Body).Decode(&body)
 	if res.StatusCode != 200 || body["serverVersion"] != "0.1.0" || res.Header.Get(client.HeaderServerVersion) != "0.1.0" {
 		t.Errorf("json: %d %v %v", res.StatusCode, body, res.Header)
+	}
+	if oidc, _ := body["oidc"].(map[string]any); oidc["clientId"] != "forge-cli" || oidc["webClientId"] != "forge-web" {
+		t.Errorf("oidc: %v", body["oidc"])
+	}
+	if got := res.Header.Get("Access-Control-Allow-Origin"); got != web {
+		t.Errorf("allow origin: %q", got)
 	}
 }

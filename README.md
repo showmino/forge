@@ -143,6 +143,13 @@ GitHub OAuth App owned by the org with the callback
 `FORGE_DEX_ONEPASSWORD_ITEM`. The render also creates the CloudNativePG cluster
 `forge-db` (2 instances, `longhorn-retain`), which holds the service catalog
 and Dex's logins; it needs the CloudNativePG operator. There are no backups yet.
+
+The web dashboard (Phase 6) calls forge-api from the browser. Render with
+`FORGE_WEB_ORIGINS`, its addresses separated by commas
+(`http://forge-web.staging.<domain>,http://forge-web.production.<domain>`), to
+add Dex's public client `forge-web` and to let those pages, and no others, call
+the API (`FORGE_CORS_ORIGINS`, `FORGE_OIDC_WEB_CLIENT_ID` on forge-api). Restart
+Dex after changing it. Without it, nothing of the dashboard is rendered.
 Phase 1 serves plain
 HTTP; add TLS (cert-manager) before real use.
 

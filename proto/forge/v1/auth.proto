@@ -26,11 +26,16 @@ message GetServerInfoResponse {
   OIDCConfig oidc = 3;
 }
 
-// OIDCConfig is what a public client needs to run the device flow.
+// OIDCConfig is what a public client needs to log in: the CLI runs the
+// device flow as client_id, the web dashboard the authorization code flow
+// with PKCE as web_client_id.
 message OIDCConfig {
   string issuer = 1;
   string client_id = 2;
   repeated string scopes = 3;
+  // Client ID of the web dashboard; empty when the server accepts no
+  // dashboard logins.
+  string web_client_id = 4;
 }
 
 message GetStatusRequest {}

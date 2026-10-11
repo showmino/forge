@@ -23,7 +23,9 @@ import (
 type OIDC struct {
 	Issuer   string
 	ClientID string
-	Scopes   []string
+	// WebClientID is the web dashboard's client; empty when it may not log in.
+	WebClientID string
+	Scopes      []string
 }
 
 // Options configure the API.
@@ -156,9 +158,10 @@ func (a *authService) GetServerInfo(context.Context, *connect.Request[forgev1.Ge
 		ServerVersion:    a.o.Version,
 		MinClientVersion: a.o.MinClientVersion,
 		Oidc: &forgev1.OIDCConfig{
-			Issuer:   a.o.OIDC.Issuer,
-			ClientId: a.o.OIDC.ClientID,
-			Scopes:   slices.Clone(a.o.OIDC.Scopes),
+			Issuer:      a.o.OIDC.Issuer,
+			ClientId:    a.o.OIDC.ClientID,
+			WebClientId: a.o.OIDC.WebClientID,
+			Scopes:      slices.Clone(a.o.OIDC.Scopes),
 		},
 	}), nil
 }

@@ -31,6 +31,7 @@ data:
           mode: require
     web:
       http: 0.0.0.0:5556
+      allowedOrigins: [${WEB_ORIGINS_YAML}] #web
     oauth2:
       grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
       skipApprovalScreen: true
@@ -41,6 +42,10 @@ data:
         name: Forge CLI
         public: true
         redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
+      - id: forge-web #web
+        name: Forge dashboard #web
+        public: true #web
+        redirectURIs: [${WEB_REDIRECTS_YAML}] #web
     # Only members of the org log in; groups are "<org>:<team-slug>", and
     # forge-api's FORGE_WRITER_GROUPS picks the teams that may write. Dex
     # expands $GITHUB_CLIENT_* from its environment (the Secret dex-github).
@@ -128,6 +133,8 @@ spec:
           env:
             - {name: FORGE_OIDC_ISSUER, value: "http://${DEX_HOST}/dex"}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
+            - {name: FORGE_OIDC_WEB_CLIENT_ID, value: forge-web} #web
+            - {name: FORGE_CORS_ORIGINS, value: "${FORGE_WEB_ORIGINS}"} #web
             - {name: FORGE_WRITER_GROUPS, value: "${FORGE_WRITER_GROUPS}"}
             - name: FORGE_DATABASE_URL
               valueFrom:

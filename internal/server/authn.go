@@ -169,17 +169,29 @@ func (i *authInterceptor) authenticate(ctx context.Context, procedure, header st
 
 // OIDCAuthenticator verifies ID tokens issued by an OIDC provider such as Dex.
 type OIDCAuthenticator struct {
-	verifier *oidc.IDTokenVerifier
+	verifier  *oidc.IDTokenVerifier
+	audiences []string
 }
 
-// NewOIDCAuthenticator discovers the provider at issuer. Tokens must have
-// clientID in their audience.
-func NewOIDCAuthenticator(ctx context.Context, issuer, clientID string) (*OIDCAuthenticator, error) {
+// NewOIDCAuthenticator discovers the provider at issuer. Tokens must have one
+// of clientIDs in their audience: the CLI's, and the web dashboard's when the
+// server accepts its logins. Empty IDs are skipped.
+func NewOIDCAuthenticator(ctx context.Context, issuer string, clientIDs ...string) (*OIDCAuthenticator, error) {
+	var audiences []string
+	for _, id := range clientIDs {
+		if id != "" && !slices.Contains(audiences, id) {
+			audiences = append(audiences, id)
+		}
+	}
+	if len(audiences) == 0 {
+		return nil, errors.New("an OIDC client ID is required")
+	}
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("discover OIDC issuer %s: %w", issuer, err)
 	}
-	return &OIDCAuthenticator{verifier: provider.Verifier(&oidc.Config{ClientID: clientID})}, nil
+	// The verifier takes one client ID; the audience is checked in Authenticate.
+	return &OIDCAuthenticator{verifier: provider.Verifier(&oidc.Config{SkipClientIDCheck: true}), audiences: audiences}, nil
 }
 
 // Authenticate verifies the token signature, issuer, audience and expiry.
@@ -187,6 +199,9 @@ func (a *OIDCAuthenticator) Authenticate(ctx context.Context, token string) (*Pr
 	idt, err := a.verifier.Verify(ctx, token)
 	if err != nil {
 		return nil, fmt.Errorf("invalid token: %w", err)
+	}
+	if !slices.ContainsFunc(idt.Audience, func(aud string) bool { return slices.Contains(a.audiences, aud) }) {
+		return nil, errors.New("invalid token: it was not issued to a Forge client")
 	}
 	var claims struct {
 		Email  string   `json:"email"`
