@@ -151,7 +151,7 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   #
 
 ## The web dashboard (Phase 6)
 
-Live on k3s since 2026-10-11: forge-api `v0.1.0` (`ghcr.io/showmino/forge-api:v0.1.0`, the first image built by the release workflow; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs; `v0.1.0` cuts versions) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
+Live on k3s since 2026-10-11: forge-api `v0.2.0` (`ghcr.io/showmino/forge-api:v0.2.0`; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs, then `v0.1.0`, the first image built by the release workflow, which cuts versions; `v0.2.0` keeps sessions and applied migration 0004, the `sessions` table) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
 render must also carry `FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io`
 (next to `FORGE_DEPLOYS=1`, the chart revision, the App and both 1Password items); a render without it removes
 the dashboard's login client and its CORS access. Restart Dex after a change to its config
@@ -178,6 +178,15 @@ until there is a `showmino/homebrew-tap` and the secret `HOMEBREW_TAP_GITHUB_TOK
 repo's workflows write: package settings, "Manage Actions access", `forge` with role Write (set on 2026-10-11; the
 first run failed with `permission_denied: write_package` without it). A run that failed before publishing can be
 re-run on the same tag.
+
+Sessions (live since forge-api `v0.2.0`): `GetServerInfo` answers `sessions: true` (forge-api has the GitHub App). After
+`bin/forge auth login`, `bin/forge auth status` shows a `session` row and `bin/forge auth session list` the sessions of
+every machine and browser; the credentials file holds a `session_token` and no ID or refresh token. The dashboard keeps
+its session in the browser's `localStorage` (`forge.session`) for 7 days. To see the membership check, look for
+`checking a session's memberships` (a failure) or `session ended` in forge-api's log; a session forge-api ended itself
+is `forge audit list --action auth.session.end`. If a login is refused with "does not say which GitHub user it is",
+Dex's ID token lacks `preferred_username` (scope `profile`). Why sessions exist: Dex's log showed
+`failed to refresh identity ... Bad credentials` each time ten newer GitHub sign-ins had pushed out the CLI's token.
 
 Versions (live since forge-api `v0.1.0`): `bin/forge deploy start <svc> --env staging --dry-run` and
 `bin/forge deploy promote <svc> --dry-run [--bump minor|major]` print the version they would cut and change nothing.
