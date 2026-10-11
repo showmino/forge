@@ -151,7 +151,7 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   #
 
 ## The web dashboard (Phase 6)
 
-Live on k3s since 2026-10-11: forge-api `3f2c8d3` (first `a846a98`; `57a118e` added `TeamService`; `3f2c8d3` makes `DeleteService` take down what a service runs) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
+Live on k3s since 2026-10-11: forge-api `v0.1.0` (`ghcr.io/showmino/forge-api:v0.1.0`, the first image built by the release workflow; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs; `v0.1.0` cuts versions) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
 render must also carry `FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io`
 (next to `FORGE_DEPLOYS=1`, the chart revision, the App and both 1Password items); a render without it removes
 the dashboard's login client and its CORS access. Restart Dex after a change to its config
@@ -170,6 +170,23 @@ there only the first part can be checked by script (GetServerInfo, the preflight
 
 The dashboard's repo is `showmino/forge-web` (checkout `/home/mino/code/forge-web`); after an API change run
 `sh scripts/sync-proto.sh ../forge` there.
+
+Releasing Forge itself: push a `vX.Y.Z` tag on `main` of `showmino/forge`. `release.yml` (goreleaser) publishes the
+GitHub release with the CLI for Linux, macOS and Windows (checksums signed with cosign, SBOMs) and
+`ghcr.io/showmino/forge-api:vX.Y.Z` (also `latest`), which is the image to roll out. The Homebrew cask is skipped
+until there is a `showmino/homebrew-tap` and the secret `HOMEBREW_TAP_GITHUB_TOKEN`. The image package must let the
+repo's workflows write: package settings, "Manage Actions access", `forge` with role Write (set on 2026-10-11; the
+first run failed with `permission_denied: write_package` without it). A run that failed before publishing can be
+re-run on the same tag.
+
+Versions (live since forge-api `v0.1.0`): `bin/forge deploy start <svc> --env staging --dry-run` and
+`bin/forge deploy promote <svc> --dry-run [--bump minor|major]` print the version they would cut and change nothing.
+A real staging deploy shows a `release` step ("release candidate v0.1.0-rc.1 for <sha7>"); then check, in the
+service's repo, the tag, the pre-release by `mino-forge[bot]`, and a `release` workflow run that adds the tag to the
+image (`docker buildx imagetools inspect ghcr.io/showmino/<svc>:<version>` lists the digest of `:<sha7>`). First
+cut live on 2026-10-11: `forge-web` `v0.1.0-rc.1` at `4dad38d`. Deployments from before the rollout show no version
+until they are deployed again. A service made before templates `v1.4.0` has no `release.yml`: it gets tags and
+releases but no version tag on its image until the file is added.
 
 Deleting a service (live since forge-api `3f2c8d3`): `bin/forge service delete <svc> --dry-run` prints what would be
 taken down and changes nothing; forge-api's own account must be allowed both of
