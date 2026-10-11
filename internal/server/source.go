@@ -19,6 +19,8 @@ type source struct {
 	ref, commit, image     string
 	port                   int32
 	health                 string
+	// domain is run.domain as forge.yaml has it: "" for the default.
+	domain string
 }
 
 // resolveSource checks service ("services/<id>") and ref (default main),
@@ -63,6 +65,7 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
 			return s, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("forge.yaml at %s is invalid: %w", shortSHA(s.commit), err))
 		}
 		s.port, s.health = int32(mf.RunPort()), mf.RunHealth() //nolint:gosec // Parse checks run.port is 1-65535
+		s.domain = mf.RunDomain()
 	}
 	s.image = "ghcr.io/" + strings.ToLower(s.owner) + "/" + s.serviceID + ":" + shortSHA(s.commit)
 	return s, nil

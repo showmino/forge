@@ -5,3 +5,8 @@ port: 8080
 health: /healthz
 replicas: 1
 host: ""
+# The Gateway listener of the route; empty means the environment's own.
+listener: ""
+# The DNS record of a public address; unset for an internal one.
+#   dns: {name: payments, zone: example-com, tunnel: production}
+dns: null

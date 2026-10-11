@@ -38,6 +38,17 @@
 # It adds Dex's public client forge-web and lets those pages call forge-api
 # from a browser. Dex reads its config at start: restart it after a change.
 #
+# Public addresses: with FORGE_PUBLIC_DOMAINS a service is reached under a
+# real domain, payments.example.com in production and
+# payments-staging.example.com in staging. Each item is a domain and the name
+# of its DNS zone for the platform's CloudflareRecordsApplication, the default
+# domain first; lines with a trailing "public" marker exist only then:
+#   FORGE_PUBLIC_DOMAINS=showmino.com=showmino-com,deogratias.cloud=deogratias-cloud ... | kubectl apply -f -
+# It needs FORGE_DEPLOYS, a chart revision that has the DNS record, and the
+# Cloudflare tunnel sending the domains' hosts to the Gateway
+# (FORGE_PREVIEW_IP). FORGE_PUBLIC_DNS_TUNNEL (default production) names the
+# tunnel the records point at.
+#
 # Deploys (forge deploy) need previews, plus a commit on origin/main that Argo
 # CD takes the chart from (an unpushed commit makes every Application fail);
 # lines with a trailing "deploys" marker exist only then:
@@ -213,6 +224,67 @@ if [ -n "$web_origins" ]; then
 else
   web_marks='/#web$/d'
 fi
+# Public addresses: services reached under real domains, through the
+# platform's DNS records and tunnel. Each item is <domain>=<DNS zone name>.
+public_domains=${FORGE_PUBLIC_DOMAINS:-}
+public_tunnel=${FORGE_PUBLIC_DNS_TUNNEL:-production}
+public_listeners=
+if [ -n "$public_domains" ]; then
+  [ -n "$deploys" ] || { echo "FORGE_PUBLIC_DOMAINS needs FORGE_DEPLOYS" >&2; exit 2; }
+  # The same rules as forge-api (ParsePublicDomains), so that what renders also starts.
+  case $public_domains in
+    *[!a-z0-9.=,-]*) echo "invalid FORGE_PUBLIC_DOMAINS: $public_domains (lower case, like example.com=example-com,other.io=other-io)" >&2; exit 2 ;;
+    ,*|*,|*,,*) echo "invalid FORGE_PUBLIC_DOMAINS: $public_domains has an empty item" >&2; exit 2 ;;
+  esac
+  printf '%s' "$public_tunnel" | grep -Eq '^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$' ||
+    { echo "invalid FORGE_PUBLIC_DNS_TUNNEL: $public_tunnel (a name such as production)" >&2; exit 2; }
+  seen=,
+  old_ifs=$IFS
+  IFS=,
+  for item in $public_domains; do
+    domain=${item%%=*}
+    zone=${item#*=}
+    case $item in
+      *=*=*|*=|=*) echo "invalid FORGE_PUBLIC_DOMAINS: \"$item\" is not <domain>=<zone name>" >&2; exit 2 ;;
+      *=*) ;;
+      *) echo "invalid FORGE_PUBLIC_DOMAINS: \"$item\" is not <domain>=<zone name>" >&2; exit 2 ;;
+    esac
+    printf '%s' "$domain" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$' ||
+      { echo "invalid FORGE_PUBLIC_DOMAINS: \"$domain\" is not a domain such as example.com" >&2; exit 2; }
+    printf '%s' "$zone" | grep -Eq '^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$' ||
+      { echo "invalid FORGE_PUBLIC_DOMAINS: the zone name \"$zone\" is a name such as example-com" >&2; exit 2; }
+    case $seen in
+      *,$domain,*) echo "invalid FORGE_PUBLIC_DOMAINS: $domain is listed twice" >&2; exit 2 ;;
+    esac
+    seen=$seen$domain,
+    # One listener per domain: it takes only hosts under that domain, and
+    # only routes from the namespace of a Forge deployment, never a preview.
+    public_listeners="$public_listeners    - name: public-$zone
+      protocol: HTTP
+      port: 80
+      hostname: \"*.$domain\"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+"
+  done
+  IFS=$old_ifs
+  # A chart from before public addresses ignores them: the deployment would
+  # report success and be reachable nowhere.
+  if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$dir" cat-file -e "$chart_rev:deploy/argocd/chart/templates/dns.yaml" 2>/dev/null ||
+      { echo "FORGE_PUBLIC_DOMAINS needs a FORGE_DEPLOY_CHART_REVISION whose chart makes DNS records: $chart_rev has no deploy/argocd/chart/templates/dns.yaml (or is not fetched here)" >&2; exit 2; }
+  fi
+  public_marks='s/ *#public$//'
+else
+  public_marks='/#public$/d'
+  public_tunnel= # unvalidated without public domains; keep it out of the sed
+fi
 if [ -n "$app_id" ]; then
   app='s/ *#app$//' # keep the App lines, drop their marker
 else
@@ -245,7 +317,8 @@ fi
     echo "---"
     cat "$dir/resources.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$web_marks" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+} | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
-        -e "s|\${FORGE_API_IMAGE}|$image|g"
+        -e "s|\${FORGE_API_IMAGE}|$image|g" |
+  PUBLIC_LISTENERS=$public_listeners awk '/#public-listeners$/ { printf "%s", ENVIRON["PUBLIC_LISTENERS"]; next } { print }'

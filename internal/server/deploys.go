@@ -57,6 +57,15 @@ type DeployOptions struct {
 	Org string
 	// Domain: hosts are <service>.<env>.<Domain>.
 	Domain string
+	// PublicDomains are the domains services get public addresses under;
+	// the first is the default. Empty means internal addresses only.
+	PublicDomains []PublicDomain
+	// DNSTunnel names, to the platform's DNS records, the tunnel this
+	// cluster is reached through (default "production").
+	DNSTunnel string
+	// HostTaken reports whether a public address is in use already (it
+	// resolves); nil skips the check.
+	HostTaken func(ctx context.Context, host string) (bool, error)
 	// ArgoNamespace holds the Applications (default argocd).
 	ArgoNamespace string
 	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
@@ -84,6 +93,9 @@ type Deploys struct {
 func NewDeploys(o DeployOptions) *Deploys {
 	if o.ArgoNamespace == "" {
 		o.ArgoNamespace = "argocd"
+	}
+	if o.DNSTunnel == "" {
+		o.DNSTunnel = "production"
 	}
 	for _, d := range []struct {
 		v   *time.Duration
@@ -142,6 +154,9 @@ type deployRecord struct {
 	Time      string `yaml:"time"`
 	// Version is the tag the commit ran as; empty before Forge cut versions.
 	Version string `yaml:"version,omitempty"`
+	// Domain is run.domain of the commit's forge.yaml, kept so that a
+	// promotion gives the next environment the address the service asked for.
+	Domain string `yaml:"domain,omitempty"`
 	// Image and DeployCommit come from the commit, not the values file.
 	Image        string `yaml:"-"`
 	DeployCommit string `yaml:"-"`
@@ -156,6 +171,10 @@ type deployValues struct {
 	Health   string `yaml:"health"`
 	Replicas int    `yaml:"replicas"`
 	Host     string `yaml:"host"`
+	// Listener is the Gateway listener of the route when it is not the
+	// environment's own, and DNS the record of a public address.
+	Listener string     `yaml:"listener,omitempty"`
+	DNS      *deployDNS `yaml:"dns,omitempty"`
 	// Database is set when the service has a database in this environment.
 	Database *deployDatabase `yaml:"database,omitempty"`
 	Forge    deployRecord    `yaml:"forge"`
@@ -252,7 +271,7 @@ var healthStates = map[string]forgev1.Deployment_Health{
 func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit string, st AppStatus) *forgev1.Deployment {
 	dep := &forgev1.Deployment{
 		Name: deployNamePrefix + svc + "/" + env, Service: servicePrefix + svc, Env: env,
-		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: "http://" + d.host(svc, env),
+		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: hostURL(v.Host, v.DNS != nil),
 		Sync: forgev1.Deployment_SYNC_STATUS_UNKNOWN, Health: forgev1.Deployment_HEALTH_UNKNOWN,
 		Message: st.Message, DeployCommit: deployCommit, DeployedBy: v.Forge.Actor, Version: v.Forge.Version,
 	}
@@ -328,15 +347,7 @@ func (d *Deploys) GetDeployment(ctx context.Context, req *connect.Request[forgev
 // productionOf is what svc runs in production; nil when that is nothing or
 // cannot be read.
 func (d *Deploys) productionOf(ctx context.Context, svc string) *deployValues {
-	data, err := d.o.Repo.Read(ctx, valuesPath(svc, finalEnv), "")
-	if err != nil {
-		return nil
-	}
-	v, err := parseValues(data)
-	if err != nil {
-		return nil
-	}
-	return &v
+	return d.currentValues(ctx, svc, finalEnv)
 }
 
 func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forgev1.ListDeploymentsRequest]) (*connect.Response[forgev1.ListDeploymentsResponse], error) {
@@ -485,6 +496,15 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	v.Forge.Kind, v.Forge.Actor = kindRollback, actorOf(ctx)
+	// The address is worked out now, like the database: from the domain the
+	// restored commit asked for, under today's settings. An older deploy's
+	// address may be one the platform no longer hands out, or someone else's
+	// by now, and a rollback must not take a public service off the internet.
+	addr, moved, err := d.addressFor(ctx, svc, env, v.Forge.Domain, d.currentValues(ctx, svc, env))
+	if err != nil {
+		return nil, err
+	}
+	v.Host, v.Listener, v.DNS = addr.host, addr.listener, addr.dns
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
 		return nil, err
 	}
@@ -495,7 +515,7 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
 	}
-	op, err := d.startMutation(ctx, kindRollback, svc, env, v, nil)
+	op, err := d.startMutation(ctx, kindRollback, svc, env, v, withAddressNote(moved, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -540,8 +560,12 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
+	addr, moved, err := d.addressFor(ctx, svc, to, src.Forge.Domain, d.currentValues(ctx, svc, to))
+	if err != nil {
+		return nil, err
+	}
 	v := src
-	v.Env, v.Host = to, d.host(svc, to)
+	v.Env, v.Host, v.Listener, v.DNS = to, addr.host, addr.listener, addr.dns
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
 	// Staging's candidate number is not production's version: that is cut
 	// below, or there is none.
@@ -570,11 +594,40 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.PromoteDeployResponse{Deployment: preview}), nil
 	}
-	op, err := d.startMutation(ctx, kindPromote, svc, to, v, cut)
+	op, err := d.startMutation(ctx, kindPromote, svc, to, v, withAddressNote(moved, cut))
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&forgev1.PromoteDeployResponse{Operation: op, Deployment: preview}), nil
+}
+
+// currentValues is what svc runs in env now, nil when that is nothing or
+// cannot be read.
+func (d *Deploys) currentValues(ctx context.Context, svc, env string) *deployValues {
+	data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), "")
+	if err != nil {
+		return nil
+	}
+	v, err := parseValues(data)
+	if err != nil {
+		return nil
+	}
+	return &v
+}
+
+// withAddressNote tells the operation's reader that the address changes,
+// before whatever next does. next may be nil.
+func withAddressNote(note string, next func(context.Context, func(string, string)) (string, error)) func(context.Context, func(string, string)) (string, error) {
+	if note == "" {
+		return next
+	}
+	return func(ctx context.Context, emit func(string, string)) (string, error) {
+		emit("address", note)
+		if next == nil {
+			return "", nil
+		}
+		return next(ctx, emit)
+	}
 }
 
 // startMutation locks svc/env and starts an operation that applies v. cut,

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/server"
 	"github.com/showmino/forge/internal/store"
 )
@@ -26,6 +27,8 @@ func withCITokens(ctx context.Context, base server.Authenticator, audience strin
 type deployFlags struct {
 	on                                          bool
 	repo, domain, syncTimeout, namespaceTimeout string
+	// publicDomains is --public-domains, publicTunnel --public-dns-tunnel.
+	publicDomains, publicTunnel string
 	// resources says which database a service has, for DATABASE_URL.
 	resources store.ResourceStore
 }
@@ -64,8 +67,19 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 			return nil, fmt.Errorf("set --deploy-domain: cannot derive it from preview domain %q", previewDomain)
 		}
 	}
+	public, err := server.ParsePublicDomains(f.publicDomains)
+	if err != nil {
+		return nil, fmt.Errorf("--public-domains: %w", err)
+	}
+	if len(public) > 0 {
+		if !manifest.ValidID(f.publicTunnel) {
+			return nil, fmt.Errorf("--public-dns-tunnel %q must be a name such as production", f.publicTunnel)
+		}
+		log.Info("services get public addresses", "domains", f.publicDomains, "tunnel", f.publicTunnel)
+	}
 	gh := &github.Client{Token: app.Token}
 	return server.NewDeploys(server.DeployOptions{
+		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS,
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
 		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,
