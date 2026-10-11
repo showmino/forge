@@ -30,6 +30,7 @@ type deployFixture struct {
 	deploys   *Deploys
 	client    forgev1connect.DeployServiceClient
 	argo      *envtest.Argo
+	catalog   *Catalog
 }
 
 func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *envtest.Argo)) *deployFixture {
@@ -56,6 +57,7 @@ func newDeployFixtureAuth(t *testing.T, noArgo bool, tweak func(*DeployOptions, 
 		Files: map[string][]byte{envSHA + ":forge.yaml": manifest, ciOldSHA + ":forge.yaml": manifest},
 	}
 	catalog := NewCatalog(nil)
+	f.catalog = catalog
 	if _, err := catalog.RegisterService(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{
 		ServiceId: "payments", Service: &forgev1.Service{OwnerTeam: "billing", RepoUrl: "https://github.com/showmino/payments"},
 	})); err != nil {

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package forge.v1;
 
+import "forge/v1/operation.proto";
 import "google/protobuf/field_mask.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -26,7 +27,12 @@ service ServiceCatalogService {
   // UpdateService changes the fields named in update_mask.
   rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse) {}
 
-  // DeleteService removes a service from the catalog.
+  // DeleteService removes a service: its preview environments, its staging
+  // and production deployments with their namespaces, and last its catalog
+  // entry. The GitHub repo is kept. When anything runs on the cluster the
+  // work is an operation (kind "delete_service") and the entry stays until it
+  // has succeeded, so a failed delete can be asked for again. A service that
+  // runs nothing is removed at once.
   rpc DeleteService(DeleteServiceRequest) returns (DeleteServiceResponse) {
     option idempotency_level = IDEMPOTENT;
   }
@@ -127,7 +133,15 @@ message DeleteServiceRequest {
   bool validate_only = 3;
 }
 
-message DeleteServiceResponse {}
+message DeleteServiceResponse {
+  // The teardown, when the service runs anything on the cluster; unset when
+  // the service was removed at once (and for validate_only).
+  Operation operation = 1;
+  // What the delete takes down besides the catalog entry, as resource names:
+  // "environments/pr-142", "deployments/payments/production". With
+  // validate_only it is what a delete would take down.
+  repeated string removes = 2;
+}
 
 message CreateServiceRequest {
   // Becomes services/{service_id} and the repo {github org}/{service_id}.

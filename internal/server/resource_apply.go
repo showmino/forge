@@ -48,6 +48,9 @@ func (r *Resources) applicable(ctx context.Context, rec *store.PlanRecord, m *fo
 	} else if !ok {
 		return precondition("%s is no longer in the catalog, so %s cannot be applied", p.GetService(), name)
 	}
+	if err := r.o.Catalog.refuseDeleting(p.GetService()); err != nil {
+		return err
+	}
 	if len(p.GetChanges()) == 0 {
 		// Nothing would change on the cluster. That is nothing to apply, unless
 		// Forge's own records are out of line with it (an apply that failed or

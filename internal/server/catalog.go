@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -33,6 +34,66 @@ type Catalog struct {
 	// resources, when set, is asked before a service is deleted: a service
 	// that still has resources stays.
 	resources store.ResourceStore
+	// teardown, when set, takes down what a service runs before it is deleted.
+	teardown *teardown
+
+	// deleting maps a service being deleted to the operation doing it. While
+	// a service is in it nothing new may be started for it: no deploy, no
+	// preview, no resource run.
+	delMu    sync.Mutex
+	deleting map[string]string
+}
+
+// refuseDeleting returns FAILED_PRECONDITION while the service called name
+// is being deleted.
+func (c *Catalog) refuseDeleting(name string) error {
+	c.delMu.Lock()
+	defer c.delMu.Unlock()
+	if op, ok := c.deleting[name]; ok {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is being deleted (%s); nothing can be started for it", name, op))
+	}
+	return nil
+}
+
+// markDeleting claims name for a delete, or returns false when one is running.
+func (c *Catalog) markDeleting(name, by string) bool {
+	c.delMu.Lock()
+	defer c.delMu.Unlock()
+	if _, ok := c.deleting[name]; ok {
+		return false
+	}
+	if c.deleting == nil {
+		c.deleting = map[string]string{}
+	}
+	c.deleting[name] = by
+	return true
+}
+
+func (c *Catalog) unmarkDeleting(name string) {
+	c.delMu.Lock()
+	defer c.delMu.Unlock()
+	delete(c.deleting, name)
+}
+
+// checkNoResources refuses while the service still has resource records.
+func (c *Catalog) checkNoResources(ctx context.Context, name string) error {
+	if c.resources == nil {
+		return nil
+	}
+	rs, err := c.resources.ListResources(ctx, name, "")
+	if err != nil {
+		return storeErr(err)
+	}
+	if len(rs) == 0 {
+		return nil
+	}
+	names := make([]string, len(rs))
+	for i, r := range rs {
+		names[i] = r.GetName()
+	}
+	return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+		"%s still has resources (%s); remove them from forge.yaml, then run 'forge resource plan --env <env> --allow-destroy' and apply the plan",
+		name, strings.Join(names, ", ")))
 }
 
 // GuardResources makes DeleteService refuse a service that still has
@@ -301,45 +362,17 @@ func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	if c.resources != nil {
-		rs, err := c.resources.ListResources(ctx, name, "")
-		if err != nil {
-			return nil, storeErr(err)
-		}
-		if len(rs) > 0 {
-			names := make([]string, len(rs))
-			for i, r := range rs {
-				names[i] = r.GetName()
-			}
-			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
-				"%s still has resources (%s); remove them from forge.yaml, then run 'forge resource plan --env <env> --allow-destroy' and apply the plan",
-				name, strings.Join(names, ", ")))
-		}
+	if err := c.checkNoResources(ctx, name); err != nil {
+		return nil, err
 	}
-	err = c.store.Write(ctx, func(tx store.Tx) error {
-		cur, _, err := tx.Get(ctx, name)
-		if errors.Is(err, store.ErrNotFound) {
-			return notFound(name)
-		}
+	if c.teardown != nil {
+		op, removes, err := c.startTeardown(ctx, name, req.Msg.GetEtag(), req.Msg.GetValidateOnly())
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if e := req.Msg.GetEtag(); e != "" && e != cur.GetEtag() {
-			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, e, cur.GetEtag()))
-		}
-		deps, err := tx.Dependents(ctx, name)
-		if err != nil {
-			return err
-		}
-		if len(deps) > 0 {
-			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is a dependency of %s", name, deps[0]))
-		}
-		if req.Msg.GetValidateOnly() {
-			return nil
-		}
-		return tx.Delete(ctx, name)
-	})
-	if err != nil {
+		return connect.NewResponse(&forgev1.DeleteServiceResponse{Operation: op, Removes: removes}), nil
+	}
+	if err := c.deleteChecked(ctx, name, req.Msg.GetEtag(), req.Msg.GetValidateOnly()); err != nil {
 		return nil, storeErr(err)
 	}
 	return connect.NewResponse(&forgev1.DeleteServiceResponse{}), nil

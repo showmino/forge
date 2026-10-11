@@ -495,6 +495,42 @@ func (c *Cluster) EnsureServiceNamespace(ctx context.Context, service, env strin
 	return err
 }
 
+// ForgeApplicationExists reports whether Argo CD has an Application of that
+// name that is Forge's (the ApplicationSet labels them). One that is not
+// Forge's is someone else's: it does not count and is never waited for.
+func (c *Cluster) ForgeApplicationExists(ctx context.Context, argoNamespace, name string) (bool, error) {
+	app, err := c.Dynamic.Resource(applications).Namespace(argoNamespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return app.GetLabels()[labelManagedBy] == "forge", nil
+}
+
+// DeleteServiceNamespace starts deleting <service>-<env>. A namespace that is
+// already gone is fine; one that is not Forge's is refused with
+// errUnlabelled and never touched. The delete names the namespace it looked
+// at by UID, so a namespace recreated in between is not the one deleted.
+func (c *Cluster) DeleteServiceNamespace(ctx context.Context, service, env string) error {
+	ns, err := c.Kube.CoreV1().Namespaces().Get(ctx, service+"-"+env, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if l := ns.Labels; l[labelManagedBy] != "forge" || l[labelService] != service || l[labelDeployEnv] != env {
+		return errUnlabelled
+	}
+	err = c.Kube.CoreV1().Namespaces().Delete(ctx, ns.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &ns.UID}})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 var cnpgClusters = schema.GroupVersionResource{Group: "postgresql.cnpg.io", Version: "v1", Resource: "clusters"}
 
 // DatabaseHealth reads what CloudNativePG reports for the database called

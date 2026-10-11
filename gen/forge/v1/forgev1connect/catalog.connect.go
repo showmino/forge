@@ -63,7 +63,12 @@ type ServiceCatalogServiceClient interface {
 	RegisterService(context.Context, *connect.Request[v1.RegisterServiceRequest]) (*connect.Response[v1.RegisterServiceResponse], error)
 	// UpdateService changes the fields named in update_mask.
 	UpdateService(context.Context, *connect.Request[v1.UpdateServiceRequest]) (*connect.Response[v1.UpdateServiceResponse], error)
-	// DeleteService removes a service from the catalog.
+	// DeleteService removes a service: its preview environments, its staging
+	// and production deployments with their namespaces, and last its catalog
+	// entry. The GitHub repo is kept. When anything runs on the cluster the
+	// work is an operation (kind "delete_service") and the entry stays until it
+	// has succeeded, so a failed delete can be asked for again. A service that
+	// runs nothing is removed at once.
 	DeleteService(context.Context, *connect.Request[v1.DeleteServiceRequest]) (*connect.Response[v1.DeleteServiceResponse], error)
 	// CreateService scaffolds a service from a template: it renders the
 	// template, creates the GitHub repo, pushes the first commit and registers
@@ -177,7 +182,12 @@ type ServiceCatalogServiceHandler interface {
 	RegisterService(context.Context, *connect.Request[v1.RegisterServiceRequest]) (*connect.Response[v1.RegisterServiceResponse], error)
 	// UpdateService changes the fields named in update_mask.
 	UpdateService(context.Context, *connect.Request[v1.UpdateServiceRequest]) (*connect.Response[v1.UpdateServiceResponse], error)
-	// DeleteService removes a service from the catalog.
+	// DeleteService removes a service: its preview environments, its staging
+	// and production deployments with their namespaces, and last its catalog
+	// entry. The GitHub repo is kept. When anything runs on the cluster the
+	// work is an operation (kind "delete_service") and the entry stays until it
+	// has succeeded, so a failed delete can be asked for again. A service that
+	// runs nothing is removed at once.
 	DeleteService(context.Context, *connect.Request[v1.DeleteServiceRequest]) (*connect.Response[v1.DeleteServiceResponse], error)
 	// CreateService scaffolds a service from a template: it renders the
 	// template, creates the GitHub repo, pushes the first commit and registers

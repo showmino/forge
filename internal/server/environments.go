@@ -73,8 +73,9 @@ type Environments struct {
 	o EnvOptions
 
 	mu sync.Mutex
-	// pending holds environments whose create has not made the namespace yet.
-	pending map[string]bool
+	// pending maps environments whose create has not made the namespace yet
+	// to their service's id.
+	pending map[string]string
 	// requests maps a create's request_id to its operation.
 	requests map[string]string
 }
@@ -98,7 +99,7 @@ func NewEnvironments(o EnvOptions) *Environments {
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Environments{o: o, pending: map[string]bool{}, requests: map[string]string{}}
+	return &Environments{o: o, pending: map[string]string{}, requests: map[string]string{}}
 }
 
 func (e *Environments) ready() error {
@@ -194,7 +195,7 @@ func (e *Environments) envFromNamespace(ns *corev1.Namespace) *forgev1.Environme
 func (e *Environments) countEnvs(nss []corev1.Namespace) int {
 	n := len(e.pending)
 	for i := range nss {
-		if !e.pending[nss[i].Labels[labelEnvironment]] {
+		if _, pending := e.pending[nss[i].Labels[labelEnvironment]]; !pending {
 			n++
 		}
 	}
