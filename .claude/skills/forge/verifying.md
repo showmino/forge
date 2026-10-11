@@ -151,7 +151,7 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   #
 
 ## The web dashboard (Phase 6)
 
-Live on k3s since 2026-10-11: forge-api `a846a98` and Dex with the client `forge-web`. From now on every
+Live on k3s since 2026-10-11: forge-api `57a118e` (first `a846a98`; `57a118e` adds `TeamService`) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
 render must also carry `FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io`
 (next to `FORGE_DEPLOYS=1`, the chart revision, the App and both 1Password items); a render without it removes
 the dashboard's login client and its CORS access. Restart Dex after a change to its config
