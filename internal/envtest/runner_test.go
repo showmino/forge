@@ -188,7 +188,16 @@ func TestRunnerPlansAndApplies(t *testing.T) {
 		t.Errorf("after the delete: %v %v", r.Databases(), removed.Secrets)
 	}
 
-	if st, err := r.Status(ctx, "resourcePlans/dddddddddddd", run.ModeApply); err != nil || !st.Done || st.Failed {
+	// A run reports its result first and is marked finished a moment later, as
+	// a Job is: wait for the status instead of reading it at once.
+	var st run.Status
+	var err error
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if st, err = r.Status(ctx, "resourcePlans/dddddddddddd", run.ModeApply); err != nil || st.Done {
+			break
+		}
+	}
+	if err != nil || !st.Done || st.Failed {
 		t.Errorf("status of a finished run: %+v %v", st, err)
 	}
 	if _, err := r.Status(ctx, "resourcePlans/none", run.ModePlan); err == nil {
