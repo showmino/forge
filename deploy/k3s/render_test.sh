@@ -210,4 +210,21 @@ done
 check "public: a bad tunnel name refused"         sh -c "! FORGE_PUBLIC_DNS_TUNNEL='a|b' FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 tunnel_ignored() { [ "$(FORGE_PUBLIC_DNS_TUNNEL='x|;s|forge|HACKED' FORGE_GITHUB_APP_ID=5239131 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 | cksum)" = "$(printf '%s\n' "$with" | cksum)" ]; }
 check "public: the tunnel name is ignored without public domains" tunnel_ignored
+
+# The login's public name: off unless FORGE_LOGIN_URL is set.
+login=$(FORGE_LOGIN_URL=https://forge-login.showmino.com FORGE_GITHUB_APP_ID=5239131 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+login_has() { printf '%s\n' "$login" | grep -qF -- "$1"; }
+login_settings() {
+  login_has '    issuer: https://forge-login.showmino.com/dex' &&
+    login_has '{name: FORGE_OIDC_ISSUER, value: "https://forge-login.showmino.com/dex"}' &&
+    ! login_has 'http://dex.10.150.1.220.nip.io/dex'
+}
+login_only_changes_urls() { [ "$(printf '%s\n' "$login" | sed 's|https://forge-login.showmino.com|http://dex.10.150.1.220.nip.io|g' | cksum)" = "$(printf '%s\n' "$with" | cksum)" ]; }
+bad_login() { ! FORGE_LOGIN_URL=$1 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1; }
+check "login: the issuer and forge-api use the public name" login_settings
+check "login: nothing else changes"                 login_only_changes_urls
+check "login: a path refused"                       bad_login https://login.example.com/dex
+check "login: a name without a scheme refused"      bad_login login.example.com
+check "login: upper case refused"                   bad_login https://Login.example.com
+check "login: sed characters refused"               bad_login 'https://a.example.com|x'
 exit $fail

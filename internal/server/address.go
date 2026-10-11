@@ -78,12 +78,20 @@ func hostURL(host string, public bool) string {
 	return "http://" + host
 }
 
-// address works out where svc is reached in env. want is run.domain from the
-// service's forge.yaml. Without public domains, or with "none", it is the
-// internal address <service>.<env>.<domain>. Otherwise it is one label under
-// the chosen domain, because a certificate for *.example.com covers nothing
-// deeper: <service>.<domain> in production, <service>-<env>.<domain> elsewhere.
-func (d *Deploys) address(svc, env, want string) (address, error) {
+// wanted is the address a service asks for in its forge.yaml: run.domain and
+// run.host, each "" for the default.
+type wanted struct {
+	domain, host string
+}
+
+// address works out where svc is reached in env. Without public domains, or
+// with the domain "none", it is the internal address <service>.<env>.<domain>.
+// Otherwise it is one label under the chosen domain, because a certificate
+// for *.example.com covers nothing deeper: <name>.<domain> in production and
+// <name>-<env>.<domain> elsewhere, where the name is the service's own unless
+// it asks for another with run.host.
+func (d *Deploys) address(svc, env string, w wanted) (address, error) {
+	want := w.domain
 	refuse := func(format string, a ...any) (address, error) {
 		return address{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(format, a...))
 	}
@@ -105,15 +113,19 @@ func (d *Deploys) address(svc, env, want string) (address, error) {
 		}
 		domain = d.o.PublicDomains[i]
 	}
-	label := svc
+	name, named := svc, "a service named "+svc
+	if w.host != "" && w.host != svc {
+		name, named = w.host, "run.host "+w.host
+	}
+	label := name
 	if env != finalEnv {
-		label = svc + "-" + env
+		label = name + "-" + env
 	}
 	// "payments-staging" in production would get the address of "payments" in staging.
 	for _, e := range deployEnvs {
-		if e != finalEnv && strings.HasSuffix(svc, "-"+e) {
-			return refuse("a service named %s cannot have a public address: %s.%s is where the service %q is reached in %s. Rename it, or set run.domain to %q",
-				svc, svc, domain.Name, strings.TrimSuffix(svc, "-"+e), e, manifest.DomainNone)
+		if e != finalEnv && strings.HasSuffix(name, "-"+e) {
+			return refuse("%s cannot have a public address: %s.%s is where %q is reached in %s. Pick another name, or set run.domain to %q",
+				named, name, domain.Name, strings.TrimSuffix(name, "-"+e), e, manifest.DomainNone)
 		}
 	}
 	if len(label) > 63 {
@@ -130,9 +142,12 @@ func (d *Deploys) address(svc, env, want string) (address, error) {
 // the environment has now, nil before its first deploy. The note says what
 // the reader of the operation must know: that the service is public, and
 // which address stops working. It is "" when nothing of that changes.
-func (d *Deploys) addressFor(ctx context.Context, svc, env, want string, current *deployValues) (address, string, error) {
+func (d *Deploys) addressFor(ctx context.Context, svc, env string, want wanted, current *deployValues) (address, string, error) {
 	a, err := d.address(svc, env, want)
 	if err != nil {
+		return a, "", err
+	}
+	if err := d.nameFree(ctx, svc, want); err != nil {
 		return a, "", err
 	}
 	if current != nil && current.Host == a.host {
@@ -153,6 +168,23 @@ func (d *Deploys) addressFor(ctx context.Context, svc, env, want string, current
 		note += "; " + hostURL(current.Host, current.DNS != nil) + " stops working"
 	}
 	return a, note, nil
+}
+
+// nameFree refuses a run.host that is the name of another service in the
+// catalog: that service's addresses are its own, deployed yet or not.
+func (d *Deploys) nameFree(ctx context.Context, svc string, w wanted) error {
+	if w.host == "" || w.host == svc || w.domain == manifest.DomainNone || len(d.o.PublicDomains) == 0 || d.o.Catalog == nil {
+		return nil
+	}
+	taken, err := d.o.Catalog.has(ctx, servicePrefix+w.host)
+	if err != nil {
+		return err
+	}
+	if taken {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+			"run.host %s is the name of another service, %s%s: its addresses are its own. Pick another name", w.host, servicePrefix, w.host))
+	}
+	return nil
 }
 
 // hostFree refuses a public address that already resolves: something else

@@ -104,7 +104,12 @@ func TestRun(t *testing.T) {
 			t.Errorf("run.domain %s: %q %v", domain, d.RunDomain(), err)
 		}
 	}
+	// run.host: the name before the domain, when it is not the service's own.
+	if h, err := Parse([]byte(base + "run:\n  host: forge\n")); err != nil || h.RunHost() != "forge" || m.RunHost() != "" {
+		t.Errorf("run.host: %v %v", h, err)
+	}
 	for _, bad := range []string{"run:\n  port: 70000\n", "run:\n  port: -1\n", "run:\n  health: ready\n", "run:\n  nope: 1\n",
+		"run:\n  host: Forge\n", "run:\n  host: forge.showmino.com\n", "run:\n  host: -forge\n", "run:\n  host: \"*\"\n",
 		"run:\n  domain: Example.com\n", "run:\n  domain: localhost\n", "run:\n  domain: https://example.com\n", "run:\n  domain: \"*.example.com\"\n", "run:\n  domain: example.com.\n"} {
 		if _, err := Parse([]byte(base + bad)); err == nil {
 			t.Errorf("accepted %q", bad)

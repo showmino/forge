@@ -274,7 +274,13 @@ each domain with the name of its DNS zone, the default first).
   run:
     domain: deogratias.cloud   # another of the platform's domains
     # domain: none             # no public address: the internal one
+    host: shop                 # the name before the domain, when it is
+                               # not the service's own: shop.<domain>
+                               # and shop-staging.<domain>
   ```
+
+  `run.host` cannot be the name of another service in the catalog, and like
+  every new address it must not resolve yet.
 
 The deploy chart makes the DNS record with the deployment: a
 `CloudflareRecordsApplication` (the platform's own kind; a Crossplane `Record`
