@@ -28,6 +28,11 @@ spec:
     - {group: gateway.networking.k8s.io, kind: HTTPRoute}
     - {group: "", kind: ResourceQuota}
     - {group: "", kind: LimitRange}
+    # Not deployed by the chart: Argo CD leaves out of an application's tree
+    # every kind its project does not allow, so without these two the UI
+    # shows a Deployment with nothing under it.
+    - {group: apps, kind: ReplicaSet}
+    - {group: "", kind: Pod}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
