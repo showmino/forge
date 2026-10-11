@@ -84,7 +84,7 @@ func newEnvFixture(t *testing.T, noImage bool, tweak func(*EnvOptions)) *envFixt
 	f.audit = store.NewMemory()
 	h, err := New(Options{
 		Authenticator: StaticAuthenticator{
-			"writer": {Subject: "ana", Groups: []string{"platform"}},
+			"writer": {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}},
 			"reader": {Subject: "bo", Groups: []string{"dev"}},
 		},
 		Authorizer:   Authorizer{WriterGroups: []string{"platform"}},
@@ -162,7 +162,7 @@ func TestCreateEnvironmentReady(t *testing.T) {
 	}
 	a := ns.Annotations
 	wantExpire := f.clock.now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
-	if a[annState] != stateReady || a[annRef] != "main" || a[annCommit] != envSHA || a[annImage] != f.image || a[annCreator] != "ana" || a[annExpire] != wantExpire {
+	if a[annState] != stateReady || a[annRef] != "main" || a[annCommit] != envSHA || a[annImage] != f.image || a[annCreator] != "ana@example.com" || a[annExpire] != wantExpire {
 		t.Errorf("annotations: %v", a)
 	}
 	if ns.Labels[labelService] != "payments" {

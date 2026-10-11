@@ -1,6 +1,6 @@
 # Phase 6: the web dashboard
 
-Date: 2026-10-11. Status: design, awaiting the owner's approval.
+Date: 2026-10-11. Status: built and in production; the exit gate passed on k3s on 2026-10-11.
 
 ## Goal
 
