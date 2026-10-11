@@ -1,0 +1,13 @@
+{
+  "teams": [
+    {
+      "name": "teams/billing",
+      "displayName": "Billing",
+      "description": "Payments and the ledger"
+    },
+    {
+      "name": "teams/platform-engineering",
+      "displayName": "Platform Engineering"
+    }
+  ]
+}

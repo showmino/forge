@@ -144,6 +144,10 @@ GitHub OAuth App owned by the org with the callback
 `forge-db` (2 instances, `longhorn-retain`), which holds the service catalog
 and Dex's logins; it needs the CloudNativePG operator. There are no backups yet.
 
+A service belongs to a team of the GitHub organization. `forge team list` (and
+the dashboard's Create form) read the teams from GitHub as the App, which needs
+the organization permission "Members: read" for it.
+
 The web dashboard (Phase 6) calls forge-api from the browser. Render with
 `FORGE_WEB_ORIGINS`, its addresses separated by commas
 (`http://forge-web.staging.<domain>,http://forge-web.production.<domain>`), to

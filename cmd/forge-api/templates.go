@@ -36,6 +36,15 @@ func githubApp(id, keyFile, org string) (*github.App, error) {
 	return &github.App{ID: n, Key: key, Org: org}, nil
 }
 
+// teamSource lists the organization's teams as the App; without an App there
+// is none, and TeamService answers FAILED_PRECONDITION.
+func teamSource(app *github.App) server.TeamSource {
+	if app == nil {
+		return nil
+	}
+	return &github.Client{Token: app.Token}
+}
+
 // templateSource picks where the API reads templates from: a local checkout
 // (development) or the GitHub repo as the App. It returns nil when neither is
 // configured; TemplateService then answers FAILED_PRECONDITION.

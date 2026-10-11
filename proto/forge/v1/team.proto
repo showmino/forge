@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package forge.v1;
+
+// TeamService lists the teams a service can belong to: the teams of the
+// GitHub organization Forge creates repos in. Resource names follow AIP
+// style: "teams/{team}".
+service TeamService {
+  // ListTeams returns every team of the organization, ordered by name.
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Team is a team of the GitHub organization.
+message Team {
+  // "teams/{team}", where {team} is the team's slug on GitHub, for example
+  // "teams/platform-engineering". The slug is what a service's owner_team
+  // holds, and what a login's groups carry after the organization's name.
+  string name = 1;
+  // The name as people wrote it, for example "Platform Engineering".
+  string display_name = 2;
+  string description = 3;
+}
+
+message ListTeamsRequest {}
+
+message ListTeamsResponse {
+  repeated Team teams = 1;
+}

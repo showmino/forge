@@ -449,6 +449,7 @@ var auditReads = []string{
 	forgev1connect.AuthServiceGetStatusProcedure,
 	forgev1connect.TemplateServiceListTemplatesProcedure,
 	forgev1connect.TemplateServiceGetTemplateProcedure,
+	forgev1connect.TeamServiceListTeamsProcedure,
 	forgev1connect.OperationServiceGetOperationProcedure,
 	forgev1connect.OperationServiceListOperationsProcedure,
 	forgev1connect.OperationServiceWatchOperationProcedure,
