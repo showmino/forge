@@ -151,7 +151,33 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   #
 
 ## The web dashboard (Phase 6)
 
-Live on k3s since 2026-10-11: forge-api `v0.2.0` (`ghcr.io/showmino/forge-api:v0.2.0`; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs, then `v0.1.0`, the first image built by the release workflow, which cuts versions; `v0.2.0` keeps sessions and applied migration 0004, the `sessions` table) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
+The render that is live (2026-10-11), to start every later rollout from; only `FORGE_API_IMAGE`, and the chart revision when the chart changes, move:
+
+```sh
+FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app \
+FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOYS=1 \
+FORGE_DEPLOY_CHART_REVISION=e7f0b8ec2d2282814116bedc6e06c64e11009bca \
+FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io \
+FORGE_PUBLIC_DOMAINS=showmino.com=showmino-com,deogratias.cloud=deogratias-cloud \
+FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.3.0 sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221
+```
+
+Public addresses (live since forge-api `v0.3.0`, chart `e7f0b8e`): services are reached at `https://<svc>.showmino.com`
+and `https://<svc>-staging.showmino.com` (or `deogratias.cloud` with `run.domain`). The pieces: the tunnel's two
+wildcard routes to `10.150.1.222` (`showmino/kubernetes` #123), the Gateway listeners `public-showmino-com` and
+`public-deogratias-cloud`, and a `CloudflareRecordsApplication` per deployment in the service's namespace
+(`kubectl -n <svc>-<env> get cloudflarerecordsapplications.kro.run`; its Record is in `crossplane-system`).
+`forge-web` says `run.domain: none`: do not roll it back to a deploy from before 2026-10-11 17:56 UTC, which
+would give it a public address its API calls cannot work from. Proven with a throwaway `hello-forge` on
+2026-10-11: staging and production on `showmino.com`, staging moved to `deogratias.cloud` by a commit (the old
+record went, the operation named both addresses), HTTPS 200 through Cloudflare with the zone's certificate, and
+the delete removed both records and namespaces. To check a name from outside without a cached "does not exist",
+ask Cloudflare's DNS over HTTPS (`https://cloudflare-dns.com/dns-query?name=<host>&type=A`, `accept:
+application/dns-json`): a resolver that was asked before the record existed, as Forge's own free-name check
+does, may say NXDOMAIN for a while. A first production deploy showed one `ErrImagePull` before the pull secret
+was in the new namespace, and recovered by itself.
+
+Live on k3s since 2026-10-11: forge-api `v0.3.0` (public addresses; before it `v0.2.0`, which keeps sessions). Earlier: forge-api `v0.2.0` (`ghcr.io/showmino/forge-api:v0.2.0`; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs, then `v0.1.0`, the first image built by the release workflow, which cuts versions; `v0.2.0` keeps sessions and applied migration 0004, the `sessions` table) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
 render must also carry `FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io`
 (next to `FORGE_DEPLOYS=1`, the chart revision, the App and both 1Password items); a render without it removes
 the dashboard's login client and its CORS access. Restart Dex after a change to its config
