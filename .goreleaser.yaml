@@ -66,6 +66,8 @@ dockers_v2:
 homebrew_casks:
   - name: forge
     ids: [forge]
+    # No tap token, no cask: the release itself does not depend on it.
+    skip_upload: "{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}"
     repository:
       owner: showmino
       name: homebrew-tap

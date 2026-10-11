@@ -9,7 +9,7 @@
 #   deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
 #
 # FORGE_API_IMAGE picks the image (default forge-api:dev):
-#   FORGE_API_IMAGE=ghcr.io/showmino/forge-api:0.1.0 deploy/k3s/render.sh forge.lan | kubectl apply -f -
+#   FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.1.0 deploy/k3s/render.sh forge.lan | kubectl apply -f -
 #
 # With the Forge GitHub App (templates and 'forge create'), create the Secret
 # first, then render with the App's ID (FORGE_GITHUB_ORG defaults to showmino,

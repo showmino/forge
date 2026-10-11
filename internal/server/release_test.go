@@ -67,7 +67,7 @@ func TestReleaseVersions(t *testing.T) {
 	if got := rel.Names(); got != "v0.1.0-rc.1@"+main7 {
 		t.Fatalf("tags %q", got)
 	}
-	if r, ok := rel.Release("v0.1.0-rc.1"); !ok || !r.Prerelease || r.Commit != envSHA || r.Previous != "" {
+	if r, ok := rel.Release("v0.1.0-rc.1"); !ok || !r.Prerelease || r.Latest || r.Commit != envSHA || r.Previous != "" {
 		t.Errorf("candidate release %+v %v", r, ok)
 	}
 	hist, _ := f.repo.History(ctx, valuesPath("payments", "staging"), 1)
@@ -108,7 +108,7 @@ func TestReleaseVersions(t *testing.T) {
 	if got := rel.Names(); !strings.HasSuffix(got, " v0.1.0@"+old7) {
 		t.Errorf("tags %q", got)
 	}
-	if r, ok := rel.Release("v0.1.0"); !ok || r.Prerelease || r.Commit != ciOldSHA || r.Previous != "" {
+	if r, ok := rel.Release("v0.1.0"); !ok || r.Prerelease || !r.Latest || r.Commit != ciOldSHA || r.Previous != "" {
 		t.Errorf("final release %+v %v", r, ok)
 	}
 	// Staging runs the released commit, so it shows the final version too;
@@ -124,12 +124,17 @@ func TestReleaseVersions(t *testing.T) {
 		t.Errorf("staging history %v", r)
 	}
 
-	// Back to main on staging: the commit keeps the candidate it had.
+	// Back to main on staging. Its old candidate was for v0.1.0, which was
+	// released from the other commit: it is now a candidate for the next one.
 	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
-	if got := f.versions(t); got != "staging=v0.1.0-rc.1 production=v0.1.0" {
+	if got := f.versions(t); got != "staging=v0.1.1-rc.1 production=v0.1.0" {
 		t.Errorf("versions %q", got)
+	}
+	// A bump is picked for production only.
+	if _, err := f.client.StartDeploy(ctx, as("writer", &forgev1.StartDeployRequest{Service: "services/payments", Env: "staging", Bump: forgev1.Bump_BUMP_MINOR})); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("a bump on a staging deploy: %v", err)
 	}
 	// A minor is picked at the promotion; notes run from the last final.
 	if op := f.promote(t, forgev1.Bump_BUMP_MINOR); op.GetError() != nil {
@@ -165,7 +170,7 @@ func TestReleaseVersions(t *testing.T) {
 	}
 	// Staging no longer runs what production runs, so it shows what it was
 	// deployed as.
-	if got := f.versions(t); got != "staging=v0.1.0-rc.1 production=v0.1.0" {
+	if got := f.versions(t); got != "staging=v0.1.1-rc.1 production=v0.1.0" {
 		t.Errorf("after the rollback: versions %q", got)
 	}
 	if got := rel.Names(); got != tags {
@@ -175,6 +180,17 @@ func TestReleaseVersions(t *testing.T) {
 	if _, err := f.client.PromoteDeploy(ctx, as("writer", &forgev1.PromoteDeployRequest{Service: "services/payments", Bump: 9})); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("unknown bump: %v", err)
 	}
+}
+
+// stepMessage is the message of op's last event for step.
+func stepMessage(op *forgev1.Operation, step string) string {
+	msg := ""
+	for _, e := range op.GetEvents() {
+		if e.GetStep() == step {
+			msg = e.GetMessage()
+		}
+	}
+	return msg
 }
 
 // firstDeploy is the oldest deploy commit of payments in env.
@@ -203,25 +219,63 @@ func TestReleaseVersionFailures(t *testing.T) {
 		t.Errorf("a deploy without a version was committed: %v", err)
 	}
 
-	// The tag was made but the release was not: running it again finishes it.
+	// The tag is made but the release is not: the deploy goes on and says
+	// so, and the next deploy of the commit makes the release.
 	rel.Fail(nil, errors.New("503"))
-	if e := f.deployRef(t, "staging", "").GetError(); e.GetCode() != "release_failed" || rel.Names() != "v0.1.0-rc.1@"+shortSHA(envSHA) {
-		t.Fatalf("op error %v, tags %q", e, rel.Names())
+	op = f.deployRef(t, "staging", "")
+	if op.GetError() != nil || rel.Names() != "v0.1.0-rc.1@"+shortSHA(envSHA) || !strings.Contains(stepMessage(op, "release"), "could not be made") {
+		t.Fatalf("op error %v, tags %q, release step %q", op.GetError(), rel.Names(), stepMessage(op, "release"))
+	}
+	if got := f.versions(t); got != "staging=v0.1.0-rc.1" {
+		t.Errorf("versions %q", got)
 	}
 	rel.Fail(nil, nil)
 	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
 	if _, ok := rel.Release("v0.1.0-rc.1"); !ok || rel.Names() != "v0.1.0-rc.1@"+shortSHA(envSHA) {
-		t.Errorf("after the retry: tags %q, tags again %q", rel.Names(), rel.Names())
+		t.Errorf("after the next deploy: tags %q", rel.Names())
+	}
+
+	// A promotion that cannot tag changes nothing in production.
+	rel.Fail(errors.New("502 Bad Gateway"), nil)
+	if e := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED).GetError(); e.GetCode() != "release_failed" {
+		t.Fatalf("promote: %v", e)
+	}
+	if _, err := f.repo.Read(ctx, valuesPath("payments", "production"), ""); !errors.Is(err, github.ErrNotFound) {
+		t.Errorf("a promotion without a version was committed: %v", err)
+	}
+	// It tags but cannot make the release: production runs the version.
+	rel.Fail(nil, errors.New("503"))
+	if op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED); op.GetError() != nil || !strings.Contains(stepMessage(op, "release"), "could not be made") {
+		t.Fatalf("promote: %v, release step %q", op.GetError(), stepMessage(op, "release"))
+	}
+	if got := f.versions(t); got != "staging=v0.1.0 production=v0.1.0" {
+		t.Errorf("versions %q", got)
+	}
+	// A deploy to staging never makes the release of a final version (it
+	// would be CI making it, and as a candidate).
+	rel.Fail(nil, nil)
+	if op := f.deployRef(t, "staging", ""); op.GetError() != nil || stepMessage(op, "release") != shortSHA(envSHA)+" is v0.1.0" {
+		t.Fatalf("staging redeploy: %v, release step %q", op.GetError(), stepMessage(op, "release"))
+	}
+	if _, ok := rel.Release("v0.1.0"); ok {
+		t.Error("a staging deploy made the release of a final version")
+	}
+	// The next promotion of the commit makes it, as a final release.
+	if op := f.promote(t, forgev1.Bump_BUMP_MAJOR); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	if r, ok := rel.Release("v0.1.0"); !ok || r.Prerelease || !r.Latest {
+		t.Errorf("repaired release %+v %v", r, ok)
 	}
 
 	// Someone tags the next number first: Forge takes the one after it.
-	rel.Race = &github.Tag{Name: "v0.1.0-rc.2", Commit: strings.Repeat("d", 40)}
+	rel.Race = &github.Tag{Name: "v0.1.1-rc.1", Commit: strings.Repeat("d", 40)}
 	if op := f.deployRef(t, "staging", "release"); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
-	if got := rel.Names(); !strings.HasSuffix(got, " v0.1.0-rc.3@"+shortSHA(ciOldSHA)) {
+	if got := rel.Names(); !strings.HasSuffix(got, " v0.1.1-rc.2@"+shortSHA(ciOldSHA)) {
 		t.Errorf("after a race: tags %q", got)
 	}
 }
@@ -233,6 +287,30 @@ func TestPlanVersion(t *testing.T) {
 		{Name: "v0.3.0", Commit: a}, {Name: "v0.3.1-rc.1", Commit: b}, {Name: "nightly", Commit: b},
 		{Name: "v1.2", Commit: b}, {Name: "v0.3.0-rc.4", Commit: a},
 	}
+	// The candidate of b was for v0.1.1, which was released from a.
+	stale := []github.Tag{{Name: "v0.1.1-rc.1", Commit: a}, {Name: "v0.1.1-rc.2", Commit: b}, {Name: "v0.1.1", Commit: a}, {Name: "v0.1.0", Commit: b}}
+	for _, tc := range []struct {
+		commit         string
+		final          bool
+		want           string
+		tagged, latest bool
+	}{
+		{b, false, "v0.1.0", true, false}, // staging shows the final version b has
+		{b, true, "v0.1.0", true, false},  // an old release is not the latest
+		{a, true, "v0.1.1", true, true},   // the highest one is
+		{strings.Repeat("c", 40), false, "v0.1.2-rc.1", false, false},
+		{strings.Repeat("c", 40), true, "v0.1.2", false, true},
+	} {
+		p := planVersion(stale, tc.commit, tc.final, semver.Patch)
+		if p.version.String() != tc.want || p.tagged != tc.tagged || p.latest != tc.latest {
+			t.Errorf("%s final=%v: got %s tagged=%v latest=%v", shortSHA(tc.commit), tc.final, p.version, p.tagged, p.latest)
+		}
+	}
+	// Without b's final version its stale candidate gives way to a new one.
+	if p := planVersion(stale[:3], b, false, semver.Patch); p.version.String() != "v0.1.2-rc.1" || p.tagged {
+		t.Errorf("a stale candidate: got %s tagged=%v", p.version, p.tagged)
+	}
+
 	for _, tc := range []struct {
 		name, commit string
 		final        bool

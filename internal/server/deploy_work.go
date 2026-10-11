@@ -83,7 +83,7 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if w := workloadOf(ctx); w != nil && src.commit != w.SHA {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolved %s to %s, not the CI token's commit %s", ref, shortSHA(src.commit), shortSHA(w.SHA)))
 	}
-	bump, err := bumpOf(m.GetBump())
+	bump, err := bumpOf(m.GetBump(), m.GetEnv())
 	if err != nil {
 		return nil, err
 	}

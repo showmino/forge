@@ -13,6 +13,10 @@ import (
 // ErrTagExists is returned by CreateTag when the tag is already there.
 var ErrTagExists = errors.New("the tag already exists")
 
+// ErrTooManyTags is returned by ListTagCommits for a repo with more tags
+// than it reads: a partial list would give wrong versions.
+var ErrTooManyTags = fmt.Errorf("the repository has more than %d tags", pageSize*maxPages)
+
 // Tag is a tag and the commit it points at.
 type Tag struct {
 	Name, Commit string
@@ -41,10 +45,10 @@ func (c *Client) ListTagCommits(ctx context.Context, owner, repo string) ([]Tag,
 			out = append(out, Tag{Name: t.Name, Commit: t.Commit.SHA})
 		}
 		if len(tags) < pageSize {
-			break
+			return out, nil
 		}
 	}
-	return out, nil
+	return nil, fmt.Errorf("%w: %s/%s", ErrTooManyTags, owner, repo)
 }
 
 // alreadyExists reports whether err is GitHub refusing to create something
@@ -71,9 +75,10 @@ type Release struct {
 	Tag, Commit string
 	// Previous is the tag its notes start from; empty for the first release.
 	Previous string
-	// Prerelease marks a release candidate; any other release becomes the
-	// repo's latest.
+	// Prerelease marks a release candidate.
 	Prerelease bool
+	// Latest makes it the repo's latest release.
+	Latest bool
 }
 
 // ReleaseExists reports whether owner/repo has a release for tag.
@@ -86,7 +91,8 @@ func (c *Client) ReleaseExists(ctx context.Context, owner, repo, tag string) (bo
 }
 
 // CreateRelease publishes r with notes GitHub writes from the pull requests
-// merged since r.Previous. A release that is already there is left alone.
+// merged since r.Previous; when GitHub cannot write them the release has
+// none. A release that is already there is left alone.
 func (c *Client) CreateRelease(ctx context.Context, owner, repo string, r Release) error {
 	notesIn := map[string]string{"tag_name": r.Tag, "target_commitish": r.Commit}
 	if r.Previous != "" {
@@ -95,12 +101,11 @@ func (c *Client) CreateRelease(ctx context.Context, owner, repo string, r Releas
 	var notes struct {
 		Body string `json:"body"`
 	}
-	if err := c.doJSON(ctx, http.MethodPost, repoPath(owner, repo)+"/releases/generate-notes", notesIn, &notes); err != nil {
-		return fmt.Errorf("release notes for %s: %w", r.Tag, err)
-	}
-	latest := "true"
-	if r.Prerelease {
-		latest = "false"
+	// The notes are a nicety: a release without them beats no release.
+	_ = c.doJSON(ctx, http.MethodPost, repoPath(owner, repo)+"/releases/generate-notes", notesIn, &notes)
+	latest := "false"
+	if r.Latest && !r.Prerelease {
+		latest = "true"
 	}
 	in := map[string]any{
 		"tag_name": r.Tag, "target_commitish": r.Commit, "name": r.Tag, "body": notes.Body,

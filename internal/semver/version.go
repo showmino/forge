@@ -56,8 +56,8 @@ func (v Version) String() string {
 // Final reports whether v is a final version, not a candidate.
 func (v Version) Final() bool { return v.RC == 0 }
 
-// base is v without its candidate number.
-func (v Version) base() Version { return Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch} }
+// Base is v without its candidate number: the final version it leads to.
+func (v Version) Base() Version { return Version{Major: v.Major, Minor: v.Minor, Patch: v.Patch} }
 
 // Compare orders versions as semver does: a candidate comes before its
 // final version.
@@ -116,7 +116,7 @@ func NextFinal(all []Version, bump Bump) Version {
 func NextCandidate(all []Version) Version {
 	next := NextFinal(all, Patch)
 	for _, v := range all {
-		if v.base() == next.base() && v.RC >= next.RC {
+		if v.Base() == next.Base() && v.RC >= next.RC {
 			next.RC = v.RC
 		}
 	}
@@ -130,7 +130,7 @@ func NextCandidate(all []Version) Version {
 func Previous(all []Version, v Version) (Version, bool) {
 	var below []Version
 	for _, o := range all {
-		if Compare(o, v) < 0 && (o.Final() || (!v.Final() && o.base() == v.base())) {
+		if Compare(o, v) < 0 && (o.Final() || (!v.Final() && o.Base() == v.Base())) {
 			below = append(below, o)
 		}
 	}

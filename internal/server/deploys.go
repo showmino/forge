@@ -76,8 +76,8 @@ type Deploys struct {
 	running map[string]string
 	// requests maps a caller's StartDeploy request_id (requestKey) to its operation.
 	requests map[string]string
-	// cutMu is held while a version is worked out and tagged.
-	cutMu sync.Mutex
+	// cutLocks maps "owner/repo" to the lock held while a version is cut there.
+	cutLocks sync.Map
 }
 
 // NewDeploys returns the deploy service.
@@ -536,13 +536,16 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	bump, err := bumpOf(req.Msg.GetBump())
+	bump, err := bumpOf(req.Msg.GetBump(), to)
 	if err != nil {
 		return nil, err
 	}
 	v := src
 	v.Env, v.Host = to, d.host(svc, to)
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
+	// Staging's candidate number is not production's version: that is cut
+	// below, or there is none.
+	v.Forge.Version = ""
 	var cut func(context.Context, func(string, string)) (string, error)
 	if d.o.Releases != nil {
 		owner, repo, err := d.serviceRepo(ctx, svc)

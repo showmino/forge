@@ -248,8 +248,11 @@ Pods keep running the image CI built for the commit (`:<sha7>`). The
 `release.yml` workflow that comes with every template adds the version to
 that same image when Forge pushes the tag, so `ghcr.io/<org>/<service>:v0.3.1`
 is the image production runs. Forge cuts versions with its GitHub App
-(contents: write), and a deploy fails with `release_failed` before it changes
-anything if the tag or release cannot be made; run it again.
+(contents: write). The tag is the version: a deploy fails with
+`release_failed` before it changes anything if the tag cannot be made, so run
+it again. A GitHub release that cannot be made does not stop the deploy; the
+operation says so and the next deploy of the commit makes it. `--bump` is for
+production: a staging deploy refuses it.
 
 ### Audit log
 
