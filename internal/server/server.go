@@ -38,6 +38,9 @@ type Options struct {
 	Catalog          *Catalog
 	// Templates serves TemplateService; nil answers FAILED_PRECONDITION.
 	Templates TemplateSource
+	// Teams lists the organization's teams for TeamService; nil answers
+	// FAILED_PRECONDITION.
+	Teams TeamSource
 	// Repos creates the repos of new services; nil answers FAILED_PRECONDITION
 	// to CreateService unless validate_only.
 	Repos RepoHost
@@ -111,6 +114,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger}, opts))
+	mux.Handle(forgev1connect.NewTeamServiceHandler(&teamService{src: o.Teams, org: o.GitHubOrg, log: o.Logger, now: time.Now}, opts))
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))

@@ -52,6 +52,7 @@ type Client struct {
 	Catalog      forgev1connect.ServiceCatalogServiceClient
 	Auth         forgev1connect.AuthServiceClient
 	Templates    forgev1connect.TemplateServiceClient
+	Teams        forgev1connect.TeamServiceClient
 	Operations   forgev1connect.OperationServiceClient
 	Environments forgev1connect.EnvironmentServiceClient
 	Deploys      forgev1connect.DeployServiceClient
@@ -87,6 +88,7 @@ func New(baseURL string, o Options) (*Client, error) {
 		Catalog:      forgev1connect.NewServiceCatalogServiceClient(hc, baseURL, opts...),
 		Auth:         forgev1connect.NewAuthServiceClient(hc, baseURL, opts...),
 		Templates:    forgev1connect.NewTemplateServiceClient(hc, baseURL, opts...),
+		Teams:        forgev1connect.NewTeamServiceClient(hc, baseURL, opts...),
 		Operations:   forgev1connect.NewOperationServiceClient(hc, baseURL, opts...),
 		Environments: forgev1connect.NewEnvironmentServiceClient(hc, baseURL, opts...),
 		Deploys:      forgev1connect.NewDeployServiceClient(hc, baseURL, opts...),

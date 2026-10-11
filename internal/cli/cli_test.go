@@ -32,6 +32,7 @@ type harness struct {
 
 	authn     server.Authenticator
 	templates server.TemplateSource
+	teams     server.TeamSource
 	repos     server.RepoHost
 	ops       *server.Operations
 	catalog   *server.Catalog
@@ -72,6 +73,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Authenticator: authn,
 		Authorizer:    server.Authorizer{WriterGroups: []string{"platform"}},
 		Templates:     h.templates,
+		Teams:         h.teams,
 		Repos:         h.repos,
 		Operations:    h.ops,
 		Catalog:       h.catalog,

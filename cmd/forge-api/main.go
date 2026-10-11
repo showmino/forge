@@ -212,6 +212,7 @@ func run() error {
 		Resources:        res,
 		CLIDir:           *cliDir,
 		Templates:        templates,
+		Teams:            teamSource(app),
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,
 		MinClientVersion: *minClient,
