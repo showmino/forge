@@ -96,10 +96,18 @@ type Credentials struct {
 	Expiry       time.Time `json:"expiry"`
 	Subject      string    `json:"subject,omitempty"`
 	Email        string    `json:"email,omitempty"`
+	// SessionToken is a Forge session: the API's own token for this login.
+	// With it the ID and refresh tokens are not kept, and Expiry is when
+	// the session ends if it is not used.
+	SessionToken string `json:"session_token,omitempty"`
 }
 
-// Valid reports whether the ID token is still usable for at least the margin.
+// Valid reports whether the credentials can be used as they are: a session
+// (the API says when it has ended), or an ID token good for at least the margin.
 func (c *Credentials) Valid(now time.Time, margin time.Duration) bool {
+	if c != nil && c.SessionToken != "" {
+		return true
+	}
 	return c != nil && c.IDToken != "" && now.Add(margin).Before(c.Expiry)
 }
 
@@ -182,8 +190,9 @@ func parseClaims(jwt string) (claims, error) {
 // ErrLoginRequired means there are no usable credentials.
 var ErrLoginRequired = errors.New("not logged in")
 
-// TokenSource returns ID tokens for key from store, refreshing and saving
-// them when they are about to expire. It is safe for concurrent use.
+// TokenSource returns the bearer token for key from store: its session
+// token, or its ID token, refreshed and saved when it is about to expire. It
+// is safe for concurrent use.
 func TokenSource(ctx context.Context, store Store, key string, hc *http.Client, now func() time.Time) oauth2.TokenSource {
 	if now == nil {
 		now = time.Now
@@ -229,6 +238,9 @@ func (s *refreshingSource) Token() (*oauth2.Token, error) {
 			return nil, fmt.Errorf("save refreshed credentials: %w", err)
 		}
 		s.creds = next
+	}
+	if s.creds.SessionToken != "" {
+		return &oauth2.Token{AccessToken: s.creds.SessionToken, TokenType: "Bearer"}, nil
 	}
 	return &oauth2.Token{AccessToken: s.creds.IDToken, TokenType: "Bearer", Expiry: s.creds.Expiry}, nil
 }

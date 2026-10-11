@@ -38,6 +38,15 @@ const (
 	AuthServiceGetServerInfoProcedure = "/forge.v1.AuthService/GetServerInfo"
 	// AuthServiceGetStatusProcedure is the fully-qualified name of the AuthService's GetStatus RPC.
 	AuthServiceGetStatusProcedure = "/forge.v1.AuthService/GetStatus"
+	// AuthServiceCreateSessionProcedure is the fully-qualified name of the AuthService's CreateSession
+	// RPC.
+	AuthServiceCreateSessionProcedure = "/forge.v1.AuthService/CreateSession"
+	// AuthServiceListSessionsProcedure is the fully-qualified name of the AuthService's ListSessions
+	// RPC.
+	AuthServiceListSessionsProcedure = "/forge.v1.AuthService/ListSessions"
+	// AuthServiceDeleteSessionProcedure is the fully-qualified name of the AuthService's DeleteSession
+	// RPC.
+	AuthServiceDeleteSessionProcedure = "/forge.v1.AuthService/DeleteSession"
 )
 
 // AuthServiceClient is a client for the forge.v1.AuthService service.
@@ -47,6 +56,17 @@ type AuthServiceClient interface {
 	GetServerInfo(context.Context, *connect.Request[v1.GetServerInfoRequest]) (*connect.Response[v1.GetServerInfoResponse], error)
 	// GetStatus returns the caller's identity and permissions.
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
+	// CreateSession turns a fresh login into a Forge session: a token of
+	// Forge's own that keeps working without the identity provider. The caller
+	// must present the ID token of a login made in the last few minutes, never
+	// a session. The client the ID token was issued to decides the kind: the
+	// CLI's lasts until it has not been used for 90 days, the web dashboard's
+	// for 7 days.
+	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
+	// ListSessions returns the caller's own sessions.
+	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	// DeleteSession ends one of the caller's own sessions at once.
+	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
 }
 
 // NewAuthServiceClient constructs a client for the forge.v1.AuthService service. By default, it
@@ -74,6 +94,25 @@ func NewAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		createSession: connect.NewClient[v1.CreateSessionRequest, v1.CreateSessionResponse](
+			httpClient,
+			baseURL+AuthServiceCreateSessionProcedure,
+			connect.WithSchema(authServiceMethods.ByName("CreateSession")),
+			connect.WithClientOptions(opts...),
+		),
+		listSessions: connect.NewClient[v1.ListSessionsRequest, v1.ListSessionsResponse](
+			httpClient,
+			baseURL+AuthServiceListSessionsProcedure,
+			connect.WithSchema(authServiceMethods.ByName("ListSessions")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		deleteSession: connect.NewClient[v1.DeleteSessionRequest, v1.DeleteSessionResponse](
+			httpClient,
+			baseURL+AuthServiceDeleteSessionProcedure,
+			connect.WithSchema(authServiceMethods.ByName("DeleteSession")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -81,6 +120,9 @@ func NewAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 type authServiceClient struct {
 	getServerInfo *connect.Client[v1.GetServerInfoRequest, v1.GetServerInfoResponse]
 	getStatus     *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
+	createSession *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	listSessions  *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	deleteSession *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
 }
 
 // GetServerInfo calls forge.v1.AuthService.GetServerInfo.
@@ -93,6 +135,21 @@ func (c *authServiceClient) GetStatus(ctx context.Context, req *connect.Request[
 	return c.getStatus.CallUnary(ctx, req)
 }
 
+// CreateSession calls forge.v1.AuthService.CreateSession.
+func (c *authServiceClient) CreateSession(ctx context.Context, req *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error) {
+	return c.createSession.CallUnary(ctx, req)
+}
+
+// ListSessions calls forge.v1.AuthService.ListSessions.
+func (c *authServiceClient) ListSessions(ctx context.Context, req *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error) {
+	return c.listSessions.CallUnary(ctx, req)
+}
+
+// DeleteSession calls forge.v1.AuthService.DeleteSession.
+func (c *authServiceClient) DeleteSession(ctx context.Context, req *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error) {
+	return c.deleteSession.CallUnary(ctx, req)
+}
+
 // AuthServiceHandler is an implementation of the forge.v1.AuthService service.
 type AuthServiceHandler interface {
 	// GetServerInfo needs no credentials. The CLI calls it before login to discover
@@ -100,6 +157,17 @@ type AuthServiceHandler interface {
 	GetServerInfo(context.Context, *connect.Request[v1.GetServerInfoRequest]) (*connect.Response[v1.GetServerInfoResponse], error)
 	// GetStatus returns the caller's identity and permissions.
 	GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error)
+	// CreateSession turns a fresh login into a Forge session: a token of
+	// Forge's own that keeps working without the identity provider. The caller
+	// must present the ID token of a login made in the last few minutes, never
+	// a session. The client the ID token was issued to decides the kind: the
+	// CLI's lasts until it has not been used for 90 days, the web dashboard's
+	// for 7 days.
+	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
+	// ListSessions returns the caller's own sessions.
+	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	// DeleteSession ends one of the caller's own sessions at once.
+	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
 }
 
 // NewAuthServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -123,12 +191,37 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	authServiceCreateSessionHandler := connect.NewUnaryHandler(
+		AuthServiceCreateSessionProcedure,
+		svc.CreateSession,
+		connect.WithSchema(authServiceMethods.ByName("CreateSession")),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceListSessionsHandler := connect.NewUnaryHandler(
+		AuthServiceListSessionsProcedure,
+		svc.ListSessions,
+		connect.WithSchema(authServiceMethods.ByName("ListSessions")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceDeleteSessionHandler := connect.NewUnaryHandler(
+		AuthServiceDeleteSessionProcedure,
+		svc.DeleteSession,
+		connect.WithSchema(authServiceMethods.ByName("DeleteSession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.AuthService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AuthServiceGetServerInfoProcedure:
 			authServiceGetServerInfoHandler.ServeHTTP(w, r)
 		case AuthServiceGetStatusProcedure:
 			authServiceGetStatusHandler.ServeHTTP(w, r)
+		case AuthServiceCreateSessionProcedure:
+			authServiceCreateSessionHandler.ServeHTTP(w, r)
+		case AuthServiceListSessionsProcedure:
+			authServiceListSessionsHandler.ServeHTTP(w, r)
+		case AuthServiceDeleteSessionProcedure:
+			authServiceDeleteSessionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -144,4 +237,16 @@ func (UnimplementedAuthServiceHandler) GetServerInfo(context.Context, *connect.R
 
 func (UnimplementedAuthServiceHandler) GetStatus(context.Context, *connect.Request[v1.GetStatusRequest]) (*connect.Response[v1.GetStatusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.GetStatus is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.CreateSession is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.ListSessions is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.DeleteSession is not implemented"))
 }

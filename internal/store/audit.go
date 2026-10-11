@@ -34,11 +34,13 @@ type AuditStore interface {
 	ListAuditEvents(ctx context.Context, q AuditQuery) ([]*forgev1.AuditEvent, error)
 }
 
-// Backend is everything forge-api keeps: the catalog, the audit log and resources.
+// Backend is everything forge-api keeps: the catalog, the audit log,
+// resources and sessions.
 type Backend interface {
 	Store
 	AuditStore
 	ResourceStore
+	SessionStore
 }
 
 const auditPrefix = "auditEvents/"

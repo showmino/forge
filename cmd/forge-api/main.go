@@ -134,6 +134,9 @@ func run() error {
 			return err
 		}
 	}
+	if oidc, ok := authn.(*server.OIDCAuthenticator); ok {
+		oidc.SetWebClient(*webClientID)
+	}
 
 	var groups []string
 	for _, g := range strings.Split(*writers, ",") {
@@ -206,6 +209,10 @@ func run() error {
 	}
 	// Deleting a service takes down its previews and deployments first.
 	catalog.EnableTeardown(deps, envs, ops)
+	// A login becomes a session of Forge's own, which lasts without the
+	// identity provider; forge-api keeps its person's teams current itself.
+	sessions := server.NewSessions(server.SessionOptions{Store: st, Members: members(app), Org: *githubOrg, Teams: groups, Log: log})
+	go sessions.RunSweeper(ctx, time.Hour)
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,
@@ -215,6 +222,7 @@ func run() error {
 		CLIDir:           *cliDir,
 		Templates:        templates,
 		Teams:            teamSource(app),
+		Sessions:         sessions,
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,
 		MinClientVersion: *minClient,

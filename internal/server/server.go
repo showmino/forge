@@ -41,6 +41,9 @@ type Options struct {
 	// Teams lists the organization's teams for TeamService; nil answers
 	// FAILED_PRECONDITION.
 	Teams TeamSource
+	// Sessions, when set, lets a login be turned into a session and reads
+	// session tokens before the Authenticator sees them.
+	Sessions *Sessions
 	// Repos creates the repos of new services; nil answers FAILED_PRECONDITION
 	// to CreateService unless validate_only.
 	Repos RepoHost
@@ -104,7 +107,7 @@ func New(o Options) (http.Handler, error) {
 	opts := connect.WithInterceptors(
 		&logInterceptor{log: o.Logger},
 		&auditInterceptor{a: aud},
-		&authInterceptor{authn: o.Authenticator, authz: o.Authorizer},
+		&authInterceptor{authn: WithSessions(o.Sessions, o.Authenticator), authz: o.Authorizer},
 	)
 	mux := http.NewServeMux()
 	create := &creator{
@@ -185,12 +188,22 @@ func (a *authService) GetStatus(ctx context.Context, _ *connect.Request[forgev1.
 	if !ok {
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
-	return connect.NewResponse(&forgev1.GetStatusResponse{
+	out := &forgev1.GetStatusResponse{
 		Subject:     p.Subject,
 		Email:       p.Email,
 		Groups:      slices.Clone(p.Groups),
 		Permissions: slices.Clone(p.Permissions),
-	}), nil
+	}
+	if p.Session != "" && a.o.Sessions != nil {
+		if all, err := a.o.Sessions.o.Store.ListSessions(ctx, p.Subject); err == nil {
+			for _, ses := range all {
+				if ses.ID == p.Session {
+					out.Session = sessionProto(ses, p.Session)
+				}
+			}
+		}
+	}
+	return connect.NewResponse(out), nil
 }
 
 type logInterceptor struct{ log *slog.Logger }

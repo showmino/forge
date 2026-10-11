@@ -25,6 +25,9 @@ type Memory struct {
 	planSeq   int64
 	resources map[string]*forgev1.Resource // likewise
 	states    map[string]ResourceState
+
+	sesMu    sync.Mutex
+	sessions map[string]Session // by ID
 }
 
 type memEntry struct {
