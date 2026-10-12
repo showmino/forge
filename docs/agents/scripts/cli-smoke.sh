@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Exercise every forge command against a live API and check exit codes.
 #
-#   bash .claude/skills/forge/scripts/cli-smoke.sh bin/forge <context> > smoke.log; tail -1 smoke.log
+#   bash docs/agents/scripts/cli-smoke.sh bin/forge <context> > smoke.log; tail -1 smoke.log
 #
 # Needs a logged-in context whose Dex has the password connector: it logs out
 # and back in with approve-device-login.py. It registers and deletes the

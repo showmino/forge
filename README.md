@@ -3,9 +3,17 @@
 Forge is an internal developer platform. This repo holds the `forge` CLI, the
 Forge API (`forge-api`) and the Protobuf contract they share.
 
-**Status: Phase 1.** The service catalog, contexts, OIDC login and the API
-skeleton work. Templates, environments, deploys and resources come in later
-phases (see the design doc).
+**Status (October 2026):** the catalog, templates and `forge create`, preview
+environments, deploys with promotion and rollback, versions and releases, the
+audit log, public addresses and the web dashboard
+([`showmino/forge-web`](https://github.com/showmino/forge-web)) are built and
+live. Resources (databases) are built and switched off on the cluster;
+TechDocs is designed. [`docs/agents/status.md`](docs/agents/status.md) has the
+detail and [`docs/index.md`](docs/index.md) the design.
+
+**Working on Forge**, as a person or as a coding agent: read
+[`AGENTS.md`](AGENTS.md) first. It has the rules (the cluster is production),
+the commands and the conventions, and points to the runbook.
 
 ```
 cmd/forge/          CLI entry point; maps errors to exit codes
@@ -90,6 +98,11 @@ it, and against an older API, `CreateSession` answers `Unimplemented` and the
 CLI keeps the ID and refresh tokens, as before.
 
 ## On k3s
+
+> This section is for a throwaway single-node k3s of your own. **The
+> `showmino` cluster is production and is not set up this way:** its images
+> come from `ghcr.io`, and every change to it follows the rollout procedure in
+> [`docs/agents/verifying.md`](docs/agents/verifying.md) with the owner's OK.
 
 On a single-node k3s with the bundled Traefik ingress, import a local image:
 

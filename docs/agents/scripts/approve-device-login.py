@@ -2,7 +2,7 @@
 would (submit the code, then the static password login), so the whole OIDC
 device flow can be checked without a person.
 
-    python3 -I .claude/skills/forge/scripts/approve-device-login.py bin/forge [--context NAME]
+    python3 -I docs/agents/scripts/approve-device-login.py bin/forge [--context NAME]
 
 DEX_LOGIN / DEX_PASSWORD override admin@example.com / password. Only works
 against a Dex with the password connector and skipApprovalScreen: true.
