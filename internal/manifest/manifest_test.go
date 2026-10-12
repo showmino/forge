@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/showmino/forge/internal/docs"
 )
 
 func TestParse(t *testing.T) {
@@ -118,6 +120,31 @@ func TestRun(t *testing.T) {
 	out, err := (&Manifest{APIVersion: APIVersion, Service: Service{Name: "a", Team: "b"}, Run: &Run{Port: 9090, Health: "/ready"}}).Marshal()
 	if err != nil || !strings.Contains(string(out), "run:\n  port: 9090\n  health: /ready\n") {
 		t.Errorf("marshal: %s %v", out, err)
+	}
+}
+
+func TestDocs(t *testing.T) {
+	t.Parallel()
+	base := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"
+	m, err := Parse([]byte(base + "docs:\n  - title: Overview\n    path: index.md\n  - path: api/errors.md\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []docs.Entry{{Title: "Overview", Path: "index.md"}, {Path: "api/errors.md"}}
+	if got := m.DocEntries(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("DocEntries = %+v", got)
+	}
+	for _, bad := range []string{
+		"docs:\n  - path: ../README.md\n",
+		"docs:\n  - path: /index.md\n",
+		"docs:\n  - path: img/a.png\n",
+		"docs:\n  - title: x\n",
+		"docs:\n  - path: a.md\n  - path: a.md\n",
+		"docs:\n  - path: a.md\n    order: 1\n",
+	} {
+		if _, err := Parse([]byte(base + bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
 	}
 }
 

@@ -45,6 +45,15 @@ func teamSource(app *github.App) server.TeamSource {
 	return &github.Client{Token: app.Token}
 }
 
+// docsSource reads services' docs from GitHub as the App; without one there
+// is none, and DocsService answers FAILED_PRECONDITION.
+func docsSource(app *github.App) server.DocsGitHub {
+	if app == nil {
+		return nil
+	}
+	return &github.Client{Token: app.Token}
+}
+
 // members asks GitHub, as the App, who is in the organization and its
 // teams; without an App sessions keep the groups of their login.
 func members(app *github.App) server.Members {
