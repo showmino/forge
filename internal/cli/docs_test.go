@@ -39,6 +39,9 @@ func TestDocsListAndGet(t *testing.T) {
 	if r := h.ok("docs", "get", "payments"); r.out != "# Payments\n\nCharges and refunds.\n" {
 		t.Errorf("start page: %q", r.out)
 	}
+	if got := printable("a\x1b]0;owned\x07b\tc\r\n\u009bd"); got != "a]0;ownedb\tc\nd" {
+		t.Errorf("printable = %q", got)
+	}
 	// A page without a final newline gets one; "docs/" before the path is allowed.
 	if r := h.ok("docs", "get", "payments", "docs/runbook.md"); r.out != "# Runbook\n\nRestart it.\n" {
 		t.Errorf("runbook: %q", r.out)

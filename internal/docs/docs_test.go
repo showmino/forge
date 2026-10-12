@@ -25,17 +25,20 @@ func TestKinds(t *testing.T) {
 	if !IsPage("a/B.MD") || IsPage("a.png") || IsPage("md") {
 		t.Error("IsPage")
 	}
-	if typ, ok := AssetType("a/b.SVG"); !ok || typ != "image/svg+xml" {
-		t.Errorf("AssetType(svg) = %q, %v", typ, ok)
+	if typ, ok := AssetType("a/b.PNG"); !ok || typ != "image/png" {
+		t.Errorf("AssetType(png) = %q, %v", typ, ok)
 	}
-	if _, ok := AssetType("a.html"); ok {
-		t.Error("AssetType accepted html")
+	// SVG can carry script: not served.
+	for _, p := range []string{"a.html", "a/b.svg"} {
+		if _, ok := AssetType(p); ok {
+			t.Errorf("AssetType accepted %s", p)
+		}
 	}
 }
 
 func TestTitle(t *testing.T) {
 	t.Parallel()
-	page := "Intro text\n```sh\n# not a heading\n```\n\n## Second\n#   Payments runbook  ##\n# Later\n"
+	page := "Intro text\n```sh\n# not a heading\n```go\n# still code\n```\n\n    # indented code\n## Second\n  #   Payments runbook  ##\n# Later\n"
 	if got := Title([]byte(page), "runbook.md"); got != "Payments runbook" {
 		t.Errorf("Title = %q", got)
 	}
@@ -138,7 +141,7 @@ func TestLint(t *testing.T) {
 		"docs/huge.md: the page is 1048577 bytes; pages are read up to 1048576",
 		"docs/index.md: the start page is missing: a repo without it has no docs",
 		`docs/runbook.md:3: "gone.md": docs/gone.md does not exist`,
-		`docs/runbook.md:4: "notes.html": images are png, jpeg, gif, webp or svg`,
+		`docs/runbook.md:4: "notes.html": images are png, jpeg, gif or webp`,
 		`docs/runbook.md:5: "../forge.yaml" points outside docs/`,
 		"forge.yaml: docs: docs/api.md does not exist",
 		`forge.yaml: docs: path "../x.md" must stay inside docs/`,

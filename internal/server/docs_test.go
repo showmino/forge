@@ -124,6 +124,7 @@ func TestDocsRefusals(t *testing.T) {
 		{"repo elsewhere", page("services/elsewhere", ""), connect.CodeNotFound, "not a repo of the showmino organization"},
 		{"no service", page("services/nope", ""), connect.CodeNotFound, ""},
 		{"not an image", asset("img/flow.html"), connect.CodeInvalidArgument, "not an image"},
+		{"svg can carry script", asset("img/logo.svg"), connect.CodeInvalidArgument, "not an image"},
 		{"missing image", asset("img/gone.png"), connect.CodeNotFound, "no image"},
 	} {
 		if connect.CodeOf(c.err) != c.code || !strings.Contains(c.err.Error(), c.text) {
@@ -159,8 +160,8 @@ func TestDocsCache(t *testing.T) {
 	// Within a minute GitHub is not asked again, even when the head moved.
 	f.gh.Push("showmino", "payments", map[string]string{"docs/index.md": "# Payments v2\n"}, f.now)
 	f.now = f.now.Add(30 * time.Second)
-	if title() != "Payments" || f.gh.Calls["ResolveRef"] != 1 {
-		t.Errorf("within a minute: %d head checks", f.gh.Calls["ResolveRef"])
+	if title() != "Payments" || f.gh.Calls["HeadSHA"] != 1 {
+		t.Errorf("within a minute: %d head checks", f.gh.Calls["HeadSHA"])
 	}
 	// After a minute the moved head is read again.
 	f.now = f.now.Add(time.Minute)
@@ -182,6 +183,101 @@ func TestDocsCache(t *testing.T) {
 	if title() != "Payments v2" {
 		t.Error("not served while GitHub is down")
 	}
+}
+
+func TestDocsReuseAndRetry(t *testing.T) {
+	t.Parallel()
+	f := newDocsFixture(t)
+	ctx := readerCtx()
+	get := func(svc string) error {
+		_, err := f.s.GetDocSet(ctx, connect.NewRequest(&forgev1.GetDocSetRequest{Service: svc}))
+		return err
+	}
+	if err := get("services/payments"); err != nil {
+		t.Fatal(err)
+	}
+	blobs := f.gh.Calls["Blob"]
+
+	// A push that does not touch docs/ or forge.yaml reads one tree and no file.
+	files := map[string]string{
+		"forge.yaml":         "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\ndocs:\n  - path: runbook.md\n    title: When it breaks\n  - path: api/errors.md\n",
+		"docs/index.md":      "# Payments\nCharges and refunds. See the [runbook](runbook.md).\n",
+		"docs/runbook.md":    "# Runbook\n",
+		"docs/api/errors.md": "# Errors\n",
+		"docs/notes.md":      "# Notes\n",
+		"docs/img/flow.png":  "png!",
+		"docs/img/flow.html": "<p>",
+		"docs/huge.md":       strings.Repeat("x", docs.MaxPageBytes+1),
+		"README.md":          "# payments, now with a badge",
+	}
+	f.gh.Push("showmino", "payments", files, f.now)
+	trees := f.gh.Calls["Tree"]
+	f.now = f.now.Add(2 * time.Minute)
+	if err := get("services/payments"); err != nil || f.gh.Calls["Blob"] != blobs || f.gh.Calls["Tree"] != trees+1 {
+		t.Errorf("unchanged docs: %v, blobs %d→%d, trees %d→%d", err, blobs, f.gh.Calls["Blob"], trees, f.gh.Calls["Tree"])
+	}
+	// One changed page is the only file read again.
+	files["docs/runbook.md"] = "# Runbook v2\n"
+	f.gh.Push("showmino", "payments", files, f.now)
+	f.now = f.now.Add(2 * time.Minute)
+	if err := get("services/payments"); err != nil || f.gh.Calls["Blob"] != blobs+2 { // the page and forge.yaml
+		t.Errorf("one page changed: %v, blobs %d→%d", err, blobs, f.gh.Calls["Blob"])
+	}
+
+	// A read that failed is answered from the cache, and tried again soon.
+	g := newDocsFixture(t)
+	g.gh.Fail = errors.New("down")
+	for range 3 {
+		if err := getFrom(g, "services/payments"); connect.CodeOf(err) != connect.CodeUnavailable {
+			t.Errorf("GitHub down: %v", err)
+		}
+	}
+	if g.gh.Calls["HeadSHA"] != 1 {
+		t.Errorf("GitHub was asked %d times", g.gh.Calls["HeadSHA"])
+	}
+	g.gh.Fail = nil
+	g.now = g.now.Add(docsRetry)
+	if err := getFrom(g, "services/payments"); err != nil {
+		t.Errorf("after the retry: %v", err)
+	}
+}
+
+func TestDocsBackgroundRefresh(t *testing.T) {
+	t.Parallel()
+	f := newDocsFixture(t)
+	f.s.now = time.Now
+	f.s.background = func(run func()) { go run() }
+	ctx := readerCtx()
+	count := func() int {
+		resp, err := f.s.ListDocSets(ctx, connect.NewRequest(&forgev1.ListDocSetsRequest{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(resp.Msg.GetDocSets())
+	}
+	if count() != 1 {
+		t.Fatal("first list")
+	}
+	f.gh.Push("showmino", "ledger", map[string]string{"docs/index.md": "# Ledger\n"}, time.Now())
+	// Make every entry stale, then list until the refresh behind it lands.
+	for _, name := range []string{"services/payments", "services/ledger"} {
+		e := f.s.entry(name)
+		snap := *e.snap.Load()
+		snap.checked = time.Now().Add(-2 * docsFresh)
+		e.snap.Store(&snap)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for count() != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("the background refresh never landed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func getFrom(f *docsFixture, svc string) error {
+	_, err := f.s.GetDocSet(readerCtx(), connect.NewRequest(&forgev1.GetDocSetRequest{Service: svc}))
+	return err
 }
 
 func TestListDocSets(t *testing.T) {

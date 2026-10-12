@@ -5,6 +5,7 @@ import (
 	"crypto/sha1" //nolint:gosec // a fake blob id, as Git's
 	"encoding/hex"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -28,8 +29,10 @@ type DocsGitHub struct {
 type docsRepo struct {
 	branch, head string
 	files        map[string][]byte
-	changed      time.Time
-	n            int
+	// trees maps a folder's id to its path; ids come from the content, as in Git.
+	trees   map[string]string
+	changed time.Time
+	n       int
 }
 
 // Push makes files the content of owner/repo's default branch at a new commit.
@@ -52,8 +55,30 @@ func (g *DocsGitHub) Push(owner, repo string, files map[string]string, at time.T
 		r.files[p] = []byte(c)
 		g.blobs[blobSHA([]byte(c))] = []byte(c)
 	}
+	r.trees = map[string]string{}
+	for p := range r.files {
+		for dir := path.Dir(p); dir != "."; dir = path.Dir(dir) {
+			r.trees[r.treeSHA(dir)] = dir
+		}
+	}
 	r.changed = at
 	return r.head
+}
+
+// treeSHA is a folder's id: it changes when anything below it does.
+func (r *docsRepo) treeSHA(dir string) string {
+	var b strings.Builder
+	paths := make([]string, 0, len(r.files))
+	for p := range r.files {
+		if strings.HasPrefix(p, dir+"/") {
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		b.WriteString(p + " " + blobSHA(r.files[p]) + "\n")
+	}
+	return blobSHA([]byte("tree " + b.String()))
 }
 
 func blobSHA(data []byte) string {
@@ -73,15 +98,12 @@ func (g *DocsGitHub) call(name, owner, repo string) (*docsRepo, error) {
 	return r, nil
 }
 
-func (g *DocsGitHub) ResolveRef(_ context.Context, owner, repo, ref string) (string, error) {
+func (g *DocsGitHub) HeadSHA(_ context.Context, owner, repo string) (string, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	r, err := g.call("ResolveRef", owner, repo)
+	r, err := g.call("HeadSHA", owner, repo)
 	if err != nil {
 		return "", err
-	}
-	if ref != "HEAD" && ref != r.branch && ref != r.head {
-		return "", github.ErrNotFound
 	}
 	return r.head, nil
 }
@@ -107,7 +129,7 @@ func (g *DocsGitHub) Tree(_ context.Context, owner, repo, treeish string, recurs
 	}
 	prefix := ""
 	if treeish != r.head {
-		dir, ok := strings.CutPrefix(treeish, "tree:"+r.head+":")
+		dir, ok := r.trees[treeish]
 		if !ok {
 			return nil, github.ErrNotFound
 		}
@@ -128,7 +150,7 @@ func (g *DocsGitHub) Tree(_ context.Context, owner, repo, treeish string, recurs
 		if dir, _, nested := strings.Cut(rel, "/"); nested && !recursive {
 			if !dirs[dir] {
 				dirs[dir] = true
-				t.Entries = append(t.Entries, github.TreeEntry{Path: dir, Type: "tree", SHA: "tree:" + r.head + ":" + prefix + dir})
+				t.Entries = append(t.Entries, github.TreeEntry{Path: dir, Type: "tree", SHA: r.treeSHA(prefix + dir)})
 			}
 			continue
 		}
@@ -138,7 +160,7 @@ func (g *DocsGitHub) Tree(_ context.Context, owner, repo, treeish string, recurs
 				d := strings.Join(parts[:i], "/")
 				if !dirs[d] {
 					dirs[d] = true
-					t.Entries = append(t.Entries, github.TreeEntry{Path: d, Type: "tree", SHA: "tree:" + r.head + ":" + prefix + d})
+					t.Entries = append(t.Entries, github.TreeEntry{Path: d, Type: "tree", SHA: r.treeSHA(prefix + d)})
 				}
 			}
 		}

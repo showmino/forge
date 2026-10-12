@@ -29,15 +29,18 @@ const (
 	MaxAssetBytes = 5 << 20
 	// MaxPages is the most pages one service may have.
 	MaxPages = 500
+	// MaxSetBytes is the most all pages of one service may weigh together.
+	MaxSetBytes = 32 << 20
 )
 
+// assetTypes are the images a page may show. SVG is left out on purpose: it
+// can carry script, and the dashboard shows these images to every reader.
 var assetTypes = map[string]string{
 	".png":  "image/png",
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
 	".gif":  "image/gif",
 	".webp": "image/webp",
-	".svg":  "image/svg+xml",
 }
 
 // CleanPath checks a path relative to docs/ ("runbook.md", "api/errors.md")
@@ -129,24 +132,20 @@ func Order(pages []string, list []Entry, titleOf func(path string) string) []Pag
 
 // Title is a page's first "# " heading, or its file name without ".md".
 func Title(markdown []byte, p string) string {
-	inFence := ""
+	var fence fenceState
 	sc := bufio.NewScanner(bytes.NewReader(markdown))
 	sc.Buffer(make([]byte, 64*1024), MaxPageBytes)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if fence := fenceOf(line); fence != "" {
-			if inFence == "" {
-				inFence = fence
-			} else if strings.HasPrefix(line, inFence) {
-				inFence = ""
-			}
+		raw := sc.Text()
+		if fence.skip(raw) {
 			continue
 		}
-		if inFence != "" {
+		// Four spaces or a tab make a code block, not a heading.
+		if strings.HasPrefix(raw, "    ") || strings.HasPrefix(raw, "\t") {
 			continue
 		}
-		if t, ok := strings.CutPrefix(line, "# "); ok {
-			if t = strings.TrimSpace(strings.TrimRight(t, "#")); t != "" {
+		if t, ok := strings.CutPrefix(strings.TrimLeft(raw, " "), "# "); ok {
+			if t = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(t), "#")); t != "" {
 				return t
 			}
 		}
@@ -154,13 +153,27 @@ func Title(markdown []byte, p string) string {
 	return strings.TrimSuffix(path.Base(p), path.Ext(p))
 }
 
-func fenceOf(line string) string {
-	for _, f := range []string{"```", "~~~"} {
-		if strings.HasPrefix(line, f) {
-			return f
+// fenceState follows fenced code blocks line by line.
+type fenceState struct{ open string }
+
+// skip reports whether a line is a fence or inside a fenced block. A block
+// ends at a line of the same fence and nothing else: "```go" opens one but
+// never closes one.
+func (f *fenceState) skip(raw string) bool {
+	line := strings.TrimSpace(raw)
+	if f.open != "" {
+		if strings.HasPrefix(line, f.open) && strings.Trim(line, f.open[:1]) == "" {
+			f.open = ""
+		}
+		return true
+	}
+	for _, mark := range []string{"```", "~~~"} {
+		if strings.HasPrefix(line, mark) {
+			f.open = line[:len(line)-len(strings.TrimLeft(line, mark[:1]))]
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 // Link is a link or image target found on a line of a page.
@@ -180,21 +193,12 @@ var (
 // outside code.
 func Links(markdown []byte) []Link {
 	var out []Link
-	inFence := ""
+	var fence fenceState
 	sc := bufio.NewScanner(bytes.NewReader(markdown))
 	sc.Buffer(make([]byte, 64*1024), MaxPageBytes)
 	for n := 1; sc.Scan(); n++ {
 		raw := sc.Text()
-		line := strings.TrimSpace(raw)
-		if fence := fenceOf(line); fence != "" {
-			if inFence == "" {
-				inFence = fence
-			} else if strings.HasPrefix(line, inFence) {
-				inFence = ""
-			}
-			continue
-		}
-		if inFence != "" {
+		if fence.skip(raw) {
 			continue
 		}
 		if m := refDef.FindStringSubmatch(raw); m != nil {
@@ -264,6 +268,10 @@ func Lint(fsys fs.FS, list []Entry) []Finding {
 		if d.IsDir() {
 			return nil
 		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			bad(p, 0, "is a symbolic link: GitHub serves the link's own text, not the file it points at")
+			return nil
+		}
 		info, err := d.Info()
 		if err != nil {
 			return err
@@ -283,6 +291,7 @@ func Lint(fsys fs.FS, list []Entry) []Finding {
 		bad(Dir+"/"+Start, 0, "the start page is missing: a repo without it has no docs")
 	}
 	var pages []string
+	total := int64(0)
 	for p, info := range files {
 		if !IsPage(p) {
 			continue
@@ -293,11 +302,16 @@ func Lint(fsys fs.FS, list []Entry) []Finding {
 		}
 		if info.Size() > MaxPageBytes {
 			bad(Dir+"/"+p, 0, "the page is %d bytes; pages are read up to %d", info.Size(), MaxPageBytes)
+		} else {
+			total += info.Size()
 		}
 	}
 	sort.Strings(pages)
 	if len(pages) > MaxPages {
 		bad(Dir, 0, "%d pages; at most %d are read", len(pages), MaxPages)
+	}
+	if total > MaxSetBytes {
+		bad(Dir, 0, "the pages are %d bytes together; at most %d are read", total, MaxSetBytes)
 	}
 	for _, e := range list {
 		if _, err := CleanPath(e.Path); err != nil {
@@ -329,7 +343,7 @@ func Lint(fsys fs.FS, list []Entry) []Finding {
 				bad(Dir+"/"+p, l.Line, "%q: %s/%s does not exist", l.Target, Dir, to)
 			case l.Image:
 				if _, ok := AssetType(to); !ok {
-					bad(Dir+"/"+p, l.Line, "%q: images are png, jpeg, gif, webp or svg", l.Target)
+					bad(Dir+"/"+p, l.Line, "%q: images are png, jpeg, gif or webp", l.Target)
 				} else if info.Size() > MaxAssetBytes {
 					bad(Dir+"/"+p, l.Line, "%q is %d bytes; images are read up to %d", l.Target, info.Size(), MaxAssetBytes)
 				}

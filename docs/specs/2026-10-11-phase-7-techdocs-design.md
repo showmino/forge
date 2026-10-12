@@ -2,7 +2,13 @@
 
 Date: 2026-10-11. Status: approved by the owner on 2026-10-12; milestone 1 built.
 
-As built in milestone 1, beyond the design: the pages of one service are kept in memory up to 32 MiB together (more is refused with a message), images up to 64 MiB across services; with a `docs:` list the side menu holds the listed pages only, with the start page always in it; `forge docs get --pages` lists the pages; the head of the default branch is read as `commits/HEAD`.
+As built in milestone 1, beyond the design (some after an independent review):
+
+- SVG images are not served: an SVG can carry script, and every reader sees these images. Images are png, jpeg, gif or webp.
+- Memory: the pages of one service are read up to 32 MiB together (more is refused with a message, and `forge docs lint` says so too); all services' pages are kept up to 256 MiB, the docs read least recently dropped first; images up to 64 MiB; a forge.yaml over 64 KiB is not read for its `docs:` list. Docs of a service that left the catalog are dropped.
+- GitHub: the head is read as `commits/HEAD` asking for the SHA alone. A push that changes neither `docs/` nor forge.yaml reads one tree and no file, and a changed page is the only file read again. A read that fails is answered from the cache until the next check (10 seconds when GitHub did not answer, a minute when the repo's content is refused), so a broken repo does not make every request call GitHub. At most 8 files are read from GitHub at once, across services.
+- With a `docs:` list the side menu holds the listed pages only, with the start page always in it. `forge docs get --pages` lists the pages; `forge docs get` strips terminal control characters from a page.
+- Who may read, made explicit: anyone with `services.read`, which is every member of the organization, reads the docs of every service through the App, including repos their own GitHub account cannot see.
 
 ## Goal
 
@@ -49,7 +55,7 @@ A new `DocsService`, read-only, all behind `services.read`:
 
 How forge-api reads: with the GitHub App it already has (contents: read). Per repo it asks GitHub for the default branch's head commit at most once a minute; the list of files and every page read are kept in memory until that commit changes. `ListDocSets` uses the same cache, refreshed in the background, so the Docs page does not wait on GitHub for every service.
 
-Limits, because a repo's content is not trusted: only paths under `docs/`, no `..`; pages are `.md`, at most 1 MiB; assets are png, jpeg, gif, webp or svg, at most 5 MiB; at most 500 pages per service.
+Limits, because a repo's content is not trusted: only paths under `docs/`, no `..`; pages are `.md`, at most 1 MiB; assets are png, jpeg, gif or webp (no SVG, see above), at most 5 MiB; at most 500 pages per service.
 
 ## CLI
 

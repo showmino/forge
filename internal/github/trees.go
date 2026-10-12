@@ -3,7 +3,9 @@ package github
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +28,30 @@ type Tree struct {
 	Entries []TreeEntry `json:"tree"`
 	// Truncated is true when GitHub left entries out (more than 100,000, or 7 MB).
 	Truncated bool `json:"truncated"`
+}
+
+// HeadSHA returns the commit at the head of owner/repo's default branch,
+// asking GitHub for the SHA alone. An empty or unknown repo is ErrNotFound.
+func (c *Client) HeadSHA(ctx context.Context, owner, repo string) (string, error) {
+	resp, err := c.doAccept(ctx, http.MethodGet, repoPath(owner, repo)+"/commits/HEAD", nil, "application/vnd.github.sha")
+	var se *StatusError
+	if errors.As(err, &se) && (se.Status == http.StatusConflict || se.Status == http.StatusUnprocessableEntity) {
+		// 409: the repo is empty; 422: no commit for HEAD.
+		return "", fmt.Errorf("%w: %w", ErrNotFound, err)
+	}
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 128))
+	if err != nil {
+		return "", err
+	}
+	sha := strings.TrimSpace(string(data))
+	if len(sha) != 40 && len(sha) != 64 {
+		return "", fmt.Errorf("GitHub returned %q as the head of %s/%s", sha, owner, repo)
+	}
+	return sha, nil
 }
 
 // Tree returns the tree treeish (a tree or commit SHA) names, and with

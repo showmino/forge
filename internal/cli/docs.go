@@ -131,7 +131,7 @@ instead. -o json prints the page with its title, commit and edit link.`,
 			}
 			p := resp.Msg.GetPage()
 			if format == output.Table {
-				md := p.GetMarkdown()
+				md := printable(p.GetMarkdown())
 				if !strings.HasSuffix(md, "\n") {
 					md += "\n"
 				}
@@ -198,6 +198,17 @@ Exits 0 when there are no problems and 1 when there are.`,
 			return nil
 		},
 	}
+}
+
+// printable drops control characters but newlines and tabs: a page comes from
+// a repo, and escape sequences in it would act on the reader's terminal.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || (r >= 0x20 && r != 0x7f && (r < 0x80 || r > 0x9f)) {
+			return r
+		}
+		return -1
+	}, s)
 }
 
 func printDocFindings(f *Factory, format output.Format, findings []docs.Finding) error {

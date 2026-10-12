@@ -61,6 +61,11 @@ func (e *StatusError) Is(target error) bool {
 // do sends a request with in as its JSON body (none when nil) and returns
 // the response if it answered 2xx; the caller closes its body.
 func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Response, error) {
+	return c.doAccept(ctx, method, path, in, "application/vnd.github+json")
+}
+
+// doAccept is do with the media type the answer should have.
+func (c *Client) doAccept(ctx context.Context, method, path string, in any, accept string) (*http.Response, error) {
 	base := c.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
@@ -77,7 +82,7 @@ func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Res
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Accept", accept)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")

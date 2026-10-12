@@ -13,6 +13,16 @@ import (
 func TestTreeBlobLastChange(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/showmino/payments/commits/HEAD", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "application/vnd.github.sha" {
+			http.Error(w, "want the sha media type", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte("1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"))
+	})
+	mux.HandleFunc("GET /repos/showmino/empty/commits/HEAD", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"Git Repository is empty."}`, http.StatusConflict)
+	})
 	mux.HandleFunc("GET /repos/showmino/payments/git/trees/{sha}", func(w http.ResponseWriter, r *http.Request) {
 		if r.PathValue("sha") != "c1" {
 			http.NotFound(w, r)
@@ -44,6 +54,15 @@ func TestTreeBlobLastChange(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := &Client{BaseURL: srv.URL}
 	ctx := context.Background()
+
+	if head, err := c.HeadSHA(ctx, "showmino", "payments"); err != nil || head != "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d" {
+		t.Errorf("HeadSHA = %q, %v", head, err)
+	}
+	for _, repo := range []string{"empty", "nope"} {
+		if _, err := c.HeadSHA(ctx, "showmino", repo); !errors.Is(err, ErrNotFound) {
+			t.Errorf("HeadSHA(%s): %v, want ErrNotFound", repo, err)
+		}
+	}
 
 	tr, err := c.Tree(ctx, "showmino", "payments", "c1", false)
 	if err != nil || len(tr.Entries) != 1 || tr.Entries[0] != (TreeEntry{Path: "docs", Type: "tree", SHA: "t2"}) || tr.Truncated {
