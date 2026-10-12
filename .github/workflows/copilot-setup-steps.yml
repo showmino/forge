@@ -9,8 +9,6 @@ name: Copilot setup steps
 # It also runs when this file changes, so a broken setup is seen in review.
 on:
   workflow_dispatch:
-  push:
-    paths: [.github/workflows/copilot-setup-steps.yml]
   pull_request:
     paths: [.github/workflows/copilot-setup-steps.yml]
 

@@ -1,8 +1,10 @@
 name: ci
 
+# The checks run once, on the pull request. They do not run again on `main`
+# after the merge: `main` only changes through pull requests, and a branch is
+# merged only when it contains the current `main` and its checks passed
+# (AGENTS.md, "Merging"), so the merge commit is the tree that was tested.
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -63,7 +65,6 @@ jobs:
           version: 1.47.2
       - run: buf lint
       - name: buf breaking
-        if: github.event_name == 'pull_request'
         # Compare with the base branch from this checkout's own history
         # (fetch-depth: 0): cloning the private repo over HTTPS fails.
         run: buf breaking --against ".git#ref=refs/remotes/origin/${{ github.base_ref }}"
