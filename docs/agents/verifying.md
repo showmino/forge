@@ -241,7 +241,7 @@ FORGE_DEPLOY_CHART_REVISION=e7f0b8ec2d2282814116bedc6e06c64e11009bca \
 FORGE_WEB_ORIGINS=https://forge.showmino.com,https://forge-staging.showmino.com \
 FORGE_PUBLIC_DOMAINS=showmino.com=showmino-com,deogratias.cloud=deogratias-cloud \
 FORGE_LOGIN_URL=https://forge-login.showmino.com \
-FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.4.0 sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221
+FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.5.0 sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221
 ```
 
 Forge's own public names (live since 2026-10-11, forge-api `v0.4.0`):
@@ -278,7 +278,7 @@ application/dns-json`): a resolver that was asked before the record existed, as 
 does, may say NXDOMAIN for a while. A first production deploy showed one `ErrImagePull` before the pull secret
 was in the new namespace, and recovered by itself.
 
-Live on k3s since 2026-10-11: forge-api `v0.4.0` (`run.host`; before it `v0.3.0`, public addresses, and `v0.2.0`, which keeps sessions). Earlier: forge-api `v0.2.0` (`ghcr.io/showmino/forge-api:v0.2.0`; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs, then `v0.1.0`, the first image built by the release workflow, which cuts versions; `v0.2.0` keeps sessions and applied migration 0004, the `sessions` table) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). Every render must carry the settings of the block above: one that leaves a setting out removes what it configured
+Live on k3s since 2026-10-12: forge-api `v0.5.0` (TechDocs milestone 1, `DocsService`; the render above, changed only in its image; checked: no drift before, the diff was the image line alone, `forge version` says server 0.5.0, `forge docs list` answers, `forge docs get forge-web` says "its repo has no docs/index.md" (so the head, root tree and docs/ tree are read from real GitHub; the blob, default branch and last-change calls are not yet exercised: no service has docs), `forge team list`, `forge deploy status forge-web` and `/healthz` as before). Before it, since 2026-10-11: forge-api `v0.4.0` (`run.host`; before it `v0.3.0`, public addresses, and `v0.2.0`, which keeps sessions). Earlier: forge-api `v0.2.0` (`ghcr.io/showmino/forge-api:v0.2.0`; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs, then `v0.1.0`, the first image built by the release workflow, which cuts versions; `v0.2.0` keeps sessions and applied migration 0004, the `sessions` table) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). Every render must carry the settings of the block above: one that leaves a setting out removes what it configured
 (without `FORGE_WEB_ORIGINS`, the dashboard's login client and its CORS access). Restart Dex after a change to its config
 (`kubectl -n forge rollout restart deploy/dex`): it reads the config only at start.
 
