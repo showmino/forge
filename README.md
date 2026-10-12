@@ -99,6 +99,11 @@ CLI keeps the ID and refresh tokens, as before.
 
 ## On k3s
 
+> This section is for a throwaway single-node k3s of your own. **The
+> `showmino` cluster is production and is not set up this way:** its images
+> come from `ghcr.io`, and every change to it follows the rollout procedure in
+> [`docs/agents/verifying.md`](docs/agents/verifying.md) with the owner's OK.
+
 On a single-node k3s with the bundled Traefik ingress, import a local image:
 
 ```sh

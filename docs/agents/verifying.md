@@ -1,7 +1,11 @@
 # Verifying Forge end to end
 
-Run from the repo root. `$GO` means `PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH`
-(Go is not on the system PATH on the dev machine).
+Run from the repo root. `$GO` means `PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH`:
+on the owner's machine (`srv-ovo`) Go is not on the system PATH. On a CI
+runner or any machine with Go on its PATH, leave `$GO` out.
+
+Sections 2 to 4 need the owner's machine: the cluster and the LAN are not
+reachable from a cloud runner. Section 1 works anywhere.
 
 ## 1. Build, test, lint (CI parity)
 
@@ -37,18 +41,27 @@ and read every `FAIL` block. When behaviour changes on purpose, change the case'
 Refresh: set `expiry` in `~/.config/forge/credentials.json` to a past time, run
 `forge auth token`; the token must change and the file stay mode 0600.
 
-## 3. The demo cluster (k3s at 10.150.0.10-15)
+## 3. The cluster (k3s at 10.150.0.10-15)
 
-The cluster is shared with real workloads (argocd, backstage, finance...). Touch
-only the `forge` namespace. Facts that shape the deploy:
+**This cluster is production**, and it is shared with other real workloads
+(argocd, backstage, finance...). Touch only what Forge owns. To change what
+runs, follow "Rolling out to the cluster" below, never the set-up commands in
+this section.
+
+Facts that shape the deploy:
 
 | Fact | Consequence |
 | --- | --- |
-| No Traefik, no IngressClass; apps use Istio `main-gateway` on `*.showmino.com` (public via Cloudflare) | Use `render.sh --lb`, not the Ingress mode or Istio, so Dex's demo password stays on the LAN |
+| No Traefik, no IngressClass; other apps use Istio `main-gateway` on `*.showmino.com` (public via Cloudflare) | Forge is rendered with `render.sh --lb`: Dex and the API have their own LoadBalancer addresses, and the Cloudflare tunnel reaches them by name (see "Forge's own public names") |
 | MetalLB v0.14.5, pool 10.150.1.200-250 | Forge uses **10.150.1.220** (Dex) and **10.150.1.221** (API); annotation is `metallb.universe.tf/loadBalancerIPs` (`metallb.io/` needs 0.15+) |
 | Dev machine `srv-ovo` is not a node, no SSH to nodes | No `k3s ctr images import`; push to `ghcr.io/showmino/forge-api:<short-sha>` (private package, docker is logged in to ghcr) |
 | Images pull with the `mino-ghcr` dockerconfigjson secret (in `docs` ns) | Copy it into `forge` and attach it to the default ServiceAccount |
 | Istio 1.30 with Gateway API v1.6.1 (GatewayClass `istio`), no `discoverySelectors`, no PeerAuthentication | Previews use their own Gateway `forge/forge-previews` on **10.150.1.222** (`*.preview.10.150.1.222.nip.io`), LAN only |
+
+**First set-up, kept as history and for rebuilding from nothing. It is not a
+rollout:** it applies without a diff and builds an image by hand. Images now
+come from the release workflow (`vX.Y.Z`), and every change goes through
+"Rolling out to the cluster". Do not run this block against the live cluster.
 
 ```sh
 IMG=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD)
@@ -73,7 +86,9 @@ bin/forge doctor
 forge-api logs `forge-api listening ... issuer=http://dex.10.150.1.220.nip.io/dex`
 only after OIDC discovery from inside the pod succeeded. With the App, `bin/forge
 template list` must show `go-grpc`, and `bash docs/agents/scripts/cli-smoke.sh
-bin/forge k3s` must report `0 failed`. Every rollout empties the in-memory catalog.
+bin/forge k3s` must report `0 failed`. (Until the groundwork a rollout emptied
+the catalog; it is kept in PostgreSQL, `forge-db`, now. Operations are still in
+memory and are gone after a restart of forge-api.)
 
 Previews (rendered with `FORGE_PREVIEW_IP`):
 
@@ -101,7 +116,9 @@ The Phase 3 exit gate (2026-10-09, 4m37s): `time (bin/forge create gate-<x> --te
 | An env is READY but its URL answers 404 | The HTTPRoute was not accepted: check `kubectl -n preview-<x> describe httproute` and the Gateway's `allowedRoutes` |
 | Every command warns "older than ... 0.1.0" | Go pseudo-version not treated as dev (fixed in `internal/version`) |
 
-Tear down, previews first (the reaper dies with forge-api, and the ClusterRole is
+**Tearing Forge down removes the platform from the cluster, with its database.
+It is the owner's decision alone; never run it to "clean up".** For the
+record: previews first (the reaper dies with forge-api, and the ClusterRole is
 cluster-scoped, so deleting namespace `forge` leaves both behind). With deploys on,
 do the Deploys teardown (below) first, otherwise services lose their routes:
 
@@ -179,11 +196,18 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   #
 The cluster is production, and every change to it needs the owner's OK
 (`AGENTS.md`). The procedure, each time:
 
+0. **The image must exist.** A change to forge-api is merged first, then
+   released: push a `vX.Y.Z` tag on `main` (tagging a merged change needs no
+   extra OK) and wait for the `release` workflow to finish. It publishes
+   `ghcr.io/showmino/forge-api:vX.Y.Z`.
 1. **Render what is live** with the command below and the image that runs now
    (`kubectl -n forge get deploy forge-api -o jsonpath='{.spec.template.spec.containers[0].image}'`),
-   into a scratch folder. `kubectl diff -f` on it must show nothing. If it
-   shows something, the cluster has drifted or the command below is stale:
-   stop and find out which before changing anything.
+   into a file in a temporary folder outside the repo (`mktemp -d`).
+   `kubectl diff -f` on it must show nothing. If it shows something, the
+   cluster has drifted or the command below is stale (the cluster is the
+   truth: for example the chart revision is what the ApplicationSet
+   `forge-services` in `argocd` says). Stop and find out which before changing
+   anything, and correct this file.
 2. **Render the new manifests** (the new image, or the new setting) and read
    `kubectl diff -f` on them. It should show what you mean to change and
    nothing else.
@@ -196,8 +220,17 @@ The cluster is production, and every change to it needs the owner's OK
 6. **Update this file** in a pull request: the image, the command below, and
    what was checked.
 
-Images are built by the release workflow: push a `vX.Y.Z` tag on `main` and
-roll out `ghcr.io/showmino/forge-api:vX.Y.Z`.
+### Secrets Forge uses (names and keys only)
+
+| Secret (namespace `forge`) | Keys | From |
+| --- | --- | --- |
+| `forge-github-app` | `github_app_private_key` | 1Password, item `vaults/Kube/items/forge-github-app` (`OnePasswordItem`) |
+| `dex-github` | `client_id`, `client_secret` | 1Password, item `vaults/Kube/items/forge-dex-github`: the GitHub OAuth app Dex signs in with |
+| `forge-db-app` | `uri`, `password` (and more) | written by CloudNativePG for the database `forge-db` |
+| `mino-ghcr` | a dockerconfigjson | copied from the `docs` namespace: pulls from `ghcr.io` |
+
+To check one, list its key names and nothing else:
+`kubectl -n forge get secret <name> -o jsonpath='{.data}' | python3 -I -c 'import json,sys; print(sorted(json.load(sys.stdin)))'`.
 
 The render that is live (2026-10-11), to start every later rollout from; only `FORGE_API_IMAGE`, and the chart revision when the chart changes, move:
 
@@ -245,10 +278,8 @@ application/dns-json`): a resolver that was asked before the record existed, as 
 does, may say NXDOMAIN for a while. A first production deploy showed one `ErrImagePull` before the pull secret
 was in the new namespace, and recovered by itself.
 
-Live on k3s since 2026-10-11: forge-api `v0.4.0` (`run.host`; before it `v0.3.0`, public addresses, and `v0.2.0`, which keeps sessions). Earlier: forge-api `v0.2.0` (`ghcr.io/showmino/forge-api:v0.2.0`; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs, then `v0.1.0`, the first image built by the release workflow, which cuts versions; `v0.2.0` keeps sessions and applied migration 0004, the `sessions` table) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). From now on every
-render must also carry `FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io`
-(next to `FORGE_DEPLOYS=1`, the chart revision, the App and both 1Password items); a render without it removes
-the dashboard's login client and its CORS access. Restart Dex after a change to its config
+Live on k3s since 2026-10-11: forge-api `v0.4.0` (`run.host`; before it `v0.3.0`, public addresses, and `v0.2.0`, which keeps sessions). Earlier: forge-api `v0.2.0` (`ghcr.io/showmino/forge-api:v0.2.0`; before it `a846a98`, then `57a118e` with `TeamService`, then `3f2c8d3`, which makes `DeleteService` take down what a service runs, then `v0.1.0`, the first image built by the release workflow, which cuts versions; `v0.2.0` keeps sessions and applied migration 0004, the `sessions` table) and Dex with the client `forge-web`. Check teams with `bin/forge team list` (mino, platform-engineering, test-team on 2026-10-11). Every render must carry the settings of the block above: one that leaves a setting out removes what it configured
+(without `FORGE_WEB_ORIGINS`, the dashboard's login client and its CORS access). Restart Dex after a change to its config
 (`kubectl -n forge rollout restart deploy/dex`): it reads the config only at start.
 
 Check the login path without a browser, against local Dex and `make api` (or a throwaway Dex on another port):
@@ -262,8 +293,8 @@ the preflight and a call with the dashboard's token: 14 lines, all `ok`. On k3s 
 there only the first part can be checked by script (GetServerInfo, the preflight and Dex's discovery with an
 `Origin` header); the rest needs a person in a browser.
 
-The dashboard's repo is `showmino/forge-web` (checkout `/home/mino/code/forge-web`); after an API change run
-`sh scripts/sync-proto.sh ../forge` there.
+The dashboard's repo is `showmino/forge-web` (on the owner's machine it is checked out next to this one, `../forge-web`).
+After an API change, run `sh scripts/sync-proto.sh ../forge` in that repo: the script lives there.
 
 Releasing Forge itself: push a `vX.Y.Z` tag on `main` of `showmino/forge`. `release.yml` (goreleaser) publishes the
 GitHub release with the CLI for Linux, macOS and Windows (checksums signed with cosign, SBOMs) and

@@ -71,10 +71,13 @@ a yes to the next one.
 
 ### Merging
 
-- Merge only when **every check of the commit is `success`** (a job that is
-  skipped by design on a pull request does not count against it). Read the
+- Merge only when **every check of the commit is `success`**. Read the
   result; do not chain a merge behind a wait and assume it passed. A merge
-  with a red test happened once here.
+  with a red test happened once here. A flaky test is fixed, not merged past.
+- In this repo no job is skipped on a pull request: all five (`test`, `lint`,
+  `proto`, `goreleaser-check`, `runner-image`) must pass. In `forge-web` the
+  jobs `image` and `deploy` only run on `main` and show as skipped on a pull
+  request; that is expected, and `test` must pass. Any other skip is a stop.
 - Never force-push `main`. Never rewrite published history.
 - A change that is risky (auth, what becomes reachable from the internet,
   anything on the path to production) gets **one independent review** before
@@ -153,8 +156,9 @@ Run `make test lint` before every commit. Write the test first.
 Adding an RPC: edit the proto, `make generate`, the handler in
 `internal/server` (register it in `server.New`), the client in `pkg/client`,
 the CLI noun, harness tests; classify it in `auditActions` or `auditReads`.
-The dashboard has a copy of the protos: `sh scripts/sync-proto.sh ../forge` in
-`forge-web`.
+The dashboard has a copy of the protos: after the change is merged here, run
+`sh scripts/sync-proto.sh ../forge` in a checkout of `showmino/forge-web`
+(the script is in that repo, not this one) and open a pull request there.
 
 ### Mistakes that have been made here
 
