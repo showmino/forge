@@ -78,6 +78,14 @@ a yes to the next one.
   `proto`, `goreleaser-check`, `runner-image`) must pass. In `forge-web` the
   jobs `image` and `deploy` only run on `main` and show as skipped on a pull
   request; that is expected, and `test` must pass. Any other skip is a stop.
+- **The checks run once, on the pull request, and not again after the merge**
+  (the owner's rule: a second run of the same checks only costs time). That
+  makes two things matter. `main` changes only through pull requests. And
+  before you merge, the branch must contain the current `main`: if `main` has
+  moved since the checks ran, merge `main` into the branch and wait for the
+  checks again, otherwise the combination was never tested. Check it with
+  `gh api repos/showmino/<repo>/compare/main...<branch> --jq .behind_by`
+  (must be 0).
 - Never force-push `main`. Never rewrite published history.
 - A change that is risky (auth, what becomes reachable from the internet,
   anything on the path to production) gets **one independent review** before
