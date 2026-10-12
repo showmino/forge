@@ -21,7 +21,7 @@ make dex                                   # Dex on :5556 (docker compose)
 bin/forge-api --oidc-issuer http://localhost:5556/dex   # in the background
 unset FORGE_TOKEN
 bin/forge context set local --api http://localhost:8080 --use
-python3 -I .claude/skills/forge/scripts/approve-device-login.py bin/forge
+python3 -I docs/agents/scripts/approve-device-login.py bin/forge
 ```
 
 Then check: `forge auth status` (permissions `services.read, services.write`),
@@ -31,7 +31,7 @@ exits 4 with `hint: run 'forge auth login'`.
 
 Whole CLI against a live API (every noun and verb, output formats, exit codes,
 forge.yaml defaults, logout/login): run
-`bash .claude/skills/forge/scripts/cli-smoke.sh bin/forge <context> > smoke.log; tail -1 smoke.log`
+`bash docs/agents/scripts/cli-smoke.sh bin/forge <context> > smoke.log; tail -1 smoke.log`
 and read every `FAIL` block. When behaviour changes on purpose, change the case's expected exit.
 
 Refresh: set `expiry` in `~/.config/forge/credentials.json` to a past time, run
@@ -66,13 +66,13 @@ kubectl -n forge patch serviceaccount default -p '{"imagePullSecrets":[{"name":"
 kubectl -n forge rollout restart deploy/forge-api && kubectl -n forge rollout status deploy/forge-api
 kubectl -n forge get svc        # EXTERNAL-IP must be .220 / .221
 bin/forge context set k3s --api http://forge.10.150.1.221.nip.io --use
-python3 -I .claude/skills/forge/scripts/approve-device-login.py bin/forge
+python3 -I docs/agents/scripts/approve-device-login.py bin/forge
 bin/forge doctor
 ```
 
 forge-api logs `forge-api listening ... issuer=http://dex.10.150.1.220.nip.io/dex`
 only after OIDC discovery from inside the pod succeeded. With the App, `bin/forge
-template list` must show `go-grpc`, and `bash .claude/skills/forge/scripts/cli-smoke.sh
+template list` must show `go-grpc`, and `bash docs/agents/scripts/cli-smoke.sh
 bin/forge k3s` must report `0 failed`. Every rollout empties the in-memory catalog.
 
 Previews (rendered with `FORGE_PREVIEW_IP`):
@@ -110,6 +110,29 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/environment
 kubectl delete ns forge
 kubectl delete clusterrole,clusterrolebinding forge-api-previews
 ```
+
+## The GitHub App
+
+forge-api acts on GitHub as the App `mino-forge` (App ID 5239131, owned by
+`showmino`, installed on the organization with access to all repositories,
+installation ID 169296924). It creates service repos, reads refs, files, CI
+runs and tags, writes tags and releases, commits to `showmino/forge-deploys`,
+and lists teams and memberships.
+
+- **Permissions** (2026-10-11): repository Administration, Contents and
+  Workflows read and write, Metadata read; organization Members read.
+- **A new permission takes two steps, both by the owner:** set it on the App
+  (organization Settings, Developer settings, GitHub Apps, mino-forge,
+  Permissions & events), then accept the request on the installation.
+- **The private key** is `mino-forge.<date>.private-key.pem` in the repo root
+  on the owner's machine (ignored by git and by Docker) and a Kubernetes
+  Secret in the `forge` namespace, synced from 1Password. Never print it.
+- **To see what the App may do** without printing a token: a throwaway
+  `cmd/zzprobe/main.go` in this module that builds `github.App` from the
+  local key and calls `internal/github`, run with `go run`, then deleted.
+  Read-only calls only.
+- **The login is a different thing:** Dex signs people in through a GitHub
+  *OAuth* app, whose callback URL must be `<login address>/dex/callback`.
 
 ## Deploys (Phase 4)
 
@@ -150,6 +173,31 @@ kubectl delete ns -l app.kubernetes.io/managed-by=forge,forge.dev/deploy-env   #
 ```
 
 ## The web dashboard (Phase 6)
+
+### Rolling out to the cluster
+
+The cluster is production, and every change to it needs the owner's OK
+(`AGENTS.md`). The procedure, each time:
+
+1. **Render what is live** with the command below and the image that runs now
+   (`kubectl -n forge get deploy forge-api -o jsonpath='{.spec.template.spec.containers[0].image}'`),
+   into a scratch folder. `kubectl diff -f` on it must show nothing. If it
+   shows something, the cluster has drifted or the command below is stale:
+   stop and find out which before changing anything.
+2. **Render the new manifests** (the new image, or the new setting) and read
+   `kubectl diff -f` on them. It should show what you mean to change and
+   nothing else.
+3. **Show the owner the diff and wait for the OK.**
+4. `kubectl apply --dry-run=server -f`, then `kubectl apply -f`. Dex reads its
+   config at start: `kubectl -n forge rollout restart deploy/dex` after a
+   change to it. Wait for `rollout status`.
+5. **Verify** with the checks in this file for what changed, and keep the
+   render from step 1 as the rollback file (`kubectl apply -f` it to go back).
+6. **Update this file** in a pull request: the image, the command below, and
+   what was checked.
+
+Images are built by the release workflow: push a `vX.Y.Z` tag on `main` and
+roll out `ghcr.io/showmino/forge-api:vX.Y.Z`.
 
 The render that is live (2026-10-11), to start every later rollout from; only `FORGE_API_IMAGE`, and the chart revision when the chart changes, move:
 
@@ -206,7 +254,7 @@ the dashboard's login client and its CORS access. Restart Dex after a change to 
 Check the login path without a browser, against local Dex and `make api` (or a throwaway Dex on another port):
 
 ```sh
-python3 -I .claude/skills/forge/scripts/web-login-check.py                 # http://localhost:8080, origin http://localhost:3000
+python3 -I docs/agents/scripts/web-login-check.py                 # http://localhost:8080, origin http://localhost:3000
 ```
 
 It walks discovery, the PKCE code flow with the static password, the token exchange without a client secret,
