@@ -237,6 +237,7 @@ func run() error {
 		CLIDir:           *cliDir,
 		Templates:        templates,
 		Teams:            teamSource(app),
+		Docs:             docsSource(app),
 		Sessions:         sessions,
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,

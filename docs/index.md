@@ -34,7 +34,7 @@ Three users shape the design: an application developer who wants a service runni
 
 ## Command surface
 
-The v1 CLI has eleven command groups; each maps one-to-one to an API resource so the dashboard can reuse the same endpoints. The Phase column ties each group to the delivery plan below.
+The v1 CLI has twelve command groups; each maps one-to-one to an API resource so the dashboard can reuse the same endpoints. The Phase column ties each group to the delivery plan below.
 
 | Group | Verbs | Example | Phase |
 | --- | --- | --- | --- |
@@ -242,7 +242,7 @@ forge/
 
 ## Phased delivery plan
 
-Build in seven phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy (`docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`): the API, policy rules, CLI and the runner that makes real databases are built, and proven end to end on a throwaway cluster; the rollout to k3s is deferred (resources stay switched off there) until a service first needs a database. Phase 6, the web dashboard, is done (`docs/specs/2026-10-11-phase-6-web-dashboard-design.md`): it lives in `showmino/forge-web`, runs in production, and its exit gate passed on k3s on 2026-10-11, when the owner created a service, deployed and promoted one and made a preview from the browser, and a second account with read access saw the same data. Since then every deployed commit also gets a version (a release candidate on staging, a final version on production, each a tag and a GitHub release), and deleting a service takes down what it runs. Phase 7, TechDocs, is designed and not started (`docs/specs/2026-10-11-phase-7-techdocs-design.md`). Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
+Build in seven phases, sequenced rather than dated, and move on only when a phase's exit gate passes for a real user. Phases 1 to 4 are done. Phase 5 is in progress: milestone 1, the audit log, is done (its exit gate passed on k3s on 2026-10-10; `docs/specs/2026-10-10-phase-5-m1-audit-design.md`); milestone 2 brings resources and policy (`docs/specs/2026-10-10-phase-5-m2-resources-policy-design.md`): the API, policy rules, CLI and the runner that makes real databases are built, and proven end to end on a throwaway cluster; the rollout to k3s is deferred (resources stay switched off there) until a service first needs a database. Phase 6, the web dashboard, is done (`docs/specs/2026-10-11-phase-6-web-dashboard-design.md`): it lives in `showmino/forge-web`, runs in production, and its exit gate passed on k3s on 2026-10-11, when the owner created a service, deployed and promoted one and made a preview from the browser, and a second account with read access saw the same data. Since then every deployed commit also gets a version (a release candidate on staging, a final version on production, each a tag and a GitHub release), and deleting a service takes down what it runs. Phase 7, TechDocs, has started (`docs/specs/2026-10-11-phase-7-techdocs-design.md`): milestone 1, the API and the CLI, is built. Before it, the k3s install moved to GitHub login and PostgreSQL storage (`docs/specs/2026-10-09-groundwork-auth-storage-design.md`).
 
 | Phase | Scope | Exit gate |
 | --- | --- | --- |

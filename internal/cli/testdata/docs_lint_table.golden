@@ -1,0 +1,4 @@
+docs/index.md: the start page is missing: a repo without it has no docs
+docs/runbook.md:2: "img/flow.png": docs/img/flow.png does not exist
+docs/runbook.md:3: "../README.md" points outside docs/
+forge.yaml: docs: docs/gone.md does not exist

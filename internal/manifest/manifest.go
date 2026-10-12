@@ -1,7 +1,7 @@
 // Package manifest reads and writes forge.yaml, the per-repo source of truth
 // for a service's catalog entry. Phase 1 covers the catalog fields; Phase 3
 // adds run, how a preview environment runs the service; Phase 5 adds
-// resources.
+// resources; Phase 7 adds docs, the order of the service's doc pages.
 package manifest
 
 import (
@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/internal/docs"
 	"github.com/showmino/forge/internal/resource"
 )
 
@@ -37,6 +38,23 @@ type Manifest struct {
 	Run *Run `yaml:"run,omitempty"`
 	// Resources are what the service needs besides its own pods.
 	Resources []Resource `yaml:"resources,omitempty"`
+	// Docs lists the pages under docs/ in the order of the side menu.
+	Docs []DocPage `yaml:"docs,omitempty"`
+}
+
+// DocPage is one entry of docs: a page under docs/ and, optionally, its title.
+type DocPage struct {
+	Title string `yaml:"title,omitempty"`
+	Path  string `yaml:"path"`
+}
+
+// DocEntries returns docs: as the docs package takes it.
+func (m *Manifest) DocEntries() []docs.Entry {
+	out := make([]docs.Entry, 0, len(m.Docs))
+	for _, d := range m.Docs {
+		out = append(out, docs.Entry{Title: d.Title, Path: d.Path})
+	}
+	return out
 }
 
 // Defaults for a manifest without run settings.
@@ -196,6 +214,22 @@ func (m *Manifest) Validate() error {
 	}
 	if err := resource.Validate(m.Declarations()); err != nil {
 		return fmt.Errorf("resources: %w", err)
+	}
+	seen := map[string]bool{}
+	for i, d := range m.Docs {
+		if _, err := docs.CleanPath(d.Path); err != nil {
+			return fmt.Errorf("docs[%d].path: %w", i, err)
+		}
+		if !docs.IsPage(d.Path) {
+			return fmt.Errorf("docs[%d].path %q must be a Markdown page (.md) under %s/", i, d.Path, docs.Dir)
+		}
+		if seen[d.Path] {
+			return fmt.Errorf("docs[%d].path %q is listed twice", i, d.Path)
+		}
+		seen[d.Path] = true
+	}
+	if len(m.Docs) > docs.MaxPages {
+		return fmt.Errorf("docs lists %d pages; at most %d", len(m.Docs), docs.MaxPages)
 	}
 	return nil
 }

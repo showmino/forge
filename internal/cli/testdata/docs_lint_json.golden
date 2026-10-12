@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "file": "docs/index.md",
+      "message": "the start page is missing: a repo without it has no docs"
+    },
+    {
+      "file": "docs/runbook.md",
+      "line": 2,
+      "message": "\"img/flow.png\": docs/img/flow.png does not exist"
+    },
+    {
+      "file": "docs/runbook.md",
+      "line": 3,
+      "message": "\"../README.md\" points outside docs/"
+    },
+    {
+      "file": "forge.yaml",
+      "message": "docs: docs/gone.md does not exist"
+    }
+  ]
+}

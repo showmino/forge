@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// DocsService reads a service's documentation: Markdown under docs/ in its
+// repo, on the repo's default branch, read from GitHub as it is now. Nothing
+// is built or stored. Every call is a read and needs services.read.
+service DocsService {
+  // ListDocSets returns the services that have docs (a docs/index.md),
+  // ordered by service. Pages are not included.
+  rpc ListDocSets(ListDocSetsRequest) returns (ListDocSetsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // GetDocSet returns one service's docs with its pages in order.
+  rpc GetDocSet(GetDocSetRequest) returns (GetDocSetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // GetDocPage returns one page's Markdown.
+  rpc GetDocPage(GetDocPageRequest) returns (GetDocPageResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // GetDocAsset returns an image a page uses. The repos are private, so a
+  // browser cannot fetch it from GitHub itself.
+  rpc GetDocAsset(GetDocAssetRequest) returns (GetDocAssetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// DocSet is the docs of one service.
+message DocSet {
+  // "services/{service}".
+  string service = 1;
+  string owner_team = 2;
+  int32 page_count = 3;
+  // The commit of the default branch the docs were read at.
+  string commit = 4;
+  // The newest commit that changed docs/, and when.
+  string change_commit = 5;
+  google.protobuf.Timestamp change_time = 6;
+  string repo_url = 7;
+  // The default branch.
+  string branch = 8;
+  // The pages in the order of the side menu (GetDocSet only).
+  repeated DocPageRef pages = 9;
+}
+
+// DocPageRef names a page in the side menu.
+message DocPageRef {
+  // The path under docs/, for example "runbook.md" or "api/errors.md".
+  string path = 1;
+  string title = 2;
+}
+
+// DocPage is one page.
+message DocPage {
+  // "services/{service}".
+  string service = 1;
+  string path = 2;
+  string title = 3;
+  string markdown = 4;
+  string commit = 5;
+  // When docs/ last changed (the set's change_time).
+  google.protobuf.Timestamp change_time = 6;
+  // Where to edit the page on GitHub.
+  string edit_url = 7;
+}
+
+message ListDocSetsRequest {}
+
+message ListDocSetsResponse {
+  repeated DocSet doc_sets = 1;
+}
+
+message GetDocSetRequest {
+  // "services/{service}".
+  string service = 1;
+}
+
+message GetDocSetResponse {
+  DocSet doc_set = 1;
+}
+
+message GetDocPageRequest {
+  // "services/{service}".
+  string service = 1;
+  // The path under docs/; empty for the start page, index.md.
+  string path = 2;
+}
+
+message GetDocPageResponse {
+  DocPage page = 1;
+}
+
+message GetDocAssetRequest {
+  // "services/{service}".
+  string service = 1;
+  // The path under docs/ of a png, jpeg, gif, webp or svg image.
+  string path = 2;
+}
+
+message GetDocAssetResponse {
+  string media_type = 1;
+  bytes data = 2;
+  string commit = 3;
+}

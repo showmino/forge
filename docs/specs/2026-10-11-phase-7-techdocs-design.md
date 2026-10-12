@@ -1,6 +1,8 @@
 # Phase 7: TechDocs
 
-Date: 2026-10-11. Status: design, awaiting the owner's approval.
+Date: 2026-10-11. Status: approved by the owner on 2026-10-12; milestone 1 built.
+
+As built in milestone 1, beyond the design: the pages of one service are kept in memory up to 32 MiB together (more is refused with a message), images up to 64 MiB across services; with a `docs:` list the side menu holds the listed pages only, with the start page always in it; `forge docs get --pages` lists the pages; the head of the default branch is read as `commits/HEAD`.
 
 ## Goal
 

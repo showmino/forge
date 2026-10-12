@@ -41,6 +41,9 @@ type Options struct {
 	// Teams lists the organization's teams for TeamService; nil answers
 	// FAILED_PRECONDITION.
 	Teams TeamSource
+	// Docs reads services' docs from GitHub for DocsService; nil answers
+	// FAILED_PRECONDITION.
+	Docs DocsGitHub
 	// Sessions, when set, lets a login be turned into a session and reads
 	// session tokens before the Authenticator sees them.
 	Sessions *Sessions
@@ -126,6 +129,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))
 	mux.Handle(forgev1connect.NewAuditServiceHandler(&auditService{store: o.Audit}, opts))
 	mux.Handle(forgev1connect.NewResourceServiceHandler(o.Resources, opts))
+	mux.Handle(forgev1connect.NewDocsServiceHandler(newDocsService(o.Docs, o.Catalog, o.GitHubOrg, o.Logger), opts))
 	mux.HandleFunc("GET /cli/{name}", cliDownload(o.CLIDir))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")

@@ -195,6 +195,13 @@ A service belongs to a team of the GitHub organization. `forge team list` (and
 the dashboard's Create form) read the teams from GitHub as the App, which needs
 the organization permission "Members: read" for it.
 
+A service's docs are Markdown under `docs/` in its repo, with `docs/index.md`
+as the start page (Phase 7). forge-api reads them from the repo's default
+branch as the App (the "Contents: read" it has already), at most once a minute
+per service, and nothing is built: `forge docs list`, `forge docs get payments
+runbook.md`, and `forge docs lint` in a repo to check them before a push. An
+optional `docs:` list in forge.yaml sets the order and titles of the pages.
+
 The web dashboard (Phase 6) calls forge-api from the browser. Render with
 `FORGE_WEB_ORIGINS`, its addresses separated by commas
 (`http://forge-web.staging.<domain>,http://forge-web.production.<domain>`), to
