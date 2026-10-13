@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -53,6 +54,9 @@ type Template struct {
 	Owner       string      `yaml:"owner,omitempty"`
 	Delimiters  []string    `yaml:"delimiters,omitempty"`
 	Parameters  []Parameter `yaml:"parameters,omitempty"`
+	// Options are the run options of forge.yaml (manifest.Options) the create
+	// form offers for this template.
+	Options []string `yaml:"options,omitempty"`
 }
 
 // Parameter is one typed input of a template.
@@ -170,6 +174,11 @@ func (t *Template) Validate() []Finding {
 	}
 	if t.Delimiters != nil && (len(t.Delimiters) != 2 || t.Delimiters[0] == "" || t.Delimiters[1] == "" || t.Delimiters[0] == t.Delimiters[1]) {
 		add(0, "delimiters must be two different, non-empty strings")
+	}
+	for i, o := range t.Options {
+		if !manifest.ValidOption(o) || slices.Contains(t.Options[:i], o) {
+			add(0, "option %q must be one of %s, listed once", o, strings.Join(manifest.Options, ", "))
+		}
 	}
 	seen := map[string]bool{}
 	for _, p := range t.Parameters {

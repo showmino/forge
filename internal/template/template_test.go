@@ -91,6 +91,8 @@ func TestValidate(t *testing.T) {
 		{"enum values", "    values: [gold, silver]", "    values: []", "needs values"},
 		{"pattern type", "    type: int\n    default: 8080", "    type: int\n    pattern: '^1'\n    default: 8080", "pattern is only allowed for type string"},
 		{"bad pattern", `pattern: '^[a-z0-9./-]+$'`, `pattern: '('`, "invalid pattern"},
+		{"unknown option", `delimiters: ["{%", "%}"]`, "delimiters: [\"{%\", \"%}\"]\noptions: [replicas, port]", `option "port" must be one of`},
+		{"option twice", `delimiters: ["{%", "%}"]`, "delimiters: [\"{%\", \"%}\"]\noptions: [jobs, jobs]", `option "jobs" must be one of`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -116,6 +118,9 @@ func TestValidate(t *testing.T) {
 
 func TestFindingString(t *testing.T) {
 	t.Parallel()
+	if tp, err := Parse([]byte(strings.Replace(validYAML, `delimiters: ["{%", "%}"]`, "delimiters: [\"{%\", \"%}\"]\noptions: [replicas, secrets, jobs]", 1))); err != nil || len(tp.Validate()) != 0 || len(tp.Options) != 3 {
+		t.Errorf("options: %v %v", tp, err)
+	}
 	if got := (Finding{File: "a/template.yaml", Line: 3, Message: "bad"}).String(); got != "a/template.yaml:3: bad" {
 		t.Errorf("with line: %q", got)
 	}

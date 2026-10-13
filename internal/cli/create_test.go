@@ -138,6 +138,40 @@ func TestCreateUsage(t *testing.T) {
 	h.fails(2, "create", "Pay_ments", "--template", "svc", "--team", "platform")
 	h.fails(2, "create")
 	h.fails(3, "create", "payments", "--template", "nope", "--team", "platform")
+
+	// Run options: badly written flags, and an option the template does not offer.
+	base := []string{"create", "payments", "--template", "svc", "--team", "platform", "--set", "tier=gold"}
+	for _, bad := range [][]string{
+		{"--resources", "cpu=1"}, {"--env", "NOEQUALS"}, {"--secret", "stripe=vaults/A/items/b"},
+		{"--secret", "stripe=vaults/A/items/b:KEY"}, {"--job", "cleanup=@daily"}, {"--job", "cleanup"},
+	} {
+		h.fails(2, append(base, bad...)...)
+	}
+	if r := h.fails(2, append(base, "--replicas", "2")...); !strings.Contains(r.err, "does not offer the run option replicas (it offers: none)") {
+		t.Errorf("not offered:\n%s", r.err)
+	}
+}
+
+func TestRunFlags(t *testing.T) {
+	t.Parallel()
+	r := runFlags{
+		replicas: 2, autoscalingMax: 5, resources: []string{"requests.cpu=100m", "limits.memory=512Mi"}, env: []string{"LOG_LEVEL=info", "EMPTY="},
+		secrets: []string{"stripe=vaults/Kube/items/shop-stripe:STRIPE_KEY=credential,STRIPE_HOOK=webhook"},
+		jobs:    []string{"cleanup=0 3 * * *:node scripts/cleanup.js --all"},
+	}
+	ro, err := r.options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ro.GetReplicas() != 2 || ro.GetAutoscalingMax() != 5 || ro.GetResources().GetRequestsCpu() != "100m" || ro.GetResources().GetLimitsMemory() != "512Mi" ||
+		ro.GetEnv()["LOG_LEVEL"] != "info" || ro.GetEnv()["EMPTY"] != "" || len(ro.GetEnv()) != 2 ||
+		ro.GetSecrets()[0].GetItem() != "vaults/Kube/items/shop-stripe" || ro.GetSecrets()[0].GetEnv()["STRIPE_HOOK"] != "webhook" ||
+		ro.GetJobs()[0].GetSchedule() != "0 3 * * *" || strings.Join(ro.GetJobs()[0].GetCommand(), "|") != "node|scripts/cleanup.js|--all" {
+		t.Errorf("options: %v", ro)
+	}
+	if ro, err := (&runFlags{}).options(); ro != nil || err != nil {
+		t.Errorf("none set: %v %v", ro, err)
+	}
 }
 
 func TestCreatePrompts(t *testing.T) {

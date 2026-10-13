@@ -171,6 +171,47 @@ message CreateServiceRequest {
   string request_id = 7;
   // Render and check; create nothing.
   bool validate_only = 8;
+  // forge.yaml's run options, written into the new repo's forge.yaml over
+  // the template's. Only the options the template offers may be set.
+  RunOptions run_options = 9;
+}
+
+// RunOptions are forge.yaml's run options (see the README, "Run options").
+// Unset fields leave the template's value.
+message RunOptions {
+  // Production's pod count; staging runs one.
+  int32 replicas = 1;
+  RunResources resources = 2;
+  map<string, string> env = 3;
+  repeated RunSecret secrets = 4;
+  repeated RunJob jobs = 5;
+  // Production grows from replicas up to this on CPU; 0 is no autoscaling.
+  int32 autoscaling_max = 6;
+}
+
+// RunResources are the app container's requests and limits, as Kubernetes
+// quantities ("100m", "128Mi").
+message RunResources {
+  string requests_cpu = 1;
+  string requests_memory = 2;
+  string limits_cpu = 3;
+  string limits_memory = 4;
+}
+
+// RunSecret is a 1Password item given to the app as environment variables.
+message RunSecret {
+  string name = 1;
+  // "vaults/<vault>/items/<item>".
+  string item = 2;
+  // Environment variable to the item's field.
+  map<string, string> env = 3;
+}
+
+// RunJob is a cron job running the service's image.
+message RunJob {
+  string name = 1;
+  string schedule = 2;
+  repeated string command = 3;
 }
 
 // CreateServiceResponse is one message of the CreateService stream.

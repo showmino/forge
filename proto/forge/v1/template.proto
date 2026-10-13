@@ -28,6 +28,9 @@ message Template {
   // Team that owns the template.
   string owner = 6;
   repeated TemplateParameter parameters = 7;
+  // The run options of forge.yaml the create form offers: "replicas",
+  // "resources", "env", "secrets", "jobs", "autoscaling".
+  repeated string options = 8;
 }
 
 // TemplateParameter is one typed input of a template.

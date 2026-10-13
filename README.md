@@ -250,6 +250,11 @@ render the template, create the private repo `github.com/<org>/<name>` as the
 Forge GitHub App, push the first commit (which starts its CI) and register the
 service. `--set name=value` sets parameters, `--dry-run` lists the files
 without creating anything, and a failure after the repo exists deletes it again.
+A template's `options:` list (in `template.yaml`, e.g. `options: [replicas,
+env, secrets, jobs]`) names the run options its create form offers;
+`forge create` sets them with `--replicas`, `--resources`, `--env`,
+`--secret`, `--job` and `--autoscaling-max`, and forge-api writes them into
+the new repo's `forge.yaml` (see "Run options").
 `forge op list`, `forge op watch <id>` and `forge op cancel <id>` show and stop long-running work on the API (operations). Phase 3's environments are the first to use them.
 `forge template lint [dir]` checks templates locally, with no API or login;
 see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.
@@ -300,7 +305,8 @@ run:
 ```
 
 `forge service options check` checks them and shows what each environment
-gets, without the API. forge-api checks them again when it deploys. Everything
+gets, without the API; `forge service options set replicas=3 env.LOG_LEVEL=debug`
+changes them in `forge.yaml`, keeping its comments. forge-api checks them again when it deploys. Everything
 that may run at once in an environment must fit the namespace's quota
 (requests 2 CPU / 2Gi, limits 4 CPU / 4Gi, 15 pods): the replicas or the
 autoscaling maximum, one more pod while a rollout replaces them, one per cron

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -113,6 +114,7 @@ func newTemplateGetCmd(f *Factory) *cobra.Command {
 					{"description", t.GetDescription()},
 					{"tags", strings.Join(t.GetTags(), ", ")},
 					{"owner", t.GetOwner()},
+					{"run options", cmp.Or(strings.Join(t.GetOptions(), ", "), "none")},
 				},
 			}); err != nil {
 				return err

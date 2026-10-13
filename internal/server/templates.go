@@ -163,6 +163,7 @@ func templateProto(t *template.Template, version string) *forgev1.Template {
 		Description: t.Description,
 		Tags:        slices.Clone(t.Tags),
 		Owner:       t.Owner,
+		Options:     slices.Clone(t.Options),
 	}
 	for _, p := range t.Parameters {
 		def, _ := p.DefaultString()

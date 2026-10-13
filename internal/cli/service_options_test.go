@@ -48,3 +48,50 @@ func TestServiceOptionsCheck(t *testing.T) {
 	}
 	h.fails(int(exitcode.Usage), "service", "options", "check", filepath.Join(h.dir, "nope"))
 }
+
+func TestServiceOptionsSet(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	dir := filepath.Join(h.dir, "repo")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "forge.yaml")
+	orig := "# The manifest.\napiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n  port: 3000 # the app\n  env: {OLD: x}\n"
+	if err := os.WriteFile(path, []byte(orig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	r := h.ok("service", "options", "set", "--dir", dir, "replicas=3", "autoscaling.max=6", "env.LOG_LEVEL=info", "env.OLD=", "resources.limits.memory=256Mi")
+	if !strings.Contains(r.err, "updated") {
+		t.Errorf("stderr: %q", r.err)
+	}
+	s := read()
+	for _, want := range []string{"# The manifest.", "port: 3000 # the app", "replicas: 3", "max: 6", "LOG_LEVEL: info", "memory: 256Mi"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "OLD") {
+		t.Errorf("env.OLD= did not remove it:\n%s", s)
+	}
+	h.ok("service", "options", "set", "--dir", dir, "autoscaling.max=", "resources.limits.memory=")
+	if s := read(); strings.Contains(s, "autoscaling") || strings.Contains(s, "resources") || !strings.Contains(s, "replicas: 3") {
+		t.Errorf("after removing:\n%s", s)
+	}
+	// Refused changes leave the file as it was.
+	before := read()
+	h.fails(int(exitcode.Unexpected), "service", "options", "set", "--dir", dir, "replicas=11")
+	h.fails(int(exitcode.Usage), "service", "options", "set", "--dir", dir, "port=1")
+	h.fails(int(exitcode.Usage), "service", "options", "set", "--dir", dir, "replicas=two")
+	h.fails(int(exitcode.Usage), "service", "options", "set", "--dir", dir, "replicas")
+	if read() != before {
+		t.Error("a refused set changed forge.yaml")
+	}
+}
