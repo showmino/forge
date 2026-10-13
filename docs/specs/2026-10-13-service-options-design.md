@@ -55,13 +55,19 @@ check` in the repo before a push):
 
 - `replicas` 1 to 10. With `autoscaling`, it is the minimum and `max` the most.
 - `resources` must fit the namespace's ResourceQuota (requests 2 CPU / 2Gi,
-  limits 4 CPU / 4Gi) with every replica and job counted.
+  limits 4 CPU / 4Gi, 15 pods) in each environment, counting the replicas (or
+  the autoscaling maximum), one more pod during a rollout, one per job and
+  the database's instances. A request not set is the limit when that is set,
+  as Kubernetes does; a request above its limit is refused.
 - `env` names are `[A-Z_][A-Z0-9_]*`; `PORT` and `DATABASE_URL` are Forge's.
 - `secrets`: at most 10; `item` must be `vaults/<vault>/items/<item>` in a vault
-  forge-api allows (`--secret-vaults`); `name` is a DNS label, the Secret is
-  `<service>-<name>`. An env var named twice is refused.
-- `jobs`: at most 5; `schedule` is a five-field cron expression; `command` is a
-  list. A job runs with `concurrencyPolicy: Forbid`, the app's security
+  forge-api allows (`--secret-vaults`); `name` is a DNS label of at most 40
+  characters, the Secret is `<name>-1password` (a suffix no other Secret in
+  the namespace has: not the pull secret, not CloudNativePG's `<db>-*`). An
+  env var named twice is refused.
+- `jobs`: at most 5; `<service>-<name>` at most 52 characters; `schedule` is
+  a five-field cron expression or a macro; `command` is a list. A job runs
+  with `concurrencyPolicy: Forbid`, at most an hour, the app's security
   context, env and secrets, and keeps the last 3 runs.
 - `autoscaling.max` up to 10, more than `replicas`.
 
@@ -73,9 +79,15 @@ that knows it is live: an older one rejects the unknown field.
 `deploy/argocd/chart` gets what `platform-config/charts/app` had, in Forge's
 shape: `replicas` from the values (already there), `resources`, `env`,
 `secrets` (one `OnePasswordItem` per item, `secretKeyRef` per env var),
-`cronjob.yaml`, and `scaledobject.yaml` (KEDA is on the cluster). The deploy
+`cronjob.yaml`, and `scaledobject.yaml` (KEDA is on the cluster). An
+autoscaled Deployment keeps `replicas` (the minimum) and is annotated
+`forge.dev/autoscaled`; the ApplicationSet ignores `spec.replicas` on those
+only (`RespectIgnoreDifferences`), so Argo CD neither fights KEDA nor drops
+production to one pod when autoscaling is switched on. The deploy
 values carry them; the chart revision moves, so every deployed service is
 re-rendered once (no change for services without options).
+
+Staging gets the same 1Password items as production.
 
 Left out of the reference chart: Istio (Forge uses its Gateway), the
 ConfigMap (env covers it), the default `mino-ghcr` 1Password item (Forge has

@@ -40,7 +40,10 @@ kind: Deployment
 metadata:
   name: payments
   labels: {app: payments}
+  # KEDA owns the replica count; Argo CD ignores it on Deployments marked so.
+  annotations: {forge.dev/autoscaled: "true"}
 spec:
+  replicas: 2
   selector:
     matchLabels: {app: payments}
   template:
@@ -72,10 +75,10 @@ spec:
             - {name: LOG_LEVEL, value: "info"}
             - name: STRIPE_HOOK
               valueFrom:
-                secretKeyRef: {name: payments-stripe, key: "webhook-secret"}
+                secretKeyRef: {name: stripe-1password, key: "webhook-secret"}
             - name: STRIPE_KEY
               valueFrom:
-                secretKeyRef: {name: payments-stripe, key: "credential"}
+                secretKeyRef: {name: stripe-1password, key: "credential"}
           resources:
             limits:
               cpu: 500m
@@ -111,6 +114,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
+      # A run that hangs would hold its share of the quota and, with Forbid,
+      # every later run.
+      activeDeadlineSeconds: 3600
       template:
         metadata:
           labels: {forge.dev/job: cleanup}
@@ -141,10 +147,10 @@ spec:
                 - {name: LOG_LEVEL, value: "info"}
                 - name: STRIPE_HOOK
                   valueFrom:
-                    secretKeyRef: {name: payments-stripe, key: "webhook-secret"}
+                    secretKeyRef: {name: stripe-1password, key: "webhook-secret"}
                 - name: STRIPE_KEY
                   valueFrom:
-                    secretKeyRef: {name: payments-stripe, key: "credential"}
+                    secretKeyRef: {name: stripe-1password, key: "credential"}
               resources:
                 limits:
                   cpu: 500m
@@ -178,7 +184,7 @@ spec:
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: payments-stripe
+  name: stripe-1password
 spec:
   itemPath: "vaults/Apps/items/stripe"
 ---

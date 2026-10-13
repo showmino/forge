@@ -95,11 +95,18 @@ spec:
             maxDuration: 3m
         syncOptions:
           - CreateNamespace=true
+          # Keep the replica count KEDA set on an autoscaled Deployment.
+          - RespectIgnoreDifferences=true
         managedNamespaceMetadata:
           labels:
             app.kubernetes.io/managed-by: forge
             forge.dev/service: '{{ index .path.segments 1 }}'
             forge.dev/deploy-env: '{{ .path.basename }}'
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - 'select(.metadata.annotations["forge.dev/autoscaled"] == "true") | .spec.replicas'
 ---
 # forge-api reads Applications to report sync and health.
 apiVersion: rbac.authorization.k8s.io/v1

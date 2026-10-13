@@ -15,6 +15,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
+      # A run that hangs would hold its share of the quota and, with Forbid,
+      # every later run.
+      activeDeadlineSeconds: 3600
       template:
         metadata:
           labels: {forge.dev/job: {{ .name }}}

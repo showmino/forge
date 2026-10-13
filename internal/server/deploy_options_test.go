@@ -85,3 +85,43 @@ func TestDeployWithoutOptions(t *testing.T) {
 		}
 	}
 }
+
+// A vault taken off the list stops its secrets at the next rollback and
+// promote too, not only at the next deploy.
+func TestSecretVaultRemoved(t *testing.T) {
+	t.Parallel()
+	apps := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n" +
+		"  secrets: [{name: stripe, item: vaults/Apps/items/stripe, env: {STRIPE_KEY: credential}}]\n"
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		gh := o.GitHub.(*envtest.GitHub)
+		gh.Files[envSHA+":forge.yaml"], gh.Files[ciOldSHA+":forge.yaml"] = []byte(apps), []byte(apps)
+		o.SecretVaults = []string{"Apps"}
+	})
+	for _, ref := range []string{"release", ""} {
+		if op := f.deployRef(t, "staging", ref); op.GetError() != nil {
+			t.Fatal(op.GetError())
+		}
+	}
+	f.deploys.o.SecretVaults = nil
+	ctx := context.Background()
+	if _, err := f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: "deployments/payments/staging"})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("rollback: %v", err)
+	}
+	if _, err := f.client.PromoteDeploy(ctx, as("writer", &forgev1.PromoteDeployRequest{Service: "services/payments"})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("promote: %v", err)
+	}
+}
+
+// Staging values written before run options have no forge.replicas: a
+// promotion of them gives production one pod and no autoscaler.
+func TestForEnvOldValues(t *testing.T) {
+	t.Parallel()
+	v, err := parseValues([]byte("name: payments\nenv: staging\nimage: x\nport: 8080\nhealth: /healthz\nreplicas: 1\nhost: h\nforge:\n  service: services/payments\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.forEnv("production")
+	if v.Replicas != 1 || v.Autoscaling != nil {
+		t.Errorf("production from old values: %d %+v", v.Replicas, v.Autoscaling)
+	}
+}

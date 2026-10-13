@@ -26,7 +26,7 @@ func TestServiceOptionsCheck(t *testing.T) {
 	base := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"
 	good := write("good", base+`run:
   replicas: 2
-  resources: {requests: {cpu: 100m}, limits: {cpu: 500m, memory: 512Mi}}
+  resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}
   env: {LOG_LEVEL: info, REGION: eu}
   secrets: [{name: stripe, item: vaults/Apps/items/stripe, env: {STRIPE_KEY: credential}}]
   jobs: [{name: cleanup, schedule: "0 3 * * *", command: [node, cleanup.js]}]

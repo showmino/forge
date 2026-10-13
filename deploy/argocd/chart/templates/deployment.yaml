@@ -3,10 +3,12 @@ kind: Deployment
 metadata:
   name: {{ required "name" .Values.name }}
   labels: {app: {{ .Values.name }}}
-spec:
-  {{- if not .Values.autoscaling }}
-  replicas: {{ .Values.replicas }}
+  {{- if .Values.autoscaling }}
+  # KEDA owns the replica count; Argo CD ignores it on Deployments marked so.
+  annotations: {forge.dev/autoscaled: "true"}
   {{- end }}
+spec:
+  replicas: {{ .Values.replicas }}
   selector:
     matchLabels: {app: {{ .Values.name }}}
   template:

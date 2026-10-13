@@ -130,7 +130,7 @@ func TestRunOptions(t *testing.T) {
   replicas: 3
   resources:
     requests: {cpu: 100m, memory: 128Mi}
-    limits: {cpu: 500m, memory: 512Mi}
+    limits: {cpu: 250m, memory: 256Mi}
   env:
     LOG_LEVEL: info
   secrets:
@@ -152,7 +152,7 @@ func TestRunOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := m.Run
-	if r.Replicas != 3 || r.Resources.Limits.Memory != "512Mi" || r.Env["LOG_LEVEL"] != "info" ||
+	if r.Replicas != 3 || r.Resources.Limits.Memory != "256Mi" || r.Env["LOG_LEVEL"] != "info" ||
 		len(r.Secrets) != 1 || r.Secrets[0].Vault() != "Apps" || r.Secrets[0].Env["STRIPE_KEY"] != "credential" ||
 		len(r.Jobs) != 2 || r.Jobs[0].Command[1] != "scripts/cleanup.js" || r.Autoscaling.Max != 6 {
 		t.Errorf("parsed: %+v", r)
@@ -189,6 +189,12 @@ func TestRunOptions(t *testing.T) {
 		"autoscaling max 11":   "run:\n  autoscaling: {max: 11}\n",
 		"autoscaling below":    "run:\n  replicas: 3\n  autoscaling: {max: 3}\n",
 		"unknown option field": "run:\n  jobs: [{name: c, schedule: \"@daily\", command: [x], image: y}]\n",
+		"requests over quota":  "run:\n  replicas: 4\n  resources: {requests: {memory: 512Mi}, limits: {memory: 512Mi}}\n",
+		"request over default": "run:\n  resources: {requests: {memory: 1Gi}}\n",
+		"too many pods":        "run:\n  replicas: 10\n  resources: {limits: {cpu: 10m, memory: 16Mi}}\n  jobs: [{name: a, schedule: \"@daily\", command: [x]}, {name: b, schedule: \"@daily\", command: [x]}, {name: c, schedule: \"@daily\", command: [x]}]\nresources:\n  - {name: main, type: postgres, instances: 3}\n",
+		"no room for the db":   "run:\n  replicas: 6\nresources:\n  - {name: main, type: postgres}\n",
+		"job name too long":    "run:\n  jobs: [{name: " + strings.Repeat("j", 44) + ", schedule: \"@daily\", command: [x]}]\n",
+		"secret name too long": "run:\n  secrets: [{name: " + strings.Repeat("s", 41) + ", item: vaults/A/items/b, env: {K: v}}]\n",
 	} {
 		if _, err := Parse([]byte(base + bad)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -200,6 +206,14 @@ func TestRunOptions(t *testing.T) {
 	}
 	if _, err := Parse([]byte(base + six)); err == nil {
 		t.Error("six jobs accepted")
+	}
+	// The same six replicas fit without a database next to them.
+	if _, err := Parse([]byte(base + "run:\n  replicas: 6\n")); err != nil {
+		t.Errorf("six replicas: %v", err)
+	}
+	// A limit without a request makes the request the limit, as Kubernetes does.
+	if _, err := Parse([]byte(base + "run:\n  resources: {limits: {memory: 1Gi}}\n")); err != nil {
+		t.Errorf("limit only: %v", err)
 	}
 }
 

@@ -19,5 +19,5 @@ vars: {}
 secrets: []
 # Cron jobs: [{name: cleanup, schedule: "0 3 * * *", command: [node, cleanup.js]}]
 jobs: []
-# Production only: {min: 2, max: 6}; replicas is then the autoscaler's.
+# Production only: {min: 2, max: 6}; KEDA then sets the replica count.
 autoscaling: null

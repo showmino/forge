@@ -226,6 +226,9 @@ func (m *Manifest) Validate() error {
 	if err := resource.Validate(m.Declarations()); err != nil {
 		return fmt.Errorf("resources: %w", err)
 	}
+	if err := m.checkRun(); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for i, d := range m.Docs {
 		if _, err := docs.CleanPath(d.Path); err != nil {

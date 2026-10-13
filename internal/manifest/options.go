@@ -20,14 +20,32 @@ const (
 	MaxJobs     = 5
 )
 
-// The namespace's ResourceQuota for the app's limits (deploy/argocd/chart/
-// templates/limits.yaml), and the LimitRange's default limits per container.
+// The namespace's ResourceQuota (deploy/argocd/chart/templates/limits.yaml),
+// the LimitRange's defaults for a container that sets nothing, and one
+// database instance (deploy/runner/module: requests 50m/256Mi, a 512Mi
+// limit and the default CPU limit).
 var (
-	quotaCPU      = resource.MustParse("4")
-	quotaMemory   = resource.MustParse("4Gi")
-	defaultCPU    = resource.MustParse("500m")
-	defaultMemory = resource.MustParse("512Mi")
+	quota      = podSize{q("2"), q("2Gi"), q("4"), q("4Gi")}
+	quotaPods  = 15
+	appDefault = podSize{q("50m"), q("64Mi"), q("500m"), q("512Mi")}
+	dbInstance = podSize{q("50m"), q("256Mi"), q("500m"), q("512Mi")}
 )
+
+func q(s string) resource.Quantity { return resource.MustParse(s) }
+
+// podSize is a pod's requests and limits as the quota counts them.
+type podSize struct{ reqCPU, reqMemory, limCPU, limMemory resource.Quantity }
+
+// add adds n pods of size p to s.
+func (s *podSize) add(p podSize, n int) {
+	for _, x := range []struct{ to, each *resource.Quantity }{
+		{&s.reqCPU, &p.reqCPU}, {&s.reqMemory, &p.reqMemory}, {&s.limCPU, &p.limCPU}, {&s.limMemory, &p.limMemory},
+	} {
+		each := x.each.DeepCopy()
+		each.Mul(int64(n))
+		x.to.Add(each)
+	}
+}
 
 // Resources are the app container's requests and limits.
 type Resources struct {
@@ -98,15 +116,12 @@ func (r *Run) validateOptions() error {
 	if r.Replicas < 0 || r.Replicas > MaxReplicas {
 		return fmt.Errorf("run.replicas %d must be 1 to %d", r.Replicas, MaxReplicas)
 	}
-	pods := max(r.Replicas, 1)
 	if a := r.Autoscaling; a != nil {
-		if a.Max > MaxReplicas || a.Max <= pods {
-			return fmt.Errorf("run.autoscaling.max %d must be more than run.replicas (%d) and at most %d", a.Max, pods, MaxReplicas)
+		if a.Max > MaxReplicas || a.Max <= max(r.Replicas, 1) {
+			return fmt.Errorf("run.autoscaling.max %d must be more than run.replicas (%d) and at most %d", a.Max, max(r.Replicas, 1), MaxReplicas)
 		}
-		pods = a.Max
 	}
-	cpu, memory, err := r.Resources.check()
-	if err != nil {
+	if _, err := r.Resources.size(); err != nil {
 		return err
 	}
 	used := map[string]string{}
@@ -134,8 +149,10 @@ func (r *Run) validateOptions() error {
 	names := map[string]bool{}
 	for i, s := range r.Secrets {
 		where := fmt.Sprintf("run.secrets[%d]", i)
-		if !ValidID(s.Name) || names[s.Name] {
-			return fmt.Errorf("%s.name %q must be a lowercase DNS label, used once", where, s.Name)
+		// The Secret is <name>-1password: no name CloudNativePG or Forge gives
+		// a Secret ends that way, so it can never be one of theirs.
+		if !ValidID(s.Name) || len(s.Name) > 40 || names[s.Name] {
+			return fmt.Errorf("%s.name %q must be a lowercase DNS label of at most 40 characters, used once", where, s.Name)
 		}
 		names[s.Name] = true
 		if !itemPath.MatchString(s.Item) {
@@ -159,9 +176,8 @@ func (r *Run) validateOptions() error {
 	names = map[string]bool{}
 	for i, j := range r.Jobs {
 		where := fmt.Sprintf("run.jobs[%d]", i)
-		// The CronJob is <service>-<name>, and its Jobs get 11 more characters.
-		if !ValidID(j.Name) || len(j.Name) > 30 || names[j.Name] {
-			return fmt.Errorf("%s.name %q must be a lowercase DNS label of at most 30 characters, used once", where, j.Name)
+		if !ValidID(j.Name) || names[j.Name] {
+			return fmt.Errorf("%s.name %q must be a lowercase DNS label, used once", where, j.Name)
 		}
 		names[j.Name] = true
 		if !validSchedule(j.Schedule) {
@@ -171,28 +187,16 @@ func (r *Run) validateOptions() error {
 			return fmt.Errorf("%s.command must be the program and its arguments, such as [node, scripts/cleanup.js]", where)
 		}
 	}
-	// Every pod the app may run at once must fit the namespace's quota.
-	pods += len(r.Jobs)
-	for _, c := range []struct {
-		what        string
-		each, quota resource.Quantity
-	}{{"cpu", cpu, quotaCPU}, {"memory", memory, quotaMemory}} {
-		total := c.each.DeepCopy()
-		total.Mul(int64(pods))
-		if total.Cmp(c.quota) > 0 {
-			return fmt.Errorf("%d pods (replicas, autoscaling and jobs) of %s %s each need %s, more than the namespace's %s",
-				pods, c.each.String(), c.what, total.String(), c.quota.String())
-		}
-	}
 	return nil
 }
 
-// check parses the quantities and returns the limits each pod counts
-// against the quota: the ones set, or the namespace's defaults.
-func (rs *Resources) check() (cpu, memory resource.Quantity, err error) {
-	cpu, memory = defaultCPU, defaultMemory
+// size parses the quantities and returns the app pod's size as Kubernetes
+// will make it: a limit not set is the LimitRange's default, and a request
+// not set is the limit when that is set, else the LimitRange's default.
+func (rs *Resources) size() (podSize, error) {
+	p := appDefault
 	if rs == nil {
-		return cpu, memory, nil
+		return p, nil
 	}
 	parse := func(where, s string) (*resource.Quantity, error) {
 		if s == "" {
@@ -204,31 +208,95 @@ func (rs *Resources) check() (cpu, memory resource.Quantity, err error) {
 		}
 		return &q, nil
 	}
-	var req, lim [2]*resource.Quantity
+	pick := func(q *Quantities, i int) string {
+		if q == nil {
+			return ""
+		}
+		return []string{q.CPU, q.Memory}[i]
+	}
 	for i, kind := range []string{"cpu", "memory"} {
-		pick := func(q *Quantities) string {
-			if q == nil {
-				return ""
+		req, err := parse("requests."+kind, pick(rs.Requests, i))
+		if err != nil {
+			return p, err
+		}
+		lim, err := parse("limits."+kind, pick(rs.Limits, i))
+		if err != nil {
+			return p, err
+		}
+		reqTo, limTo := []*resource.Quantity{&p.reqCPU, &p.reqMemory}[i], []*resource.Quantity{&p.limCPU, &p.limMemory}[i]
+		if lim != nil {
+			*limTo, *reqTo = *lim, *lim
+		}
+		if req != nil {
+			*reqTo = *req
+		}
+		if reqTo.Cmp(*limTo) > 0 {
+			return p, fmt.Errorf("run.resources.requests.%s %s is more than the limit %s (set run.resources.limits.%s)", kind, reqTo.String(), limTo.String(), kind)
+		}
+	}
+	return p, nil
+}
+
+// checkRun checks what the run options need of the namespace: the names
+// Kubernetes builds from the service's, and the quota, in each environment.
+// Every pod that may run at once counts: the replicas (or the autoscaling
+// maximum), one more while a rollout replaces them, one per cron job, and
+// the database's instances.
+func (m *Manifest) checkRun() error {
+	r := m.Run
+	if r == nil {
+		r = &Run{}
+	}
+	for i, j := range r.Jobs {
+		// A CronJob's name has at most 52 characters.
+		if n := len(m.Service.Name) + 1 + len(j.Name); n > 52 {
+			return fmt.Errorf("run.jobs[%d].name %q: the CronJob %s-%s would be %d characters; at most 52", i, j.Name, m.Service.Name, j.Name, n)
+		}
+	}
+	app, err := r.Resources.size()
+	if err != nil {
+		return err
+	}
+	for _, env := range []string{"staging", "production"} {
+		replicas := 1
+		if env == "production" {
+			replicas = max(r.Replicas, 1)
+			if r.Autoscaling != nil {
+				replicas = r.Autoscaling.Max
 			}
-			return []string{q.CPU, q.Memory}[i]
 		}
-		if req[i], err = parse("requests."+kind, pick(rs.Requests)); err != nil {
-			return cpu, memory, err
+		appPods := replicas + 1 + len(r.Jobs)
+		dbPods := 0
+		for _, res := range m.Resources {
+			n := res.Instances
+			if o, ok := res.Environments[env]; ok && o.Instances > 0 {
+				n = o.Instances
+			}
+			if n == 0 {
+				n = map[string]int{"staging": 1, "production": 2}[env]
+			}
+			dbPods += n
 		}
-		if lim[i], err = parse("limits."+kind, pick(rs.Limits)); err != nil {
-			return cpu, memory, err
+		var used podSize
+		used.add(app, appPods)
+		used.add(dbInstance, dbPods)
+		what := fmt.Sprintf("in %s, %d app pods (%d replicas, 1 more during a rollout, %d cron jobs) and %d database instances", env, appPods, replicas, len(r.Jobs), dbPods)
+		if appPods+dbPods > quotaPods {
+			return fmt.Errorf("%s are %d pods; the namespace allows %d", what, appPods+dbPods, quotaPods)
 		}
-		if req[i] != nil && lim[i] != nil && req[i].Cmp(*lim[i]) > 0 {
-			return cpu, memory, fmt.Errorf("run.resources.requests.%s is more than run.resources.limits.%s", kind, kind)
+		for _, c := range []struct {
+			name        string
+			used, quota resource.Quantity
+		}{
+			{"cpu requests", used.reqCPU, quota.reqCPU}, {"memory requests", used.reqMemory, quota.reqMemory},
+			{"cpu limits", used.limCPU, quota.limCPU}, {"memory limits", used.limMemory, quota.limMemory},
+		} {
+			if c.used.Cmp(c.quota) > 0 {
+				return fmt.Errorf("%s need %s of %s; the namespace allows %s (lower run.resources, replicas or jobs)", what, c.used.String(), c.name, c.quota.String())
+			}
 		}
 	}
-	if lim[0] != nil {
-		cpu = *lim[0]
-	}
-	if lim[1] != nil {
-		memory = *lim[1]
-	}
-	return cpu, memory, nil
+	return nil
 }
 
 func validSchedule(s string) bool {

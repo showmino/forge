@@ -300,10 +300,13 @@ run:
 ```
 
 `forge service options check` checks them and shows what each environment
-gets, without the API. forge-api checks them again when it deploys: every pod
-the app may run at once (replicas or the autoscaling maximum, plus one per
-job) must fit the namespace's quota, and a secret must come from a vault
-forge-api allows (`--secret-vaults`, none by default). A change applies at
+gets, without the API. forge-api checks them again when it deploys. Everything
+that may run at once in an environment must fit the namespace's quota
+(requests 2 CPU / 2Gi, limits 4 CPU / 4Gi, 15 pods): the replicas or the
+autoscaling maximum, one more pod while a rollout replaces them, one per cron
+job, and the database's instances. A secret must come from a vault forge-api
+allows (`--secret-vaults`, none by default); it becomes the Secret
+`<name>-1password`. A change applies at
 the next deploy (staging) or promote (production). A forge-api older than
 these fields refuses a `forge.yaml` that has them.
 

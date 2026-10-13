@@ -12,7 +12,7 @@ fields of run.secrets. The Deployment and the CronJobs share them. */}}
 - {name: {{ $k }}, value: {{ $v | quote }}}
 {{- end }}
 {{- range .Values.secrets }}
-{{- $secret := printf "%s-%s" $.Values.name .name }}
+{{- $secret := printf "%s-1password" .name }}
 {{- range $k, $field := .env }}
 - name: {{ $k }}
   valueFrom:
