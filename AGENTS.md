@@ -188,6 +188,13 @@ The dashboard has a copy of the protos: after the change is merged here, run
 - Giving a service's `forge.yaml` a field (`run.domain`, `run.host`) before
   the forge-api that knows it is live: an older API rejects unknown fields
   and every deploy of that service fails.
+- Extracting the render command out of `verifying.md` with grep and running
+  it (2026-10-13). The match was an old setup block ending in
+  `| kubectl apply -f -`: it applied a render without deploys, the Gateway
+  lost its public listeners and every Forge service answered 404 for about
+  ten minutes, until the approved render was applied again. Write the render
+  command out yourself, send it to a file, and never run text taken from the
+  docs.
 
 ## What an agent can and cannot reach
 
