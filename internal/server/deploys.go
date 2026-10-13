@@ -68,6 +68,9 @@ type DeployOptions struct {
 	HostTaken func(ctx context.Context, host string) (bool, error)
 	// ArgoNamespace holds the Applications (default argocd).
 	ArgoNamespace string
+	// ArgoURL is Argo CD's web address, e.g. https://argocd.example.com;
+	// "" leaves Deployment.argo_url empty.
+	ArgoURL string
 	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
 	ImageTimeout, SyncTimeout, NamespaceTimeout time.Duration
 	// Defaults: 10s, 2s.
@@ -289,6 +292,9 @@ func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit s
 	}
 	if s, ok := syncStates[st.Sync]; ok {
 		dep.Sync = s
+	}
+	if d.o.ArgoURL != "" {
+		dep.ArgoUrl = d.o.ArgoURL + "/applications/" + d.o.ArgoNamespace + "/" + svc + "-" + env
 	}
 	if h, ok := healthStates[st.Health]; ok {
 		dep.Health = h

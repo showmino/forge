@@ -94,6 +94,9 @@ message Deployment {
   // "v0.3.1" once it was released to production. Empty for deploys from
   // before Forge cut versions.
   string version = 15;
+  // The environment's Application in Argo CD's web UI; "" when forge-api
+  // is not given Argo CD's address (--argocd-url).
+  string argo_url = 16;
 }
 
 // DeployRecord is one change of one environment.

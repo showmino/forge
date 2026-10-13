@@ -202,6 +202,17 @@ check "public: two listeners per domain (its hosts, its root), for Forge's deplo
 check "public: nothing rendered without FORGE_PUBLIC_DOMAINS" no_pub
 check "public: adds lines and changes no others" pub_only_adds
 check "public: needs deploys"                    sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+
+# Argo CD links: off unless FORGE_ARGOCD_URL is set.
+argo_render() { FORGE_ARGOCD_URL=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
+argo_on() { out=$(argo_render https://argocd.showmino.com) && printf '%s\n' "$out" | grep -qF '{name: FORGE_ARGOCD_URL, value: "https://argocd.showmino.com"}' && ! printf '%s\n' "$out" | grep -q '#argocd'; }
+argo_off() { ! printf '%s\n' "$dep_head" | grep -q -e FORGE_ARGOCD_URL -e '#argocd'; }
+check "argocd: forge-api gets the address"        argo_on
+check "argocd: nothing rendered without it"       argo_off
+for bad in argocd.showmino.com https://argocd.showmino.com/ 'https://a.com/x' 'https://a.com|b' 'javascript:alert(1)'; do
+  check "argocd: \"$bad\" refused" sh -c "! FORGE_ARGOCD_URL='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+done
+check "argocd: needs deploys"                     sh -c "! FORGE_ARGOCD_URL=https://argocd.showmino.com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "public: a chart revision without DNS records refused" sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=18b12326d3df2c1a11b9f664f378b579eb472aaf FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 # What forge-api (ParsePublicDomains) refuses, the render refuses too.
 for bad in example.com example.com= =example-com Example.com=example-com example.com=example.com localhost=local \
