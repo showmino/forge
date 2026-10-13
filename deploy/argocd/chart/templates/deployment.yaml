@@ -4,7 +4,9 @@ metadata:
   name: {{ required "name" .Values.name }}
   labels: {app: {{ .Values.name }}}
 spec:
+  {{- if not .Values.autoscaling }}
   replicas: {{ .Values.replicas }}
+  {{- end }}
   selector:
     matchLabels: {app: {{ .Values.name }}}
   template:
@@ -27,13 +29,11 @@ spec:
           ports:
             - {name: http, containerPort: {{ .Values.port }}}
           env:
-            - {name: PORT, value: "{{ .Values.port }}"}
-            {{- with .Values.database }}
-            # The connection string CloudNativePG keeps for the service's database.
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef: {name: {{ required "database.secret" .secret }}, key: uri}
-            {{- end }}
+            {{- include "forge.env" . | nindent 12 }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           readinessProbe:
             httpGet: {path: {{ .Values.health }}, port: {{ .Values.port }}}
             periodSeconds: 5

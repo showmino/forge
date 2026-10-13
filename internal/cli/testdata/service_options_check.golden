@@ -1,0 +1,6 @@
+OPTION          STAGING                                            PRODUCTION
+replicas        1                                                  2 to 4 (on CPU)
+resources       requests cpu 100m; limits cpu 500m, memory 512Mi   requests cpu 100m; limits cpu 500m, memory 512Mi
+env             LOG_LEVEL, REGION                                  LOG_LEVEL, REGION
+secret stripe   STRIPE_KEY from vaults/Apps/items/stripe           STRIPE_KEY from vaults/Apps/items/stripe
+job cleanup     0 3 * * *: node cleanup.js                         0 3 * * *: node cleanup.js

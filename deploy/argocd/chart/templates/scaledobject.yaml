@@ -1,0 +1,18 @@
+{{- /* run.autoscaling, in production: KEDA grows the Deployment from
+autoscaling.min to autoscaling.max pods on CPU use. */ -}}
+{{- with .Values.autoscaling }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $.Values.name }}
+spec:
+  scaleTargetRef:
+    name: {{ $.Values.name }}
+  minReplicaCount: {{ required "autoscaling.min" .min }}
+  maxReplicaCount: {{ required "autoscaling.max" .max }}
+  triggers:
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "70"
+{{- end }}

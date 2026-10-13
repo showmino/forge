@@ -275,6 +275,38 @@ the API (`FORGE_API_URL`). forge-api checks the token's audience against
 forge-api serves the matching CLI for Linux at `$FORGE_API_URL/cli/forge-linux-amd64`
 (and `-arm64`), so a job needs no token for the forge repo.
 
+### Run options
+
+`forge.yaml`'s `run:` section also says how a service runs in staging and
+production. Every field is optional; without them a service runs one pod with
+the namespace's default resources:
+
+```yaml
+run:
+  replicas: 3                 # production (1 to 10); staging always runs one
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  env: {LOG_LEVEL: info}      # plain environment variables
+  secrets:                    # 1Password items, as environment variables
+    - name: stripe
+      item: vaults/Apps/items/stripe
+      env: {STRIPE_KEY: credential}   # variable: field of the item
+  jobs:                       # cron jobs: the service's image, env and secrets
+    - name: cleanup
+      schedule: "0 3 * * *"
+      command: [node, scripts/cleanup.js]
+  autoscaling: {max: 6}       # production grows from replicas to max on CPU
+```
+
+`forge service options check` checks them and shows what each environment
+gets, without the API. forge-api checks them again when it deploys: every pod
+the app may run at once (replicas or the autoscaling maximum, plus one per
+job) must fit the namespace's quota, and a secret must come from a vault
+forge-api allows (`--secret-vaults`, none by default). A change applies at
+the next deploy (staging) or promote (production). A forge-api older than
+these fields refuses a `forge.yaml` that has them.
+
 ### Addresses
 
 Where a service is reached depends on whether the platform has public

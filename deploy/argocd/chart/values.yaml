@@ -10,3 +10,14 @@ listener: ""
 # The DNS record of a public address; unset for an internal one.
 #   dns: {name: payments, zone: example-com, tunnel: production}
 dns: null
+# forge.yaml's run options, as forge-api writes them for this environment.
+#   resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}
+resources: null
+# run.env: plain environment variables, NAME: value.
+vars: {}
+# 1Password items: [{name: stripe, item: vaults/Apps/items/stripe, env: {STRIPE_KEY: credential}}]
+secrets: []
+# Cron jobs: [{name: cleanup, schedule: "0 3 * * *", command: [node, cleanup.js]}]
+jobs: []
+# Production only: {min: 2, max: 6}; replicas is then the autoscaler's.
+autoscaling: null

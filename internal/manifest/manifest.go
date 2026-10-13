@@ -66,19 +66,27 @@ const (
 // Run says how preview environments run the service.
 type Run struct {
 	// Port the service listens on for HTTP.
-	Port int `yaml:"port,omitempty"`
+	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 	// Health is the HTTP path probed for readiness and liveness.
-	Health string `yaml:"health,omitempty"`
+	Health string `yaml:"health,omitempty" json:"health,omitempty"`
 	// Domain is the public domain of the service's staging and production
 	// addresses, one the platform offers: "payments.<domain>" in production.
 	// Empty means the platform's default; DomainNone keeps the service on
 	// the platform's internal address.
-	Domain string `yaml:"domain,omitempty"`
+	Domain string `yaml:"domain,omitempty" json:"domain,omitempty"`
 	// Host is the name before the domain in the service's public addresses,
 	// when it is not the service's own: with "shop" a service called
 	// web-storefront is reached at shop.<domain> in production and at
 	// shop-staging.<domain> in staging.
-	Host string `yaml:"host,omitempty"`
+	Host string `yaml:"host,omitempty" json:"host,omitempty"`
+	// Replicas is production's pod count (staging runs one); see options.go
+	// for these and the rest of the run options.
+	Replicas    int               `yaml:"replicas,omitempty" json:"replicas,omitempty"`
+	Resources   *Resources        `yaml:"resources,omitempty" json:"resources,omitempty"`
+	Env         map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
+	Secrets     []Secret          `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+	Jobs        []Job             `yaml:"jobs,omitempty" json:"jobs,omitempty"`
+	Autoscaling *Autoscaling      `yaml:"autoscaling,omitempty" json:"autoscaling,omitempty"`
 }
 
 // RunHost returns run.host as it is written: "" for the service's name.
@@ -210,6 +218,9 @@ func (m *Manifest) Validate() error {
 		}
 		if r.Domain != "" && r.Domain != DomainNone && !domainName.MatchString(r.Domain) {
 			return fmt.Errorf("run.domain %q must be a domain such as example.com, or %q", r.Domain, DomainNone)
+		}
+		if err := r.validateOptions(); err != nil {
+			return err
 		}
 	}
 	if err := resource.Validate(m.Declarations()); err != nil {
