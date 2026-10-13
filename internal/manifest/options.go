@@ -76,6 +76,15 @@ func (s Secret) Vault() string {
 	return parts[1]
 }
 
+// ItemName is the item of the item path vaults/<vault>/items/<item>.
+func (s Secret) ItemName() string {
+	parts := strings.Split(s.Item, "/")
+	if len(parts) != 4 {
+		return ""
+	}
+	return parts[3]
+}
+
 // Job is a cron job: the service's image running Command on Schedule.
 type Job struct {
 	Name     string   `yaml:"name" json:"name"`

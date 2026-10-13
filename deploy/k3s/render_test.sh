@@ -217,6 +217,10 @@ check "argocd: needs deploys"                     sh -c "! FORGE_ARGOCD_URL=http
 # run.secrets vaults: off unless FORGE_SECRET_VAULTS is set.
 vaults_render() { FORGE_SECRET_VAULTS=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
 vaults_on() { out=$(vaults_render Apps,Shared) && printf '%s\n' "$out" | grep -qF '{name: FORGE_SECRET_VAULTS, value: "Apps,Shared"}' && ! printf '%s\n' "$out" | grep -q '#vaults'; }
+denied_on() { out=$(FORGE_SECRET_DENIED_ITEMS=forge-github-app,ghcr-secret vaults_render Kube) && printf '%s\n' "$out" | grep -qF '{name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,ghcr-secret"}'; }
+check "vaults: forge-api gets the denied items"   denied_on
+check "vaults: denied items need vaults"         sh -c "! FORGE_SECRET_DENIED_ITEMS=x FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "vaults: a bad denied item refused"        sh -c "! FORGE_SECRET_VAULTS=Kube FORGE_SECRET_DENIED_ITEMS='a|b' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 vaults_off() { ! printf '%s\n' "$dep_head" | grep -q -e FORGE_SECRET_VAULTS -e '#vaults'; }
 options_kinds() { for k in '{group: onepassword.com, kind: OnePasswordItem}' '{group: batch, kind: CronJob}' '{group: keda.sh, kind: ScaledObject}'; do printf '%s\n' "$dep_head" | grep -qF -- "$k" || return 1; done; }
 check "vaults: forge-api gets the list"           vaults_on

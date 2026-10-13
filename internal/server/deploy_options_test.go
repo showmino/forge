@@ -125,3 +125,29 @@ func TestForEnvOldValues(t *testing.T) {
 		t.Errorf("production from old values: %d %+v", v.Replicas, v.Autoscaling)
 	}
 }
+
+// In an allowed vault, the platform's own items stay out of reach: by
+// title in any case, and by ID, which the list of titles cannot catch.
+func TestSecretDeniedItems(t *testing.T) {
+	t.Parallel()
+	for item, want := range map[string]string{
+		"forge-github-app":           "holds the platform's own credentials",
+		"Forge-GitHub-App":           "holds the platform's own credentials",
+		"abcdefghijklmnopqrstuvwxyz": "not its 1Password ID",
+		"showmino-api":               "",
+	} {
+		manifest := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n" +
+			"  secrets: [{name: s, item: vaults/Kube/items/" + item + ", env: {KEY: credential}}]\n"
+		f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+			o.GitHub.(*envtest.GitHub).Files[envSHA+":forge.yaml"] = []byte(manifest)
+			o.SecretVaults, o.SecretDeniedItems = []string{"Kube"}, []string{"forge-github-app", "ghcr-secret"}
+		})
+		_, err := f.start(t, "staging")
+		switch {
+		case want == "" && err != nil:
+			t.Errorf("%s: %v", item, err)
+		case want != "" && (connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), want)):
+			t.Errorf("%s: %v, want %q", item, err, want)
+		}
+	}
+}

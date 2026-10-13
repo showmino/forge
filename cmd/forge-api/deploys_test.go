@@ -38,15 +38,16 @@ func TestDeploys(t *testing.T) {
 		domain  string
 		msg     string
 	}{
-		"no app":         {ok, nil, cluster, "preview.x.nip.io", "GitHub App"},
-		"no previews":    {ok, app, nil, "", "--previews"},
-		"bad repo":       {deployFlags{on: true, repo: "nope", syncTimeout: "10m", namespaceTimeout: "5m"}, app, cluster, "preview.x.nip.io", "owner/name"},
-		"bad timeout":    {deployFlags{on: true, repo: "a/b", syncTimeout: "soon", namespaceTimeout: "5m"}, app, cluster, "preview.x.nip.io", "FORGE_DEPLOY_SYNC_TIMEOUT"},
-		"bad ns timeout": {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "soon"}, app, cluster, "preview.x.nip.io", "FORGE_DEPLOY_NAMESPACE_TIMEOUT"},
-		"bad domain":     {ok, app, cluster, "x.nip.io", "--deploy-domain"},
-		"argocd path":    {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", argoURL: "https://argocd.example.com/x"}, app, cluster, "preview.x.nip.io", "--argocd-url"},
-		"argocd scheme":  {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", argoURL: "javascript:alert(1)"}, app, cluster, "preview.x.nip.io", "--argocd-url"},
-		"bad vault":      {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", secretVaults: "Apps,My Vault"}, app, cluster, "preview.x.nip.io", "--secret-vaults"},
+		"no app":          {ok, nil, cluster, "preview.x.nip.io", "GitHub App"},
+		"no previews":     {ok, app, nil, "", "--previews"},
+		"bad repo":        {deployFlags{on: true, repo: "nope", syncTimeout: "10m", namespaceTimeout: "5m"}, app, cluster, "preview.x.nip.io", "owner/name"},
+		"bad timeout":     {deployFlags{on: true, repo: "a/b", syncTimeout: "soon", namespaceTimeout: "5m"}, app, cluster, "preview.x.nip.io", "FORGE_DEPLOY_SYNC_TIMEOUT"},
+		"bad ns timeout":  {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "soon"}, app, cluster, "preview.x.nip.io", "FORGE_DEPLOY_NAMESPACE_TIMEOUT"},
+		"bad domain":      {ok, app, cluster, "x.nip.io", "--deploy-domain"},
+		"argocd path":     {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", argoURL: "https://argocd.example.com/x"}, app, cluster, "preview.x.nip.io", "--argocd-url"},
+		"argocd scheme":   {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", argoURL: "javascript:alert(1)"}, app, cluster, "preview.x.nip.io", "--argocd-url"},
+		"bad vault":       {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", secretVaults: "Apps,My Vault"}, app, cluster, "preview.x.nip.io", "--secret-vaults"},
+		"bad denied item": {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", secretVaults: "Kube", secretDenied: "a/b"}, app, cluster, "preview.x.nip.io", "--secret-denied-items"},
 	} {
 		if _, err := deploys(tc.f, tc.app, tc.domain, tc.cluster, &envtest.Images{}, cat, ops, "showmino", log); err == nil || !strings.Contains(err.Error(), tc.msg) {
 			t.Errorf("%s: %v, want %q", name, err, tc.msg)
