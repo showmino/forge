@@ -188,15 +188,17 @@ pub_settings() {
 }
 pub_listeners() {
   pub_has '    - name: public-showmino-com' && pub_has '      hostname: "*.showmino.com"' &&
+    pub_has '    - name: public-showmino-com-root' && pub_has '      hostname: "showmino.com"' &&
     pub_has '    - name: public-deogratias-cloud' && pub_has '      hostname: "*.deogratias.cloud"' &&
-    [ "$(printf '%s\n' "$pub" | grep -cF -- '- {key: forge.dev/deploy-env, operator: Exists}')" = 2 ] &&
+    pub_has '    - name: public-deogratias-cloud-root' && pub_has '      hostname: "deogratias.cloud"' &&
+    [ "$(printf '%s\n' "$pub" | grep -cF -- '- {key: forge.dev/deploy-env, operator: Exists}')" = 4 ] &&
     ! pub_has '#public'
 }
 no_pub() { ! printf '%s\n' "$dep" | grep -q -e FORGE_PUBLIC -e 'name: public' -e CloudflareRecordsApplication -e '#public' -e 'Public addresses'; }
 pub_only_adds() { d=$(mktemp) && p=$(mktemp) && printf '%s\n' "$dep_head" > "$d" && printf '%s\n' "$pub" > "$p"; n=$(diff "$d" "$p" | grep -c '^<'); rm -f "$d" "$p"; [ "$n" = 0 ]; }
 bad_pub() { ! pub_render "$1" >/dev/null 2>&1; }
 check "public: forge-api settings and the project entry" pub_settings
-check "public: one listener per domain, for its hosts only" pub_listeners
+check "public: two listeners per domain (its hosts, its root), for Forge's deployments only" pub_listeners
 check "public: nothing rendered without FORGE_PUBLIC_DOMAINS" no_pub
 check "public: adds lines and changes no others" pub_only_adds
 check "public: needs deploys"                    sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"

@@ -1,0 +1,3 @@
+ENV          ADDRESS                            NOW   IN USE
+staging      https://staging.deogratias.cloud   -     -
+production   https://deogratias.cloud           -     yes: claim deogratias.cloud

@@ -271,10 +271,13 @@ if [ -n "$public_domains" ]; then
     seen=$seen$domain,
     # One listener per domain: it takes only hosts under that domain, and
     # only routes from the namespace of a Forge deployment, never a preview.
-    public_listeners="$public_listeners    - name: public-$zone
+    # *.<domain> does not match the domain itself: its root has a listener
+    # of its own, for a service whose address is set to the root.
+    for listener in "public-$zone *.$domain" "public-$zone-root $domain"; do
+      public_listeners="$public_listeners    - name: ${listener% *}
       protocol: HTTP
       port: 80
-      hostname: \"*.$domain\"
+      hostname: \"${listener#* }\"
       allowedRoutes:
         namespaces:
           from: Selector
@@ -284,6 +287,7 @@ if [ -n "$public_domains" ]; then
             matchExpressions:
               - {key: forge.dev/deploy-env, operator: Exists}
 "
+    done
   done
   IFS=$old_ifs
   # A chart from before public addresses ignores them: the deployment would

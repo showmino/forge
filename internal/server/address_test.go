@@ -63,6 +63,10 @@ func TestAddress(t *testing.T) {
 		{name: "another name that is someone's staging address", d: pub, svc: "forge-web", env: "production", as: "shop-staging", refused: `run.host shop-staging cannot have a public address`},
 		{name: "another name means nothing for an internal address", d: pub, svc: "forge-web", env: "staging", as: "forge", want: "none", host: "forge-web.staging.10.150.1.222.nip.io", url: "http://forge-web.staging.10.150.1.222.nip.io"},
 		{name: "another name without public domains", d: lan, svc: "forge-web", env: "staging", as: "forge", host: "forge-web.staging.10.150.1.222.nip.io", url: "http://forge-web.staging.10.150.1.222.nip.io"},
+		// The root of a domain: the domain itself in production, <env>.<domain> elsewhere.
+		{name: "the root, staging", d: pub, svc: "deogratias", env: "staging", as: "@", want: "deogratias.cloud", host: "staging.deogratias.cloud", url: "https://staging.deogratias.cloud", dns: "staging deogratias-cloud production"},
+		{name: "an environment's name as the host", d: pub, svc: "web", env: "production", as: "staging", refused: "staging.showmino.com is where the service at the root of showmino.com is reached in staging"},
+		{name: "the root means nothing for an internal address", d: pub, svc: "deogratias", env: "staging", as: "@", want: "none", host: "deogratias.staging.10.150.1.222.nip.io", url: "http://deogratias.staging.10.150.1.222.nip.io"},
 	} {
 		a, err := tc.d.address(tc.svc, tc.env, wanted{domain: tc.want, host: tc.as})
 		if tc.refused != "" {
@@ -82,6 +86,11 @@ func TestAddress(t *testing.T) {
 		if err != nil || a.host != tc.host || a.url() != tc.url || dns != tc.dns || a.listener != listener {
 			t.Errorf("%s: %+v dns %q, %v", tc.name, a, dns, err)
 		}
+	}
+	// The root in production: no record of Forge's, a listener of its own, and public all the same.
+	a, err := pub.address("deogratias", "production", wanted{domain: "deogratias.cloud", host: "@"})
+	if err != nil || a.host != "deogratias.cloud" || a.url() != "https://deogratias.cloud" || a.dns != nil || a.listener != "public-deogratias-cloud-root" || !a.public {
+		t.Errorf("the root in production: %+v, %v", a, err)
 	}
 }
 

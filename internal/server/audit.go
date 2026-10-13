@@ -430,6 +430,12 @@ var auditActions = map[string]auditAction{
 		return s, deployNamePrefix + strings.TrimPrefix(s, servicePrefix) + "/" + to,
 			details("from", r.GetFrom(), "to", r.GetTo(), "validate_only", flag(r.GetValidateOnly()))
 	}},
+	forgev1connect.DeployServiceSetAddressProcedure: {"service.address", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.SetAddressRequest)
+		s := serviceName(r.GetService())
+		return s, s, details("host", r.GetHost(), "domain", r.GetDomain(), "clear", flag(r.GetClear()),
+			"claim", strings.Join(r.GetClaim(), ","), "validate_only", flag(r.GetValidateOnly()))
+	}},
 	forgev1connect.OperationServiceCancelOperationProcedure: {"operation.cancel", func(m any) (string, string, map[string]string) {
 		return "", m.(*forgev1.CancelOperationRequest).GetName(), nil
 	}},

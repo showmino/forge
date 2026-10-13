@@ -177,6 +177,8 @@ type deployValues struct {
 	// environment's own, and DNS the record of a public address.
 	Listener string     `yaml:"listener,omitempty"`
 	DNS      *deployDNS `yaml:"dns,omitempty"`
+	// Public marks a public address with no record of Forge's: the root of a domain.
+	Public bool `yaml:"public,omitempty"`
 	// Database is set when the service has a database in this environment.
 	Database *deployDatabase `yaml:"database,omitempty"`
 	Forge    deployRecord    `yaml:"forge"`
@@ -194,6 +196,14 @@ func (v deployValues) marshal() []byte {
 		panic(err) // a plain struct always marshals
 	}
 	return append([]byte("# Written by Forge; change it with 'forge deploy'.\n"), data...)
+}
+
+// isPublic reports whether the deployment is reachable from the internet.
+func (v *deployValues) isPublic() bool { return v != nil && (v.DNS != nil || v.Public) }
+
+// setAddress puts an address into the values the chart reads.
+func (v *deployValues) setAddress(a address) {
+	v.Host, v.Listener, v.DNS, v.Public = a.host, a.listener, a.dns, a.public && a.dns == nil
 }
 
 func parseValues(data []byte) (deployValues, error) {
@@ -273,7 +283,7 @@ var healthStates = map[string]forgev1.Deployment_Health{
 func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit string, st AppStatus) *forgev1.Deployment {
 	dep := &forgev1.Deployment{
 		Name: deployNamePrefix + svc + "/" + env, Service: servicePrefix + svc, Env: env,
-		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: hostURL(v.Host, v.DNS != nil),
+		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: hostURL(v.Host, v.isPublic()),
 		Sync: forgev1.Deployment_SYNC_STATUS_UNKNOWN, Health: forgev1.Deployment_HEALTH_UNKNOWN,
 		Message: st.Message, DeployCommit: deployCommit, DeployedBy: v.Forge.Actor, Version: v.Forge.Version,
 	}
@@ -506,7 +516,7 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if err != nil {
 		return nil, err
 	}
-	v.Host, v.Listener, v.DNS = addr.host, addr.listener, addr.dns
+	v.setAddress(addr)
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
 		return nil, err
 	}
@@ -567,7 +577,8 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 		return nil, err
 	}
 	v := src
-	v.Env, v.Host, v.Listener, v.DNS = to, addr.host, addr.listener, addr.dns
+	v.Env = to
+	v.setAddress(addr)
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
 	// Staging's candidate number is not production's version: that is cut
 	// below, or there is none.

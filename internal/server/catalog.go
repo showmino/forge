@@ -257,6 +257,8 @@ func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forg
 		}
 		s := cloneSvc(in)
 		s.Name = name
+		// Only SetAddress sets an address: it checks the names it takes.
+		s.Address = nil
 		now := timestamppb.New(c.now())
 		s.CreateTime, s.UpdateTime = now, now
 		s.Etag = etag(1)

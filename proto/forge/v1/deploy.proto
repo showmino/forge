@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package forge.v1;
 
+import "forge/v1/catalog.proto";
 import "forge/v1/operation.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -33,6 +34,11 @@ service DeployService {
 
   // PromoteDeploy copies what runs in one environment to the next.
   rpc PromoteDeploy(PromoteDeployRequest) returns (PromoteDeployResponse) {}
+
+  // SetAddress changes where a service is reached, overriding forge.yaml's
+  // run.host and run.domain. It applies at the next deploy of each
+  // environment.
+  rpc SetAddress(SetAddressRequest) returns (SetAddressResponse) {}
 }
 
 // Bump is the part of the version a final release raises.
@@ -190,4 +196,42 @@ message PromoteDeployResponse {
   Operation operation = 1;
   // What will run in the target environment.
   Deployment deployment = 2;
+}
+
+message SetAddressRequest {
+  // "services/{service}".
+  string service = 1;
+  // The name before the domain: "" for the service's own, "@" for the
+  // domain itself.
+  string host = 2;
+  // One of the platform's public domains, "" for the default, or "none".
+  string domain = 3;
+  // Clear the setting: forge.yaml's run.host and run.domain apply again.
+  bool clear = 4;
+  // Addresses in use (they resolve in DNS) that the service may take over.
+  // Each one in use must be named here.
+  repeated string claim = 5;
+  bool validate_only = 6;
+}
+
+message SetAddressResponse {
+  // The service with its new address setting.
+  Service service = 1;
+  // Where each environment will be reached after its next deploy.
+  repeated PlannedAddress addresses = 2;
+}
+
+// PlannedAddress is where one environment of a service will be reached.
+message PlannedAddress {
+  string env = 1;
+  string url = 2;
+  // Reachable from the internet.
+  bool public = 3;
+  // The name resolves in DNS and is not this environment's address now:
+  // it must be claimed.
+  bool in_use = 4;
+  // Where the environment is reached now, "" before its first deploy.
+  string current_url = 5;
+  // The host to name in claim when in_use.
+  string host = 6;
 }

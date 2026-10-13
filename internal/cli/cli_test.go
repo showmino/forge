@@ -36,13 +36,16 @@ type harness struct {
 	templates server.TemplateSource
 	teams     server.TeamSource
 	docs      server.DocsGitHub
-	repos     server.RepoHost
-	ops       *server.Operations
-	catalog   *server.Catalog
-	envs      *server.Environments
-	deploys   *server.Deploys
-	resources *server.Resources
-	audit     *store.Memory
+	// publicDomains and hostTaken go to the deploy engine of serveDeploys.
+	publicDomains []server.PublicDomain
+	hostTaken     func(context.Context, string) (bool, error)
+	repos         server.RepoHost
+	ops           *server.Operations
+	catalog       *server.Catalog
+	envs          *server.Environments
+	deploys       *server.Deploys
+	resources     *server.Resources
+	audit         *store.Memory
 }
 
 const (

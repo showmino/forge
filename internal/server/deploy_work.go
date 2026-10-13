@@ -94,9 +94,9 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	}
 	v := deployValues{
 		Name: src.serviceID, Env: env, Image: src.image, Port: src.port, Health: src.health, Replicas: 1,
-		Host: addr.host, Listener: addr.listener, DNS: addr.dns,
 		Forge: deployRecord{Service: servicePrefix + src.serviceID, Env: env, Ref: src.ref, Commit: src.commit, Actor: actor, Kind: kindDeploy, Domain: src.domain, Host: src.host},
 	}
+	v.setAddress(addr)
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, src.serviceID, m.GetEnv()); err != nil {
 		return nil, err
 	}
@@ -280,7 +280,7 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 			if atRev && st.Sync == "Synced" && st.Health == "Healthy" {
 				url := "http://" + d.host(svc, env)
 				if v, err := parseValues(content); err == nil && v.Host != "" {
-					url = hostURL(v.Host, v.DNS != nil)
+					url = hostURL(v.Host, v.isPublic())
 				}
 				emit("sync", url)
 				return nil
