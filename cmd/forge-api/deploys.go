@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 
 	"github.com/showmino/forge/internal/github"
@@ -29,6 +30,8 @@ type deployFlags struct {
 	repo, domain, syncTimeout, namespaceTimeout string
 	// publicDomains is --public-domains, publicTunnel --public-dns-tunnel.
 	publicDomains, publicTunnel string
+	// argoURL is --argocd-url, Argo CD's web address.
+	argoURL string
 	// resources says which database a service has, for DATABASE_URL.
 	resources store.ResourceStore
 }
@@ -78,8 +81,12 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 		log.Info("services get public addresses", "domains", f.publicDomains, "tunnel", f.publicTunnel)
 	}
 	gh := &github.Client{Token: app.Token}
+	argoURL := strings.TrimSuffix(f.argoURL, "/")
+	if u, err := url.Parse(argoURL); argoURL != "" && (err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil) {
+		return nil, fmt.Errorf("--argocd-url %q must be a scheme and a host, like https://argocd.example.com", f.argoURL)
+	}
 	return server.NewDeploys(server.DeployOptions{
-		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS,
+		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS, ArgoURL: argoURL,
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
 		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,

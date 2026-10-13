@@ -423,3 +423,15 @@ func TestDeployConcurrencyAndConflict(t *testing.T) {
 		t.Errorf("after %d conflicts: %v", n, op.GetError())
 	}
 }
+
+func TestDeploymentArgoURL(t *testing.T) {
+	t.Parallel()
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) { o.ArgoURL = "https://argocd.example.com" })
+	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	d, err := f.client.GetDeployment(context.Background(), as("reader", &forgev1.GetDeploymentRequest{Name: "deployments/payments/staging"}))
+	if err != nil || d.Msg.GetDeployment().GetArgoUrl() != "https://argocd.example.com/applications/argocd/payments-staging" {
+		t.Errorf("argo_url: %v %v", d, err)
+	}
+}
