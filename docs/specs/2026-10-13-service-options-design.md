@@ -95,6 +95,18 @@ its own pull secret), annotations.
 
 ## Security: which vaults
 
+Decided by the owner on 2026-10-13: services read the vault `Kube`, the one
+every app on the cluster uses. It also holds the platform's own credentials,
+so forge-api refuses the items in `--secret-denied-items` (by title, in any
+case) and any item named by a 1Password ID, which a list of titles could not
+catch. The rollout denies `forge-github-app`, `forge-dex-github`,
+`ghcr-secret`, `arc-runners`, `argocd-repo-kubernetes`, `cert-manager`,
+`Cloudflare`, `crossplane-cloudflare`, `crossplane-github-provider-creds`,
+`grafana-admin-credentials` and `renovate`. A new platform credential in
+`Kube` must be added to the list.
+
+The proposal before that decision:
+
 All 30 1Password items on the cluster today come from the vault `Kube`, which
 also holds the platform's own secrets (the GitHub App key, the registry
 credential, Dex's OAuth secret). Allowing `Kube` would let any writer put the

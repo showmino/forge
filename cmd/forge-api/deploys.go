@@ -34,6 +34,8 @@ type deployFlags struct {
 	argoURL string
 	// secretVaults is --secret-vaults, the 1Password vaults services may read.
 	secretVaults string
+	// secretDenied is --secret-denied-items, items in them services may not.
+	secretDenied string
 	// resources says which database a service has, for DATABASE_URL.
 	resources store.ResourceStore
 }
@@ -87,18 +89,24 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	if u, err := url.Parse(argoURL); argoURL != "" && (err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil) {
 		return nil, fmt.Errorf("--argocd-url %q must be a scheme and a host, like https://argocd.example.com", f.argoURL)
 	}
-	var vaults []string
-	for _, v := range strings.Split(f.secretVaults, ",") {
-		if v = strings.TrimSpace(v); v == "" {
-			continue
+	var vaults, denied []string
+	for _, list := range []struct {
+		flag, value string
+		to          *[]string
+	}{{"--secret-vaults", f.secretVaults, &vaults}, {"--secret-denied-items", f.secretDenied, &denied}} {
+		for _, v := range strings.Split(list.value, ",") {
+			if v = strings.TrimSpace(v); v == "" {
+				continue
+			}
+			if !manifest.ValidVault(v) {
+				return nil, fmt.Errorf("%s: %q must be a 1Password name (letters, digits, '.', '_', '-')", list.flag, v)
+			}
+			*list.to = append(*list.to, v)
 		}
-		if !manifest.ValidVault(v) {
-			return nil, fmt.Errorf("--secret-vaults: %q must be a vault name (letters, digits, '.', '_', '-')", v)
-		}
-		vaults = append(vaults, v)
 	}
 	return server.NewDeploys(server.DeployOptions{
-		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS, ArgoURL: argoURL, SecretVaults: vaults,
+		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS, ArgoURL: argoURL,
+		SecretVaults: vaults, SecretDeniedItems: denied,
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
 		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,

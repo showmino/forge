@@ -305,7 +305,9 @@ that may run at once in an environment must fit the namespace's quota
 (requests 2 CPU / 2Gi, limits 4 CPU / 4Gi, 15 pods): the replicas or the
 autoscaling maximum, one more pod while a rollout replaces them, one per cron
 job, and the database's instances. A secret must come from a vault forge-api
-allows (`--secret-vaults`, none by default); it becomes the Secret
+allows (`--secret-vaults`, none by default), may not be one of the items
+forge-api denies (`--secret-denied-items`, the platform's own credentials),
+and must be named by its title, not its 1Password ID; it becomes the Secret
 `<name>-1password`. A change applies at
 the next deploy (staging) or promote (production). A forge-api older than
 these fields refuses a `forge.yaml` that has them.

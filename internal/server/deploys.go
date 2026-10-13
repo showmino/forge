@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -75,6 +76,9 @@ type DeployOptions struct {
 	// SecretVaults are the 1Password vaults run.secrets may read; empty
 	// refuses every secret.
 	SecretVaults []string
+	// SecretDeniedItems are items in those vaults no service may read: the
+	// platform's own credentials. Compared without regard to case.
+	SecretDeniedItems []string
 	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
 	ImageTimeout, SyncTimeout, NamespaceTimeout time.Duration
 	// Defaults: 10s, 2s.
@@ -245,9 +249,22 @@ func (d *Deploys) secretsAllowed(v deployValues) error {
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
 				"run.secrets %s: the vault %q is not one services may read (allowed: %s)", s.Name, s.Vault(), allowed))
 		}
+		item := s.ItemName()
+		// An item named by its ID would get past the deny list, which has names.
+		if onePasswordID.MatchString(item) {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"run.secrets %s: name the item %q by its title, not its 1Password ID", s.Name, item))
+		}
+		if slices.ContainsFunc(d.o.SecretDeniedItems, func(denied string) bool { return strings.EqualFold(denied, item) }) {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"run.secrets %s: the item %q holds the platform's own credentials; services may not read it", s.Name, item))
+		}
 	}
 	return nil
 }
+
+// onePasswordID is the form of a 1Password vault or item ID.
+var onePasswordID = regexp.MustCompile(`^[a-z0-9]{26}$`)
 
 // deployDatabase tells the chart where the app's DATABASE_URL comes from.
 type deployDatabase struct {
