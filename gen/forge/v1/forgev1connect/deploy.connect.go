@@ -51,6 +51,9 @@ const (
 	// DeployServicePromoteDeployProcedure is the fully-qualified name of the DeployService's
 	// PromoteDeploy RPC.
 	DeployServicePromoteDeployProcedure = "/forge.v1.DeployService/PromoteDeploy"
+	// DeployServiceSetAddressProcedure is the fully-qualified name of the DeployService's SetAddress
+	// RPC.
+	DeployServiceSetAddressProcedure = "/forge.v1.DeployService/SetAddress"
 )
 
 // DeployServiceClient is a client for the forge.v1.DeployService service.
@@ -67,6 +70,10 @@ type DeployServiceClient interface {
 	RollbackDeploy(context.Context, *connect.Request[v1.RollbackDeployRequest]) (*connect.Response[v1.RollbackDeployResponse], error)
 	// PromoteDeploy copies what runs in one environment to the next.
 	PromoteDeploy(context.Context, *connect.Request[v1.PromoteDeployRequest]) (*connect.Response[v1.PromoteDeployResponse], error)
+	// SetAddress changes where a service is reached, overriding forge.yaml's
+	// run.host and run.domain. It applies at the next deploy of each
+	// environment.
+	SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error)
 }
 
 // NewDeployServiceClient constructs a client for the forge.v1.DeployService service. By default, it
@@ -119,6 +126,12 @@ func NewDeployServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(deployServiceMethods.ByName("PromoteDeploy")),
 			connect.WithClientOptions(opts...),
 		),
+		setAddress: connect.NewClient[v1.SetAddressRequest, v1.SetAddressResponse](
+			httpClient,
+			baseURL+DeployServiceSetAddressProcedure,
+			connect.WithSchema(deployServiceMethods.ByName("SetAddress")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -130,6 +143,7 @@ type deployServiceClient struct {
 	listDeployHistory *connect.Client[v1.ListDeployHistoryRequest, v1.ListDeployHistoryResponse]
 	rollbackDeploy    *connect.Client[v1.RollbackDeployRequest, v1.RollbackDeployResponse]
 	promoteDeploy     *connect.Client[v1.PromoteDeployRequest, v1.PromoteDeployResponse]
+	setAddress        *connect.Client[v1.SetAddressRequest, v1.SetAddressResponse]
 }
 
 // StartDeploy calls forge.v1.DeployService.StartDeploy.
@@ -162,6 +176,11 @@ func (c *deployServiceClient) PromoteDeploy(ctx context.Context, req *connect.Re
 	return c.promoteDeploy.CallUnary(ctx, req)
 }
 
+// SetAddress calls forge.v1.DeployService.SetAddress.
+func (c *deployServiceClient) SetAddress(ctx context.Context, req *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error) {
+	return c.setAddress.CallUnary(ctx, req)
+}
+
 // DeployServiceHandler is an implementation of the forge.v1.DeployService service.
 type DeployServiceHandler interface {
 	// StartDeploy deploys ref (default main) of service to env.
@@ -176,6 +195,10 @@ type DeployServiceHandler interface {
 	RollbackDeploy(context.Context, *connect.Request[v1.RollbackDeployRequest]) (*connect.Response[v1.RollbackDeployResponse], error)
 	// PromoteDeploy copies what runs in one environment to the next.
 	PromoteDeploy(context.Context, *connect.Request[v1.PromoteDeployRequest]) (*connect.Response[v1.PromoteDeployResponse], error)
+	// SetAddress changes where a service is reached, overriding forge.yaml's
+	// run.host and run.domain. It applies at the next deploy of each
+	// environment.
+	SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error)
 }
 
 // NewDeployServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -224,6 +247,12 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(deployServiceMethods.ByName("PromoteDeploy")),
 		connect.WithHandlerOptions(opts...),
 	)
+	deployServiceSetAddressHandler := connect.NewUnaryHandler(
+		DeployServiceSetAddressProcedure,
+		svc.SetAddress,
+		connect.WithSchema(deployServiceMethods.ByName("SetAddress")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.DeployService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case DeployServiceStartDeployProcedure:
@@ -238,6 +267,8 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 			deployServiceRollbackDeployHandler.ServeHTTP(w, r)
 		case DeployServicePromoteDeployProcedure:
 			deployServicePromoteDeployHandler.ServeHTTP(w, r)
+		case DeployServiceSetAddressProcedure:
+			deployServiceSetAddressHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -269,4 +300,8 @@ func (UnimplementedDeployServiceHandler) RollbackDeploy(context.Context, *connec
 
 func (UnimplementedDeployServiceHandler) PromoteDeploy(context.Context, *connect.Request[v1.PromoteDeployRequest]) (*connect.Response[v1.PromoteDeployResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.PromoteDeploy is not implemented"))
+}
+
+func (UnimplementedDeployServiceHandler) SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.SetAddress is not implemented"))
 }

@@ -76,6 +76,19 @@ message Service {
   google.protobuf.Timestamp update_time = 10;
   // Opaque version for optimistic concurrency. Output only, echoed back on update and delete.
   string etag = 11;
+  // Where the service is reached, when set in Forge (DeployService.SetAddress)
+  // rather than by forge.yaml. Output only.
+  ServiceAddress address = 12;
+}
+
+// ServiceAddress overrides forge.yaml's run.host and run.domain.
+message ServiceAddress {
+  // "" for the service's name, "@" for the domain itself.
+  string host = 1;
+  // A public domain of the platform, "" for the default, or "none".
+  string domain = 2;
+  // Addresses the service took over although they were in use.
+  repeated string claimed = 3;
 }
 
 message ListServicesRequest {

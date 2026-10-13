@@ -24,6 +24,7 @@ func (h *harness) serveDeploys(unhealthy map[string]string) *envtest.Repo {
 		GitHub:   &envtest.GitHub{Refs: map[string]string{"main": cliSHA}},
 		Releases: &envtest.Releases{},
 		Org:      "showmino", Domain: "10.150.1.222.nip.io",
+		PublicDomains: h.publicDomains, HostTaken: h.hostTaken,
 		ImagePoll: 5 * time.Millisecond, Poll: 5 * time.Millisecond,
 		ImageTimeout: 5 * time.Second, SyncTimeout: 300 * time.Millisecond, NamespaceTimeout: 5 * time.Second,
 	})

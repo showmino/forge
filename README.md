@@ -302,6 +302,24 @@ each domain with the name of its DNS zone, the default first).
   `run.host` cannot be the name of another service in the catalog, and like
   every new address it must not resolve yet.
 
+A writer can also set a service's address in Forge, where it wins over
+`run.host` and `run.domain` (in the dashboard: Settings, Danger zone, Change
+address). It is meant for the rare move, for example a service that takes
+over a domain of its own:
+
+```sh
+forge service address deogratias --host @ --domain deogratias.cloud --dry-run
+forge service address deogratias --host @ --domain deogratias.cloud --claim deogratias.cloud
+forge service address deogratias --clear      # back to forge.yaml
+```
+
+`--host @` is the domain itself: production at `https://deogratias.cloud`,
+staging at `https://staging.deogratias.cloud`. Forge makes no DNS record for
+the root of a domain; the domain's owner points it at the cluster. An address
+that already resolves is taken over only when named with `--claim`, and the
+claim is kept in the service and the audit log. Like `run.host`, the setting
+applies at the next deploy of each environment.
+
 The deploy chart makes the DNS record with the deployment: a
 `CloudflareRecordsApplication` (the platform's own kind; a Crossplane `Record`
 underneath, a proxied CNAME to the cluster's Cloudflare tunnel). It is removed

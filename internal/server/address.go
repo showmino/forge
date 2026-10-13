@@ -36,6 +36,10 @@ func ParsePublicDomains(list string) ([]PublicDomain, error) {
 		if !ok || !manifest.ValidDomain(name) || !manifest.ValidID(zone) {
 			return nil, fmt.Errorf("public domain %q must be <domain>=<zone name>, like example.com=example-com", item)
 		}
+		if strings.HasSuffix(zone, "-root") {
+			// public-<zone>-root is the listener of another zone's root.
+			return nil, fmt.Errorf("public domain %q: a zone name cannot end in -root", item)
+		}
 		if slices.ContainsFunc(out, func(d PublicDomain) bool { return d.Name == name }) {
 			return nil, fmt.Errorf("public domain %s is listed twice", name)
 		}
@@ -63,11 +67,14 @@ type address struct {
 	host string
 	// listener is the Gateway listener of the route; "" is the environment's own.
 	listener string
-	// dns is set for a public address.
+	// dns is set for a public address whose record Forge makes.
 	dns *deployDNS
+	// public is set for every address reachable from the internet, with or
+	// without a record of Forge's (the root of a domain has none).
+	public bool
 }
 
-func (a address) url() string { return hostURL(a.host, a.dns != nil) }
+func (a address) url() string { return hostURL(a.host, a.public) }
 
 // hostURL is the address people open: public addresses are served over HTTPS
 // by the platform's edge, internal ones over plain HTTP.
@@ -78,10 +85,45 @@ func hostURL(host string, public bool) string {
 	return "http://" + host
 }
 
-// wanted is the address a service asks for in its forge.yaml: run.domain and
-// run.host, each "" for the default.
+// wanted is the address a service asks for: forge.yaml's run.domain and
+// run.host, each "" for the default, or the setting made in Forge, which
+// wins (set). claimed are addresses in use the service may take over.
 type wanted struct {
 	domain, host string
+	claimed      []string
+	set          bool
+}
+
+// HostRoot is the host of a service reached at the domain itself.
+const HostRoot = "@"
+
+// rootListener is the Gateway listener of a domain's root: the public
+// listener takes *.<domain>, which does not match the domain itself.
+func rootListener(d PublicDomain) string { return publicListener(d) + "-root" }
+
+// withSetting returns what svc asks for: the address set in Forge when there
+// is one, else forge.yaml's (fromYAML). The note says when the two disagree.
+func (d *Deploys) withSetting(ctx context.Context, svc string, fromYAML wanted) (wanted, string, error) {
+	if d.o.Catalog == nil {
+		return fromYAML, "", nil
+	}
+	s, err := d.o.Catalog.get(ctx, servicePrefix+svc)
+	if connect.CodeOf(err) == connect.CodeNotFound {
+		return fromYAML, "", nil
+	}
+	if err != nil {
+		return fromYAML, "", err
+	}
+	a := s.GetAddress()
+	if a == nil {
+		return fromYAML, "", nil
+	}
+	w := wanted{domain: a.GetDomain(), host: a.GetHost(), claimed: a.GetClaimed(), set: true}
+	note := ""
+	if fromYAML.domain != w.domain || fromYAML.host != w.host {
+		note = fmt.Sprintf("the address set in Forge (host %q, domain %q) wins over forge.yaml's (run.host %q, run.domain %q)", w.host, w.domain, fromYAML.host, fromYAML.domain)
+	}
+	return w, note, nil
 }
 
 // address works out where svc is reached in env. Without public domains, or
@@ -117,6 +159,21 @@ func (d *Deploys) address(svc, env string, w wanted) (address, error) {
 	if w.host != "" && w.host != svc {
 		name, named = w.host, "run.host "+w.host
 	}
+	if name == HostRoot {
+		// The root: <domain> in production, <env>.<domain> elsewhere. Forge
+		// makes no record for the domain itself; it must point at the tunnel.
+		if env == finalEnv {
+			return address{host: domain.Name, listener: rootListener(domain), public: true}, nil
+		}
+		return address{
+			host: env + "." + domain.Name, listener: publicListener(domain), public: true,
+			dns: &deployDNS{Name: env, Zone: domain.Zone, Tunnel: d.o.DNSTunnel},
+		}, nil
+	}
+	// <env>.<domain> is where the root of a domain is reached in that environment.
+	if slices.Contains(deployEnvs, name) {
+		return refuse("%s cannot have a public address: %s.%s is where the service at the root of %s is reached in %s. Pick another name", named, name, domain.Name, domain.Name, name)
+	}
 	label := name
 	if env != finalEnv {
 		label = name + "-" + env
@@ -132,7 +189,7 @@ func (d *Deploys) address(svc, env string, w wanted) (address, error) {
 		return refuse("the address %s.%s is too long: a name before the domain has at most 63 characters", label, domain.Name)
 	}
 	return address{
-		host: label + "." + domain.Name, listener: publicListener(domain),
+		host: label + "." + domain.Name, listener: publicListener(domain), public: true,
 		dns: &deployDNS{Name: label, Zone: domain.Zone, Tunnel: d.o.DNSTunnel},
 	}, nil
 }
@@ -142,7 +199,11 @@ func (d *Deploys) address(svc, env string, w wanted) (address, error) {
 // the environment has now, nil before its first deploy. The note says what
 // the reader of the operation must know: that the service is public, and
 // which address stops working. It is "" when nothing of that changes.
-func (d *Deploys) addressFor(ctx context.Context, svc, env string, want wanted, current *deployValues) (address, string, error) {
+func (d *Deploys) addressFor(ctx context.Context, svc, env string, fromYAML wanted, current *deployValues) (address, string, error) {
+	want, disagree, err := d.withSetting(ctx, svc, fromYAML)
+	if err != nil {
+		return address{}, "", err
+	}
 	a, err := d.address(svc, env, want)
 	if err != nil {
 		return a, "", err
@@ -151,21 +212,32 @@ func (d *Deploys) addressFor(ctx context.Context, svc, env string, want wanted, 
 		return a, "", err
 	}
 	if current != nil && current.Host == a.host {
-		return a, "", nil
+		return a, disagree, nil
 	}
-	if err := d.hostFree(ctx, a); err != nil {
+	if !slices.Contains(want.claimed, a.host) {
+		if err := d.hostFree(ctx, a); err != nil {
+			return a, "", err
+		}
+	} else if err := d.heldByOther(ctx, svc, a.host); err != nil {
+		// A claim takes a name over from outside Forge, never from another service.
 		return a, "", err
 	}
 	moved := current != nil && current.Host != ""
-	if a.dns == nil && !moved {
-		return a, "", nil // a first deploy to an internal address: nothing to point out
+	if !a.public && !moved {
+		return a, disagree, nil // a first deploy to an internal address: nothing to point out
 	}
 	note := a.url()
-	if a.dns != nil {
+	if a.public {
 		note += " (public: reachable from the internet)"
 	}
+	if a.public && a.dns == nil {
+		note += "; Forge makes no DNS record for " + a.host + ": it must point at the platform's tunnel"
+	}
 	if moved {
-		note += "; " + hostURL(current.Host, current.DNS != nil) + " stops working"
+		note += "; " + hostURL(current.Host, current.isPublic()) + " stops working"
+	}
+	if disagree != "" {
+		note += "; " + disagree
 	}
 	return a, note, nil
 }
@@ -173,7 +245,7 @@ func (d *Deploys) addressFor(ctx context.Context, svc, env string, want wanted, 
 // nameFree refuses a run.host that is the name of another service in the
 // catalog: that service's addresses are its own, deployed yet or not.
 func (d *Deploys) nameFree(ctx context.Context, svc string, w wanted) error {
-	if w.host == "" || w.host == svc || w.domain == manifest.DomainNone || len(d.o.PublicDomains) == 0 || d.o.Catalog == nil {
+	if w.host == "" || w.host == svc || w.host == HostRoot || w.domain == manifest.DomainNone || len(d.o.PublicDomains) == 0 || d.o.Catalog == nil {
 		return nil
 	}
 	taken, err := d.o.Catalog.has(ctx, servicePrefix+w.host)
@@ -187,13 +259,53 @@ func (d *Deploys) nameFree(ctx context.Context, svc string, w wanted) error {
 	return nil
 }
 
+// heldByOther refuses host when another service of the catalog is reached
+// there in some environment, or has an address set in Forge that is there.
+// DNS cannot tell those apart from a name outside Forge, so a claim alone
+// would let one service take another's address.
+func (d *Deploys) heldByOther(ctx context.Context, svc, host string) error {
+	if d.o.Catalog == nil {
+		return nil
+	}
+	ids, err := d.o.Catalog.ids(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if id == svc {
+			continue
+		}
+		var setting *wanted
+		if s, err := d.o.Catalog.get(ctx, servicePrefix+id); err == nil && s.GetAddress() != nil {
+			a := s.GetAddress()
+			setting = &wanted{domain: a.GetDomain(), host: a.GetHost(), set: true}
+		}
+		for _, env := range deployEnvs {
+			held := false
+			if v := d.currentValues(ctx, id, env); v != nil && v.Host == host {
+				held = true
+			}
+			if setting != nil {
+				if a, err := d.address(id, env, *setting); err == nil && a.host == host {
+					held = true
+				}
+			}
+			if held {
+				return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+					"%s is the address of another service, %s%s, in %s: a claim cannot take it. Change that service's address first", host, servicePrefix, id, env))
+			}
+		}
+	}
+	return nil
+}
+
 // hostFree refuses a public address that already resolves: something else
 // is there (another system's record, a name taken by hand). It is asked only
 // for an address that is new to its environment. When DNS cannot be asked
 // the address is not handed out: a deploy can wait, a hijacked name cannot
 // be taken back.
 func (d *Deploys) hostFree(ctx context.Context, a address) error {
-	if a.dns == nil || d.o.HostTaken == nil {
+	if !a.public || d.o.HostTaken == nil {
 		return nil
 	}
 	taken, err := d.o.HostTaken(ctx, a.host)
