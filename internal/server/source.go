@@ -22,6 +22,8 @@ type source struct {
 	// domain and host are run.domain and run.host as forge.yaml has them:
 	// "" for the platform's default domain and for the service's own name.
 	domain, host string
+	// run is forge.yaml's run section, nil without one.
+	run *manifest.Run
 }
 
 // resolveSource checks service ("services/<id>") and ref (default main),
@@ -67,6 +69,7 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
 		}
 		s.port, s.health = int32(mf.RunPort()), mf.RunHealth() //nolint:gosec // Parse checks run.port is 1-65535
 		s.domain, s.host = mf.RunDomain(), mf.RunHost()
+		s.run = mf.Run
 	}
 	s.image = "ghcr.io/" + strings.ToLower(s.owner) + "/" + s.serviceID + ":" + shortSHA(s.commit)
 	return s, nil

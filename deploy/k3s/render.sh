@@ -59,7 +59,8 @@
 # a render without them removes the staging and production routes. Changing the
 # revision re-renders every deployed service.
 # FORGE_ARGOCD_URL (e.g. https://argocd.example.com) gives each deployment a
-# link to its Application in Argo CD's web UI.
+# link to its Application in Argo CD's web UI. FORGE_SECRET_VAULTS (e.g. Apps)
+# lists the 1Password vaults a service's run.secrets may read.
 #
 # Resources (forge resource) need deploys, plus the image of the runner Job;
 # lines with a trailing "resources" marker exist only then:
@@ -248,6 +249,17 @@ if [ -n "$argocd_url" ]; then
 else
   argocd_marks='/#argocd$/d'
 fi
+# The 1Password vaults a service's run.secrets may read. Never one with the
+# platform's own secrets (Kube): any writer could put them into a service.
+secret_vaults=${FORGE_SECRET_VAULTS:-}
+if [ -n "$secret_vaults" ]; then
+  [ -n "$deploys" ] || { echo "FORGE_SECRET_VAULTS needs FORGE_DEPLOYS" >&2; exit 2; }
+  printf '%s' "$secret_vaults" | grep -Eq '^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$' ||
+    { echo "invalid FORGE_SECRET_VAULTS: $secret_vaults (vault names, comma separated, like Apps,Shared)" >&2; exit 2; }
+  vaults_marks='s/ *#vaults$//'
+else
+  vaults_marks='/#vaults$/d'
+fi
 # Public addresses: services reached under real domains, through the
 # platform's DNS records and tunnel. Each item is <domain>=<DNS zone name>.
 public_domains=${FORGE_PUBLIC_DOMAINS:-}
@@ -348,7 +360,7 @@ fi
     echo "---"
     cat "$dir/resources.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+} | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |

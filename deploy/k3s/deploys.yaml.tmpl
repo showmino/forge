@@ -28,11 +28,17 @@ spec:
     - {group: gateway.networking.k8s.io, kind: HTTPRoute}
     - {group: "", kind: ResourceQuota}
     - {group: "", kind: LimitRange}
+    # run.secrets, run.jobs and run.autoscaling (forge.yaml).
+    - {group: onepassword.com, kind: OnePasswordItem}
+    - {group: batch, kind: CronJob}
+    - {group: keda.sh, kind: ScaledObject}
     # Not deployed by the chart: Argo CD leaves out of an application's tree
-    # every kind its project does not allow, so without these two the UI
-    # shows a Deployment with nothing under it.
+    # every kind its project does not allow, so without these the UI
+    # shows a Deployment (or CronJob, or ScaledObject) with nothing under it.
     - {group: apps, kind: ReplicaSet}
     - {group: "", kind: Pod}
+    - {group: batch, kind: Job}
+    - {group: autoscaling, kind: HorizontalPodAutoscaler}
     # The DNS record of a public address (FORGE_PUBLIC_DOMAINS). #public
     - {group: kro.run, kind: CloudflareRecordsApplication} #public
 ---
@@ -89,11 +95,18 @@ spec:
             maxDuration: 3m
         syncOptions:
           - CreateNamespace=true
+          # Keep the replica count KEDA set on an autoscaled Deployment.
+          - RespectIgnoreDifferences=true
         managedNamespaceMetadata:
           labels:
             app.kubernetes.io/managed-by: forge
             forge.dev/service: '{{ index .path.segments 1 }}'
             forge.dev/deploy-env: '{{ .path.basename }}'
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - 'select(.metadata.annotations["forge.dev/autoscaled"] == "true") | .spec.replicas'
 ---
 # forge-api reads Applications to report sync and health.
 apiVersion: rbac.authorization.k8s.io/v1

@@ -97,6 +97,11 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		Forge: deployRecord{Service: servicePrefix + src.serviceID, Env: env, Ref: src.ref, Commit: src.commit, Actor: actor, Kind: kindDeploy, Domain: src.domain, Host: src.host},
 	}
 	v.setAddress(addr)
+	v.setOptions(src.run)
+	v.forEnv(env)
+	if err := d.secretsAllowed(v); err != nil {
+		return nil, err
+	}
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, src.serviceID, m.GetEnv()); err != nil {
 		return nil, err
 	}

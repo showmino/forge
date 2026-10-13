@@ -1,0 +1,54 @@
+{{- /* run.jobs: the app's image on a schedule, with its env and secrets. A
+run that is still going when the next is due makes the next wait. */ -}}
+{{- range .Values.jobs }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "%s-%s" $.Values.name .name }}
+  labels: {app: {{ $.Values.name }}, forge.dev/job: {{ .name }}}
+spec:
+  schedule: {{ required "jobs[].schedule" .schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      # A run that hangs would hold its share of the quota and, with Forbid,
+      # every later run.
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels: {forge.dev/job: {{ .name }}}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: forge-pull
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile: {type: RuntimeDefault}
+          volumes:
+            - name: tmp
+              emptyDir: {sizeLimit: 256Mi}
+          containers:
+            - name: {{ .name }}
+              image: {{ required "image" $.Values.image }}
+              command:
+                {{- range .command }}
+                - {{ . | quote }}
+                {{- end }}
+              env:
+                {{- include "forge.env" $ | nindent 16 }}
+              {{- with $.Values.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+              volumeMounts:
+                - {name: tmp, mountPath: /tmp}
+{{- end }}

@@ -213,6 +213,18 @@ for bad in argocd.showmino.com https://argocd.showmino.com/ 'https://a.com/x' 'h
   check "argocd: \"$bad\" refused" sh -c "! FORGE_ARGOCD_URL='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 done
 check "argocd: needs deploys"                     sh -c "! FORGE_ARGOCD_URL=https://argocd.showmino.com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+
+# run.secrets vaults: off unless FORGE_SECRET_VAULTS is set.
+vaults_render() { FORGE_SECRET_VAULTS=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
+vaults_on() { out=$(vaults_render Apps,Shared) && printf '%s\n' "$out" | grep -qF '{name: FORGE_SECRET_VAULTS, value: "Apps,Shared"}' && ! printf '%s\n' "$out" | grep -q '#vaults'; }
+vaults_off() { ! printf '%s\n' "$dep_head" | grep -q -e FORGE_SECRET_VAULTS -e '#vaults'; }
+options_kinds() { for k in '{group: onepassword.com, kind: OnePasswordItem}' '{group: batch, kind: CronJob}' '{group: keda.sh, kind: ScaledObject}'; do printf '%s\n' "$dep_head" | grep -qF -- "$k" || return 1; done; }
+check "vaults: forge-api gets the list"           vaults_on
+check "vaults: nothing rendered without it"       vaults_off
+check "options: the project allows their kinds"   options_kinds
+for bad in 'My Vault' 'Apps,' ',Apps' 'Apps|x' 'a/b'; do
+  check "vaults: \"$bad\" refused" sh -c "! FORGE_SECRET_VAULTS='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+done
 check "public: a chart revision without DNS records refused" sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=18b12326d3df2c1a11b9f664f378b579eb472aaf FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 # What forge-api (ParsePublicDomains) refuses, the render refuses too.
 for bad in example.com example.com= =example-com Example.com=example-com example.com=example.com localhost=local \

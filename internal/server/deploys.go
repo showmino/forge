@@ -16,6 +16,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/store"
 )
 
@@ -71,6 +72,9 @@ type DeployOptions struct {
 	// ArgoURL is Argo CD's web address, e.g. https://argocd.example.com;
 	// "" leaves Deployment.argo_url empty.
 	ArgoURL string
+	// SecretVaults are the 1Password vaults run.secrets may read; empty
+	// refuses every secret.
+	SecretVaults []string
 	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
 	ImageTimeout, SyncTimeout, NamespaceTimeout time.Duration
 	// Defaults: 10s, 2s.
@@ -162,6 +166,10 @@ type deployRecord struct {
 	// service asked for.
 	Domain string `yaml:"domain,omitempty"`
 	Host   string `yaml:"host,omitempty"`
+	// Replicas and AutoscaleMax are run.replicas and run.autoscaling.max, kept
+	// so that a promotion gives production what the service asked for.
+	Replicas     int `yaml:"replicas,omitempty"`
+	AutoscaleMax int `yaml:"autoscaleMax,omitempty"`
 	// Image and DeployCommit come from the commit, not the values file.
 	Image        string `yaml:"-"`
 	DeployCommit string `yaml:"-"`
@@ -184,7 +192,61 @@ type deployValues struct {
 	Public bool `yaml:"public,omitempty"`
 	// Database is set when the service has a database in this environment.
 	Database *deployDatabase `yaml:"database,omitempty"`
-	Forge    deployRecord    `yaml:"forge"`
+	// forge.yaml's run options; Autoscaling only in production.
+	Resources   *manifest.Resources `yaml:"resources,omitempty"`
+	Vars        map[string]string   `yaml:"vars,omitempty"`
+	Secrets     []manifest.Secret   `yaml:"secrets,omitempty"`
+	Jobs        []manifest.Job      `yaml:"jobs,omitempty"`
+	Autoscaling *deployAutoscaling  `yaml:"autoscaling,omitempty"`
+	Forge       deployRecord        `yaml:"forge"`
+}
+
+// deployAutoscaling is the range KEDA keeps the Deployment in.
+type deployAutoscaling struct {
+	Min int `yaml:"min"`
+	Max int `yaml:"max"`
+}
+
+// setOptions puts forge.yaml's run options into the values; forEnv then
+// works out what of them applies in the environment.
+func (v *deployValues) setOptions(r *manifest.Run) {
+	if r == nil {
+		return
+	}
+	v.Resources, v.Vars, v.Secrets, v.Jobs = r.Resources, r.Env, r.Secrets, r.Jobs
+	v.Forge.Replicas = r.Replicas
+	if r.Autoscaling != nil {
+		v.Forge.AutoscaleMax = r.Autoscaling.Max
+	}
+}
+
+// forEnv sets the pod count of env: one in staging; in production
+// run.replicas, grown by the autoscaler up to run.autoscaling.max.
+func (v *deployValues) forEnv(env string) {
+	v.Replicas, v.Autoscaling = 1, nil
+	if env != finalEnv {
+		return
+	}
+	v.Replicas = max(v.Forge.Replicas, 1)
+	if v.Forge.AutoscaleMax > v.Replicas {
+		v.Autoscaling = &deployAutoscaling{Min: v.Replicas, Max: v.Forge.AutoscaleMax}
+	}
+}
+
+// secretsAllowed refuses a 1Password item outside the vaults the platform
+// allows: any other vault may hold the platform's own secrets.
+func (d *Deploys) secretsAllowed(v deployValues) error {
+	for _, s := range v.Secrets {
+		if !slices.Contains(d.o.SecretVaults, s.Vault()) {
+			allowed := "none: this Forge API takes no 1Password secrets"
+			if len(d.o.SecretVaults) > 0 {
+				allowed = strings.Join(d.o.SecretVaults, ", ")
+			}
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"run.secrets %s: the vault %q is not one services may read (allowed: %s)", s.Name, s.Vault(), allowed))
+		}
+	}
+	return nil
 }
 
 // deployDatabase tells the chart where the app's DATABASE_URL comes from.
@@ -523,6 +585,10 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 		return nil, err
 	}
 	v.setAddress(addr)
+	// Like the address: under today's settings, not the restored deploy's.
+	if err := d.secretsAllowed(v); err != nil {
+		return nil, err
+	}
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
 		return nil, err
 	}
@@ -585,6 +651,10 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	v := src
 	v.Env = to
 	v.setAddress(addr)
+	v.forEnv(to)
+	if err := d.secretsAllowed(v); err != nil {
+		return nil, err
+	}
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
 	// Staging's candidate number is not production's version: that is cut
 	// below, or there is none.

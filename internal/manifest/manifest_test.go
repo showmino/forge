@@ -123,6 +123,100 @@ func TestRun(t *testing.T) {
 	}
 }
 
+func TestRunOptions(t *testing.T) {
+	t.Parallel()
+	base := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"
+	full := base + `run:
+  replicas: 3
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 250m, memory: 256Mi}
+  env:
+    LOG_LEVEL: info
+  secrets:
+    - name: stripe
+      item: vaults/Apps/items/stripe
+      env: {STRIPE_KEY: credential, STRIPE_HOOK: webhook-secret}
+  jobs:
+    - name: cleanup
+      schedule: "0 3 * * *"
+      command: [node, scripts/cleanup.js]
+    - name: hourly
+      schedule: "@hourly"
+      command: [./report]
+  autoscaling:
+    max: 6
+`
+	m, err := Parse([]byte(full))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := m.Run
+	if r.Replicas != 3 || r.Resources.Limits.Memory != "256Mi" || r.Env["LOG_LEVEL"] != "info" ||
+		len(r.Secrets) != 1 || r.Secrets[0].Vault() != "Apps" || r.Secrets[0].Env["STRIPE_KEY"] != "credential" ||
+		len(r.Jobs) != 2 || r.Jobs[0].Command[1] != "scripts/cleanup.js" || r.Autoscaling.Max != 6 {
+		t.Errorf("parsed: %+v", r)
+	}
+	if m.ProductionReplicas() != 3 {
+		t.Errorf("replicas: %d", m.ProductionReplicas())
+	}
+	if d, _ := Parse([]byte(base)); d.ProductionReplicas() != 1 {
+		t.Errorf("default replicas: %d", d.ProductionReplicas())
+	}
+
+	for name, bad := range map[string]string{
+		"replicas 0":           "run:\n  replicas: -1\n",
+		"replicas 11":          "run:\n  replicas: 11\n",
+		"bad cpu":              "run:\n  resources: {limits: {cpu: lots}}\n",
+		"request over limit":   "run:\n  resources: {requests: {memory: 1Gi}, limits: {memory: 512Mi}}\n",
+		"over the quota":       "run:\n  replicas: 5\n  resources: {limits: {memory: 1Gi}}\n",
+		"autoscaled over":      "run:\n  replicas: 2\n  autoscaling: {max: 9}\n",
+		"env lower case":       "run:\n  env: {log_level: info}\n",
+		"env PORT":             "run:\n  env: {PORT: \"1\"}\n",
+		"env DATABASE_URL":     "run:\n  env: {DATABASE_URL: x}\n",
+		"secret name":          "run:\n  secrets: [{name: Stripe, item: vaults/A/items/b, env: {K: v}}]\n",
+		"secret item":          "run:\n  secrets: [{name: s, item: A/b, env: {K: v}}]\n",
+		"secret item spaces":   "run:\n  secrets: [{name: s, item: vaults/My Vault/items/b, env: {K: v}}]\n",
+		"secret no env":        "run:\n  secrets: [{name: s, item: vaults/A/items/b}]\n",
+		"secret field":         "run:\n  secrets: [{name: s, item: vaults/A/items/b, env: {K: \"a/b\"}}]\n",
+		"secret twice":         "run:\n  secrets: [{name: s, item: vaults/A/items/b, env: {K: v}}, {name: s, item: vaults/A/items/c, env: {L: v}}]\n",
+		"env twice":            "run:\n  env: {K: x}\n  secrets: [{name: s, item: vaults/A/items/b, env: {K: v}}]\n",
+		"job name":             "run:\n  jobs: [{name: Clean, schedule: \"@daily\", command: [x]}]\n",
+		"job schedule":         "run:\n  jobs: [{name: c, schedule: \"every day\", command: [x]}]\n",
+		"job schedule 6":       "run:\n  jobs: [{name: c, schedule: \"0 0 3 * * *\", command: [x]}]\n",
+		"job no command":       "run:\n  jobs: [{name: c, schedule: \"@daily\"}]\n",
+		"job twice":            "run:\n  jobs: [{name: c, schedule: \"@daily\", command: [x]}, {name: c, schedule: \"@daily\", command: [y]}]\n",
+		"autoscaling max 11":   "run:\n  autoscaling: {max: 11}\n",
+		"autoscaling below":    "run:\n  replicas: 3\n  autoscaling: {max: 3}\n",
+		"unknown option field": "run:\n  jobs: [{name: c, schedule: \"@daily\", command: [x], image: y}]\n",
+		"requests over quota":  "run:\n  replicas: 4\n  resources: {requests: {memory: 512Mi}, limits: {memory: 512Mi}}\n",
+		"request over default": "run:\n  resources: {requests: {memory: 1Gi}}\n",
+		"too many pods":        "run:\n  replicas: 10\n  resources: {limits: {cpu: 10m, memory: 16Mi}}\n  jobs: [{name: a, schedule: \"@daily\", command: [x]}, {name: b, schedule: \"@daily\", command: [x]}, {name: c, schedule: \"@daily\", command: [x]}]\nresources:\n  - {name: main, type: postgres, instances: 3}\n",
+		"no room for the db":   "run:\n  replicas: 6\nresources:\n  - {name: main, type: postgres}\n",
+		"job name too long":    "run:\n  jobs: [{name: " + strings.Repeat("j", 44) + ", schedule: \"@daily\", command: [x]}]\n",
+		"secret name too long": "run:\n  secrets: [{name: " + strings.Repeat("s", 41) + ", item: vaults/A/items/b, env: {K: v}}]\n",
+	} {
+		if _, err := Parse([]byte(base + bad)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	six := "run:\n  jobs:\n"
+	for i := range 6 {
+		six += "    - {name: j" + string(rune('a'+i)) + ", schedule: \"@daily\", command: [x]}\n"
+	}
+	if _, err := Parse([]byte(base + six)); err == nil {
+		t.Error("six jobs accepted")
+	}
+	// The same six replicas fit without a database next to them.
+	if _, err := Parse([]byte(base + "run:\n  replicas: 6\n")); err != nil {
+		t.Errorf("six replicas: %v", err)
+	}
+	// A limit without a request makes the request the limit, as Kubernetes does.
+	if _, err := Parse([]byte(base + "run:\n  resources: {limits: {memory: 1Gi}}\n")); err != nil {
+		t.Errorf("limit only: %v", err)
+	}
+}
+
 func TestDocs(t *testing.T) {
 	t.Parallel()
 	base := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"
