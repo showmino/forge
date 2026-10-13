@@ -12,7 +12,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # The owner's runner (mino-runner): its Go caches stay on disk between runs.
+    runs-on: [self-hosted, Linux, X64]
     services:
       postgres:
         # Docker Hub's official image through Google's mirror: Docker Hub
@@ -38,7 +39,7 @@ jobs:
         run: make chart-test
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
