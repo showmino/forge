@@ -43,6 +43,7 @@ func TestServiceAddress(t *testing.T) {
 	}
 
 	h.fails(int(exitcode.Usage), "service", "address", "deogratias", "--claim", "x")
+	h.fails(int(exitcode.Usage), "service", "address", "deogratias", "--host", "@", "--yes")
 	h.fails(int(exitcode.Usage), "service", "address", "deogratias", "--clear", "--host", "x", "--yes")
 	h.ok("service", "address", "deogratias", "--clear", "--yes")
 	if r := h.ok("service", "address", "deogratias"); !strings.Contains(r.err, "comes from its forge.yaml") {
@@ -51,5 +52,5 @@ func TestServiceAddress(t *testing.T) {
 	// A reader may look, not change.
 	h.env["FORGE_TOKEN"] = readerToken
 	h.ok("service", "address", "deogratias")
-	h.fails(int(exitcode.PermissionDenied), "service", "address", "deogratias", "--host", "shop", "--yes")
+	h.fails(int(exitcode.PermissionDenied), "service", "address", "deogratias", "--host", "shop", "--domain", "showmino.com", "--yes")
 }

@@ -16,12 +16,12 @@ name that is in use. The first user is `deogratias`, which takes the root of
 | --- | --- |
 | Where the setting lives | In the catalog (`Service.address`). It overrides forge.yaml's `run.host` and `run.domain`; clearing it goes back to them. A deploy whose forge.yaml asks for something else says so in its log |
 | The root of a domain | `host: "@"`. Production is `https://<domain>`, staging `https://staging.<domain>` |
-| A name already in use | Refused, as today, unless the writer claims it: they type each such address to confirm. The claim is kept on the service and is in the audit log |
+| A name already in use | Refused, as today, unless the writer claims it: they type each such address to confirm. The claim is kept on the service and is in the audit log. A claim covers names outside Forge only: an address another catalog service is deployed at, or has set, is refused all the same (DNS cannot tell the two apart) |
 | When it applies | At the next deploy of each environment: staging on the next push, production on the next promote |
 
 ## API
 
-`DeployService.SetAddress(service, host, domain, clear, claim[], validate_only)`,
+`DeployService.SetAddress(service, host, domain, clear, claim[], validate_only, etag)`,
 behind `services.write`, audited as `service.address`. It answers with the
 address each environment gets (`PlannedAddress`: URL, public, in use, the
 current URL), and with `validate_only` changes nothing: the dashboard shows

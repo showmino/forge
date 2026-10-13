@@ -265,6 +265,9 @@ if [ -n "$public_domains" ]; then
       { echo "invalid FORGE_PUBLIC_DOMAINS: \"$domain\" is not a domain such as example.com" >&2; exit 2; }
     printf '%s' "$zone" | grep -Eq '^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$' ||
       { echo "invalid FORGE_PUBLIC_DOMAINS: the zone name \"$zone\" is a name such as example-com" >&2; exit 2; }
+    case $zone in
+      *-root) echo "invalid FORGE_PUBLIC_DOMAINS: the zone name \"$zone\" cannot end in -root (public-<zone>-root is a domain's root listener)" >&2; exit 2 ;;
+    esac
     case $seen in
       *,$domain,*) echo "invalid FORGE_PUBLIC_DOMAINS: $domain is listed twice" >&2; exit 2 ;;
     esac

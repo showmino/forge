@@ -36,6 +36,10 @@ func ParsePublicDomains(list string) ([]PublicDomain, error) {
 		if !ok || !manifest.ValidDomain(name) || !manifest.ValidID(zone) {
 			return nil, fmt.Errorf("public domain %q must be <domain>=<zone name>, like example.com=example-com", item)
 		}
+		if strings.HasSuffix(zone, "-root") {
+			// public-<zone>-root is the listener of another zone's root.
+			return nil, fmt.Errorf("public domain %q: a zone name cannot end in -root", item)
+		}
 		if slices.ContainsFunc(out, func(d PublicDomain) bool { return d.Name == name }) {
 			return nil, fmt.Errorf("public domain %s is listed twice", name)
 		}
@@ -214,6 +218,9 @@ func (d *Deploys) addressFor(ctx context.Context, svc, env string, fromYAML want
 		if err := d.hostFree(ctx, a); err != nil {
 			return a, "", err
 		}
+	} else if err := d.heldByOther(ctx, svc, a.host); err != nil {
+		// A claim takes a name over from outside Forge, never from another service.
+		return a, "", err
 	}
 	moved := current != nil && current.Host != ""
 	if !a.public && !moved {
@@ -222,6 +229,9 @@ func (d *Deploys) addressFor(ctx context.Context, svc, env string, fromYAML want
 	note := a.url()
 	if a.public {
 		note += " (public: reachable from the internet)"
+	}
+	if a.public && a.dns == nil {
+		note += "; Forge makes no DNS record for " + a.host + ": it must point at the platform's tunnel"
 	}
 	if moved {
 		note += "; " + hostURL(current.Host, current.isPublic()) + " stops working"
@@ -245,6 +255,46 @@ func (d *Deploys) nameFree(ctx context.Context, svc string, w wanted) error {
 	if taken {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
 			"run.host %s is the name of another service, %s%s: its addresses are its own. Pick another name", w.host, servicePrefix, w.host))
+	}
+	return nil
+}
+
+// heldByOther refuses host when another service of the catalog is reached
+// there in some environment, or has an address set in Forge that is there.
+// DNS cannot tell those apart from a name outside Forge, so a claim alone
+// would let one service take another's address.
+func (d *Deploys) heldByOther(ctx context.Context, svc, host string) error {
+	if d.o.Catalog == nil {
+		return nil
+	}
+	ids, err := d.o.Catalog.ids(ctx)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if id == svc {
+			continue
+		}
+		var setting *wanted
+		if s, err := d.o.Catalog.get(ctx, servicePrefix+id); err == nil && s.GetAddress() != nil {
+			a := s.GetAddress()
+			setting = &wanted{domain: a.GetDomain(), host: a.GetHost(), set: true}
+		}
+		for _, env := range deployEnvs {
+			held := false
+			if v := d.currentValues(ctx, id, env); v != nil && v.Host == host {
+				held = true
+			}
+			if setting != nil {
+				if a, err := d.address(id, env, *setting); err == nil && a.host == host {
+					held = true
+				}
+			}
+			if held {
+				return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+					"%s is the address of another service, %s%s, in %s: a claim cannot take it. Change that service's address first", host, servicePrefix, id, env))
+			}
+		}
 	}
 	return nil
 }

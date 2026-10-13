@@ -206,7 +206,7 @@ check "public: a chart revision without DNS records refused" sh -c "! FORGE_PUBL
 # What forge-api (ParsePublicDomains) refuses, the render refuses too.
 for bad in example.com example.com= =example-com Example.com=example-com example.com=example.com localhost=local \
   a.com=a-com,a.com=other a..com=a-com example.com=1zone example.com=zone- example.com=-zone -example.com=z example.c=z example.123=z \
-  example.com=example-com,,other.io=other-io; do
+  example.com=example-com,,other.io=other-io x.com=x-com,y.com=x-com-root; do
   check "public: \"$bad\" refused" bad_pub "$bad"
 done
 check "public: a bad tunnel name refused"         sh -c "! FORGE_PUBLIC_DNS_TUNNEL='a|b' FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"

@@ -19,7 +19,9 @@ import (
 // and the domain, overriding forge.yaml's run.host and run.domain. It changes
 // no deployment; each environment moves at its next deploy. An address that
 // is in use already (it resolves in DNS) is refused unless the request
-// claims it, and the claim is kept on the service.
+// claims it, and the claim is kept on the service. A claim covers names
+// outside Forge only: an address another service has, or has set, is
+// refused all the same.
 func (d *Deploys) SetAddress(ctx context.Context, req *connect.Request[forgev1.SetAddressRequest]) (*connect.Response[forgev1.SetAddressResponse], error) {
 	if err := d.ready(); err != nil {
 		return nil, err
@@ -72,7 +74,13 @@ func (d *Deploys) SetAddress(ctx context.Context, req *connect.Request[forgev1.S
 		if cur != nil && cur.Host != "" {
 			p.CurrentUrl = hostURL(cur.Host, cur.isPublic())
 		}
-		if a.public && (cur == nil || cur.Host != a.host) && d.o.HostTaken != nil {
+		if a.public && !m.GetClear() {
+			if err := d.heldByOther(ctx, svc, a.host); err != nil {
+				return nil, err
+			}
+		}
+		// Going back to forge.yaml claims nothing: its deploy checks DNS as usual.
+		if a.public && !m.GetClear() && (cur == nil || cur.Host != a.host) && d.o.HostTaken != nil {
 			taken, err := d.o.HostTaken(ctx, a.host)
 			if err != nil {
 				return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("could not check whether %s is free: %w; try again", a.host, err))
@@ -110,15 +118,16 @@ func (d *Deploys) SetAddress(ctx context.Context, req *connect.Request[forgev1.S
 	if !m.GetClear() {
 		next = &forgev1.ServiceAddress{Host: host, Domain: domain, Claimed: inUse}
 	}
-	s, err := d.o.Catalog.setAddress(ctx, servicePrefix+svc, next)
+	s, err := d.o.Catalog.setAddress(ctx, servicePrefix+svc, next, m.GetEtag())
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&forgev1.SetAddressResponse{Service: s, Addresses: planned}), nil
 }
 
-// setAddress stores a service's address setting; nil clears it.
-func (c *Catalog) setAddress(ctx context.Context, name string, a *forgev1.ServiceAddress) (*forgev1.Service, error) {
+// setAddress stores a service's address setting; nil clears it. A non-empty
+// etag must be the service's current one.
+func (c *Catalog) setAddress(ctx context.Context, name string, a *forgev1.ServiceAddress, wantEtag string) (*forgev1.Service, error) {
 	var out *forgev1.Service
 	err := c.store.Write(ctx, func(tx store.Tx) error {
 		cur, rev, err := tx.Get(ctx, name)
@@ -127,6 +136,9 @@ func (c *Catalog) setAddress(ctx context.Context, name string, a *forgev1.Servic
 		}
 		if err != nil {
 			return err
+		}
+		if wantEtag != "" && wantEtag != cur.GetEtag() {
+			return connect.NewError(connect.CodeAborted, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, wantEtag, cur.GetEtag()))
 		}
 		next := cur
 		next.Address = a

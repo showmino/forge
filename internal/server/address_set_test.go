@@ -93,8 +93,32 @@ func TestSetAddress(t *testing.T) {
 	if _, err := set("writer", &forgev1.SetAddressRequest{Host: "@", Domain: "deogratias.cloud"}); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "deogratias.cloud is already in use") {
 		t.Fatalf("unclaimed: %v", err)
 	}
+	// A change made since the service was read is not overwritten.
+	if _, err := set("writer", &forgev1.SetAddressRequest{Host: "@", Domain: "deogratias.cloud", Claim: []string{"deogratias.cloud"}, Etag: "stale"}); connect.CodeOf(err) != connect.CodeAborted {
+		t.Errorf("stale etag: %v", err)
+	}
 	if _, err := set("writer", &forgev1.SetAddressRequest{Host: "@", Domain: "deogratias.cloud", Claim: []string{"deogratias.cloud"}}); err != nil {
 		t.Fatal(err)
+	}
+
+	// Another service cannot claim what payments has set, even before it deploys there.
+	if _, err := f.catalog.RegisterService(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{
+		ServiceId: "shop", Service: &forgev1.Service{OwnerTeam: "billing", RepoUrl: "https://github.com/showmino/shop"},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	setShop := func(r *forgev1.SetAddressRequest) error {
+		r.Service = "services/shop"
+		_, err := f.client.SetAddress(ctx, as("writer", r))
+		return err
+	}
+	if err := setShop(&forgev1.SetAddressRequest{Host: "@", Domain: "deogratias.cloud", Claim: []string{"deogratias.cloud"}}); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "another service, services/payments") {
+		t.Errorf("shop claimed payments' setting: %v", err)
+	}
+	// Nor the address payments is deployed at.
+	dns.set(func(k *taken) { k.hosts["payments-staging.showmino.com"] = true })
+	if err := setShop(&forgev1.SetAddressRequest{Host: "payments", Domain: "showmino.com", Claim: []string{"payments-staging.showmino.com"}}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("shop took payments' name: %v", err)
 	}
 	if a := stored(); a.GetHost() != "@" || a.GetDomain() != "deogratias.cloud" || !slices.Equal(a.GetClaimed(), []string{"deogratias.cloud"}) {
 		t.Errorf("stored: %v", a)
@@ -134,13 +158,19 @@ func TestSetAddress(t *testing.T) {
 		t.Errorf("production url: %v %v", d, err)
 	}
 
-	// Clearing goes back to forge.yaml at the next deploy.
+	// Clearing goes back to forge.yaml at the next deploy. The old address
+	// still resolving does not stop it: that deploy checks DNS itself.
 	if _, err := set("writer", &forgev1.SetAddressRequest{Clear: true}); err != nil {
 		t.Fatal(err)
 	}
 	if stored() != nil {
 		t.Error("clear left the address")
 	}
+	// payments is still deployed at the root: shop cannot claim it.
+	if err := setShop(&forgev1.SetAddressRequest{Host: "@", Domain: "deogratias.cloud", Claim: []string{"deogratias.cloud"}}); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "staging.deogratias.cloud is the address of another service, services/payments") {
+		t.Errorf("shop claimed payments' deployed address: %v", err)
+	}
+	dns.set(func(k *taken) { delete(k.hosts, "payments-staging.showmino.com") })
 	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}

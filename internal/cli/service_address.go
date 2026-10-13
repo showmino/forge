@@ -20,7 +20,7 @@ func newServiceAddressCmd(f *Factory) *cobra.Command {
 		Short: "Show or change where a service is reached",
 		Long: `Without flags, show where a service is reached in staging and production.
 
-With --host or --domain, set its address in Forge: it wins over forge.yaml's
+With --host and --domain, set its address in Forge: it wins over forge.yaml's
 run.host and run.domain until --clear goes back to them. --host @ is the
 domain itself: production at https://<domain>, staging at
 https://staging.<domain>. Nothing moves at once: staging moves at its next
@@ -49,7 +49,11 @@ service's name to confirm, or pass --yes.`,
 			fl := cmd.Flags()
 			change := fl.Changed("host") || fl.Changed("domain") || clear
 			if !change && len(claim) > 0 {
-				return exitcode.Usagef("--claim goes with --host or --domain")
+				return exitcode.Usagef("--claim goes with --host and --domain")
+			}
+			if change && !clear && (!fl.Changed("host") || !fl.Changed("domain")) {
+				// One without the other would put the other back to its default.
+				return exitcode.Usagef("an address takes both --host and --domain")
 			}
 			ctx, cancel := f.withTimeout(cmd.Context())
 			defer cancel()
@@ -57,14 +61,15 @@ service's name to confirm, or pass --yes.`,
 			if err != nil {
 				return err
 			}
-			req := &forgev1.SetAddressRequest{Service: name, Host: host, Domain: domain, Clear: clear, Claim: claim}
+			got, err := c.Catalog.GetService(ctx, connect.NewRequest(&forgev1.GetServiceRequest{Name: name}))
+			if err != nil {
+				return err
+			}
+			svc := got.Msg.GetService()
+			req := &forgev1.SetAddressRequest{Service: name, Host: host, Domain: domain, Clear: clear, Claim: claim, Etag: svc.GetEtag()}
 			if !change {
 				// Where it is now: the setting as it stands, planned without changing anything.
-				svc, err := c.Catalog.GetService(ctx, connect.NewRequest(&forgev1.GetServiceRequest{Name: name}))
-				if err != nil {
-					return err
-				}
-				a := svc.Msg.GetService().GetAddress()
+				a := svc.GetAddress()
 				if a == nil {
 					f.infof("%s's address comes from its forge.yaml (run.host, run.domain).", short)
 					req.Clear = true

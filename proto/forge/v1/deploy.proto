@@ -212,6 +212,9 @@ message SetAddressRequest {
   // Each one in use must be named here.
   repeated string claim = 5;
   bool validate_only = 6;
+  // The service's etag as it was read; the change is refused when the
+  // service has changed since. "" skips the check.
+  string etag = 7;
 }
 
 message SetAddressResponse {

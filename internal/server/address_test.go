@@ -23,7 +23,7 @@ func TestParsePublicDomains(t *testing.T) {
 	if got, err := ParsePublicDomains(""); err != nil || len(got) != 0 {
 		t.Errorf("empty: %+v %v", got, err)
 	}
-	for _, bad := range []string{"showmino.com", "showmino.com=", "=showmino-com", "Showmino.com=showmino-com", "showmino.com=showmino.com", "localhost=local", "a.com=a-com,a.com=other", "a..com=a-com", "*.a.com=a-com"} {
+	for _, bad := range []string{"showmino.com", "showmino.com=", "=showmino-com", "Showmino.com=showmino-com", "showmino.com=showmino.com", "localhost=local", "a.com=a-com,a.com=other", "a..com=a-com", "*.a.com=a-com", "x.com=x-com,y.com=x-com-root"} {
 		if got, err := ParsePublicDomains(bad); err == nil {
 			t.Errorf("%q: got %+v, want an error", bad, got)
 		}
