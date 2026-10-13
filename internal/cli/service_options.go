@@ -18,8 +18,8 @@ import (
 )
 
 func newServiceOptionsCmd(f *Factory) *cobra.Command {
-	cmd := group("options", "Check a service's run options (replicas, secrets, jobs) in forge.yaml")
-	cmd.AddCommand(newServiceOptionsCheckCmd(f))
+	cmd := group("options", "Check and change a service's run options (replicas, secrets, jobs) in forge.yaml")
+	cmd.AddCommand(newServiceOptionsCheckCmd(f), newServiceOptionsSetCmd(f))
 	return cmd
 }
 

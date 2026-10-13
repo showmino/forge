@@ -5,6 +5,7 @@ title         Go service
 description   Go service fixture
 tags          go, grpc
 owner         platform
+run options   none
 
 PARAMETER   TYPE                  REQUIRED   DEFAULT   DESCRIPTION
 port        int                   no         8080      Port the server listens on

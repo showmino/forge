@@ -244,6 +244,11 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if err := template.CheckManifest(files, id, req.GetOwnerTeam()); err != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", tname, version, err))
 	}
+	if ro := req.GetRunOptions(); ro != nil {
+		if files, err = applyRunOptions(files, t, ro); err != nil {
+			return nil, err
+		}
+	}
 	var m *manifest.Manifest
 	for _, f := range files {
 		if f.Path == manifest.FileName {

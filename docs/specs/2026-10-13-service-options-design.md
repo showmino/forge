@@ -1,6 +1,6 @@
 # Service options: replicas, resources, env, 1Password secrets, cron jobs, autoscaling
 
-Status: approved 2026-10-13; milestone 1 live (forge-api `v0.8.1`). The open points below
+Status: approved 2026-10-13; milestone 1 live (forge-api `v0.8.1`); milestone 2 in review. The open points below
 were taken as recommended: no vault is allowed until `--secret-vaults` is
 set, and autoscaling is on CPU. In the chart the plain variables are `vars`
 (`env` is the environment's name there).

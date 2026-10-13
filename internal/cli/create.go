@@ -22,6 +22,7 @@ func newCreateCmd(f *Factory) *cobra.Command {
 	var tmpl, team string
 	var owners, sets []string
 	var dryRun bool
+	var run runFlags
 	cmd := &cobra.Command{
 		Use:   "create <name> --template <template>[@version] --team <team>",
 		Short: "Create a service from a template",
@@ -31,9 +32,16 @@ creates the private repo github.com/<org>/<name>, pushes the first commit
 after the repo exists fails, the repo is deleted again.
 
 Template parameters are set with --set name=value; on a terminal forge asks
-for missing required ones. See 'forge template get <template>'.`,
+for missing required ones. See 'forge template get <template>'.
+
+Run options (--replicas, --resources, --env, --secret, --job,
+--autoscaling-max) go into the new repo's forge.yaml, run section; a
+template offers some of them (see 'forge template get'), and the rest are
+refused. Change them later in forge.yaml.`,
 		Example: `  forge create payments --template go-grpc --team billing
   forge create ledger --template go-grpc@v1.0.0 --team billing --owner ana@example.com --set port=9090
+  forge create shop --template nextjs --team web --replicas 2 --env LOG_LEVEL=info \
+    --secret stripe=vaults/Kube/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
   forge create payments --template go-grpc --team billing --dry-run`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,6 +53,10 @@ for missing required ones. See 'forge template get <template>'.`,
 				return exitcode.Usagef("--template is required").WithHint("see 'forge template list'")
 			}
 			raw, err := parseSets(sets)
+			if err != nil {
+				return err
+			}
+			runOptions, err := run.options()
 			if err != nil {
 				return err
 			}
@@ -93,6 +105,7 @@ for missing required ones. See 'forge template get <template>'.`,
 				Owners:          owners,
 				RequestId:       client.NewRequestID(),
 				ValidateOnly:    dryRun,
+				RunOptions:      runOptions,
 			})
 			if errors.Is(err, errMayStillFinish) {
 				return exitcode.From(errors.Unwrap(err)).WithHint(fmt.Sprintf("the create may still finish on the Forge API; check 'forge service get %s'", id))
@@ -122,6 +135,7 @@ for missing required ones. See 'forge template get <template>'.`,
 	fl.StringSliceVar(&owners, "owner", nil, "owner email or handle (repeatable)")
 	fl.StringArrayVar(&sets, "set", nil, "template parameter as name=value (repeatable)")
 	fl.BoolVar(&dryRun, "dry-run", false, "render and check without creating anything; print the files")
+	run.register(fl)
 	return cmd
 }
 
