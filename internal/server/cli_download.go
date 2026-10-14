@@ -28,14 +28,25 @@ var (
 )
 
 // cliRelease serves GET /cli/releases/{tag}/{file}: the CLI archives and
-// checksums of a forge release, for 'forge upgrade' on any OS without a
-// GitHub token. Like the Linux builds, they are not secret.
-func cliRelease(src CLIReleases, repo string, log *slog.Logger) http.HandlerFunc {
+// checksums of the API's own release (tag "v"+version), for 'forge upgrade'
+// on any OS without a GitHub token. Like the Linux builds, they are not
+// secret. Each download costs GitHub calls as the App, so other tags are
+// refused before asking, few run at once, and caches may keep the answer.
+func cliRelease(src CLIReleases, repo, version string, log *slog.Logger) http.HandlerFunc {
+	slots := make(chan struct{}, 4)
 	return func(w http.ResponseWriter, r *http.Request) {
 		tag, file := r.PathValue("tag"), r.PathValue("file")
 		owner, name, ok := strings.Cut(repo, "/")
-		if src == nil || !ok || !releaseTagRE.MatchString(tag) || !releaseAssetRE.MatchString(file) {
+		if src == nil || !ok || tag != "v"+version || !releaseTagRE.MatchString(tag) || !releaseAssetRE.MatchString(file) {
 			http.NotFound(w, r)
+			return
+		}
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			w.Header().Set("Retry-After", "10")
+			http.Error(w, "too many downloads at once; try again shortly", http.StatusServiceUnavailable)
 			return
 		}
 		body, err := src.ReleaseAsset(r.Context(), owner, name, tag, file)
@@ -50,7 +61,11 @@ func cliRelease(src CLIReleases, repo string, log *slog.Logger) http.HandlerFunc
 		}
 		defer body.Close()
 		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = io.Copy(w, body)
+		// A published release does not change.
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		if _, err := io.Copy(w, body); err != nil {
+			log.WarnContext(r.Context(), "cli release asset: copy", "tag", tag, "file", file, "error", err)
+		}
 	}
 }
 

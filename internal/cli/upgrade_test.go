@@ -50,7 +50,10 @@ func upgradeHarness(t *testing.T, sums func(name string, data []byte) string) *h
 	h.serverVersion = "0.2.0"
 	h.startAPI(h.authn)
 	h.executable = filepath.Join(t.TempDir(), "forge")
-	if err := os.WriteFile(h.executable, []byte("forge 0.1.0 binary"), 0o755); err != nil {
+	if err := os.WriteFile(h.executable, []byte("forge 0.1.0 binary"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(h.executable, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	return h
@@ -73,10 +76,10 @@ func TestUpgrade(t *testing.T) {
 	if !strings.Contains(r.out, "forge upgraded from 0.1.0 to 0.2.0") || binary() != "forge 0.2.0 binary" {
 		t.Errorf("upgrade:\n%s\nbinary %q", r, binary())
 	}
-	if info, err := os.Stat(h.executable); err != nil || info.Mode().Perm()&0o100 == 0 {
-		t.Errorf("not executable: %v %v", info, err)
+	if info, err := os.Stat(h.executable); err != nil || info.Mode().Perm() != 0o750 {
+		t.Errorf("mode not kept: %v %v", info, err)
 	}
-	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(h.executable), "*.new")); len(left) != 0 {
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(h.executable), ".forge-upgrade-*")); len(left) != 0 {
 		t.Errorf("left behind: %v", left)
 	}
 
@@ -84,6 +87,27 @@ func TestUpgrade(t *testing.T) {
 	h.startAPI(h.authn)
 	if r := h.ok("upgrade"); !strings.Contains(r.out, "forge 0.1.0 is the server's version: nothing to do") {
 		t.Errorf("up to date:\n%s", r)
+	}
+
+	// An older API does not downgrade this forge by itself.
+	h.serverVersion = "0.0.9"
+	h.startAPI(h.authn)
+	if r := h.fails(2, "upgrade"); !strings.Contains(r.err, "older than this forge") || !strings.Contains(r.err, "--allow-downgrade") {
+		t.Errorf("downgrade:\n%s", r)
+	}
+}
+
+func TestUpgradeNeedsHTTPS(t *testing.T) {
+	t.Parallel()
+	for raw, ok := range map[string]bool{
+		"https://forge-api.showmino.com":   true,
+		"http://127.0.0.1:8080":            true,
+		"http://localhost:8080":            true,
+		"http://forge.10.150.1.221.nip.io": false,
+	} {
+		if err := trustedAPI(raw); (err == nil) != ok {
+			t.Errorf("%s: %v", raw, err)
+		}
 	}
 }
 

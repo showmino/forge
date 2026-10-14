@@ -135,7 +135,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewResourceServiceHandler(o.Resources, opts))
 	mux.Handle(forgev1connect.NewDocsServiceHandler(newDocsService(o.Docs, o.Catalog, o.GitHubOrg, o.Logger), opts))
 	mux.HandleFunc("GET /cli/{name}", cliDownload(o.CLIDir))
-	mux.HandleFunc("GET /cli/releases/{tag}/{file}", cliRelease(o.CLIReleases, o.CLIRepo, o.Logger))
+	mux.HandleFunc("GET /cli/releases/{tag}/{file}", cliRelease(o.CLIReleases, o.CLIRepo, o.Version, o.Logger))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("ok\n"))

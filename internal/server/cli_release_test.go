@@ -11,13 +11,12 @@ import (
 
 func TestCLIRelease(t *testing.T) {
 	t.Parallel()
-	rel := envtest.ReleaseAssets{
-		"showmino/forge/v1.2.3/checksums.txt":                     []byte("sums"),
+	rel := envtest.ReleaseAssets{"showmino/forge/v1.2.2/checksums.txt": []byte("older"), "showmino/forge/v1.2.3/checksums.txt": []byte("sums"),
 		"showmino/forge/v1.2.3/forge_1.2.3_darwin_arm64.tar.gz":   []byte("mac build"),
 		"showmino/forge/v1.2.3/forge_1.2.3_windows_amd64.zip":     []byte("windows build"),
 		"showmino/forge/v1.2.3/forge_1.2.3_linux_amd64.sbom.json": []byte("not served"),
 	}
-	h, err := New(Options{Authenticator: StaticAuthenticator{}, CLIReleases: rel, CLIRepo: "showmino/forge"})
+	h, err := New(Options{Version: "1.2.3", Authenticator: StaticAuthenticator{}, CLIReleases: rel, CLIRepo: "showmino/forge"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +41,7 @@ func TestCLIRelease(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
+		"/cli/releases/v1.2.2/checksums.txt",                     // published, but not this API's version
 		"/cli/releases/v1.2.3/forge_1.2.3_linux_amd64.sbom.json", // an asset, but not a CLI archive
 		"/cli/releases/v1.2.3/forge_1.2.3_linux_amd64.tar.gz",    // allowed, not published
 		"/cli/releases/latest/checksums.txt",

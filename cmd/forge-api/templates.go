@@ -3,8 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/server"
@@ -89,10 +91,11 @@ func repoHost(app *github.App) server.RepoHost {
 	return &github.Client{Token: app.Token}
 }
 
-// cliReleases reads the forge repo's release assets as the App, for 'forge upgrade'.
+// cliReleases reads the forge repo's release assets as the App, for 'forge
+// upgrade'. The default client's 60s would cut a slow download short.
 func cliReleases(app *github.App) server.CLIReleases {
 	if app == nil {
 		return nil
 	}
-	return &github.Client{Token: app.Token}
+	return &github.Client{Token: app.Token, HTTP: &http.Client{Timeout: 10 * time.Minute}}
 }
