@@ -351,14 +351,19 @@ func TestCreateWaitsForImageAndCI(t *testing.T) {
 
 	// CI passed but built no image, as a workflow that builds only on main
 	// does for a branch: fail now, not after the image timeout.
-	noImage := newEnvFixture(t, true, func(o *EnvOptions) { o.ImageTimeout = time.Hour })
+	noImage := newEnvFixture(t, true, func(o *EnvOptions) { o.ImageTimeout = 2 * time.Second })
 	noImage.gh.SetRuns(envSHA, []github.WorkflowRun{{Name: "ci", Status: "completed", Conclusion: "success"}})
+	start := time.Now()
 	resp, err = noImage.create(t, &forgev1.CreateEnvironmentRequest{EnvironmentId: "a"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if op := noImage.wait(t, resp.GetOperation()); op.GetError().GetCode() != "no_image" || !strings.Contains(op.GetError().GetMessage(), noImage.image) {
 		t.Errorf("CI without an image: %v", op.GetError())
+	}
+	// Not at once: a tenth of the timeout, for runs GitHub creates late.
+	if d := time.Since(start); d < 200*time.Millisecond {
+		t.Errorf("no_image after %s, before the grace", d)
 	}
 	for _, fx := range []*envFixture{failing, slow, noImage} {
 		if envs, _ := fx.cluster.Envs(context.Background()); len(envs) != 0 {
