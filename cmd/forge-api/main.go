@@ -89,7 +89,8 @@ func run() error {
 		runnerSA     = flag.String("runner-service-account", env("FORGE_RUNNER_SERVICE_ACCOUNT", "forge-runner"), "service account the runner Jobs run as")
 		runnerAPIURL = flag.String("runner-api-url", env("FORGE_RUNNER_API_URL", "http://forge-api-runner.forge.svc:8081"), "URL at which the runner Jobs reach --runner-addr")
 
-		cliDir = flag.String("cli-dir", env("FORGE_CLI_DIR", ""), "directory of forge CLI builds served at /cli/forge-linux-<arch> for CI jobs")
+		cliDir  = flag.String("cli-dir", env("FORGE_CLI_DIR", ""), "directory of forge CLI builds served at /cli/forge-linux-<arch> for CI jobs")
+		cliRepo = flag.String("cli-repo", env("FORGE_CLI_REPO", "showmino/forge"), "GitHub repo (owner/name) whose releases 'forge upgrade' downloads through /cli/releases")
 	)
 	flag.Parse()
 	if *printVersion {
@@ -238,6 +239,8 @@ func run() error {
 		Deploys:          deps,
 		Resources:        res,
 		CLIDir:           *cliDir,
+		CLIReleases:      cliReleases(app),
+		CLIRepo:          *cliRepo,
 		Templates:        templates,
 		Teams:            teamSource(app),
 		Docs:             docsSource(app),

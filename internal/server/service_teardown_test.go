@@ -123,6 +123,8 @@ func TestDeleteServiceTakesEverythingDown(t *testing.T) {
 		t.Errorf("a dry run names: %s", got)
 	}
 
+	// Argo holds the delete at its first commit, so the checks below see it running.
+	f.argo.SetLag(time.Hour)
 	op, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"})
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +139,7 @@ func TestDeleteServiceTakesEverythingDown(t *testing.T) {
 	if again, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"}); err != nil || again.GetName() != op.GetName() {
 		t.Errorf("a second delete while the first runs: %v %v, want %s", again.GetName(), err, op.GetName())
 	}
+	f.argo.SetLag(0)
 	done := wait(t, f.ops, op.GetName())
 	if done.GetError() != nil {
 		t.Fatalf("delete: %v", done.GetError())

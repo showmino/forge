@@ -103,7 +103,7 @@ exit codes:
 		c.GroupID = "core"
 		root.AddCommand(c)
 	}
-	for _, c := range []*cobra.Command{newAuthCmd(f), newContextCmd(f), newInitCmd(f), newDoctorCmd(f)} {
+	for _, c := range []*cobra.Command{newAuthCmd(f), newContextCmd(f), newInitCmd(f), newDoctorCmd(f), newUpgradeCmd(f)} {
 		c.GroupID = "setup"
 		root.AddCommand(c)
 	}
