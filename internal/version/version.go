@@ -17,6 +17,9 @@ var (
 	Commit = ""
 	// Date is the build date in RFC 3339.
 	Date = ""
+	// APIURL is the Forge API the CLI uses when no context or flag names one.
+	// Empty for local builds.
+	APIURL = ""
 )
 
 // Info is the build information of this binary.

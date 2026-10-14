@@ -30,6 +30,8 @@ type harness struct {
 	stdin  string
 	tty    bool
 	issuer string
+	// defaultAPI is the API URL built into the binary; empty for a dev build.
+	defaultAPI string
 
 	authn     server.Authenticator
 	sessions  *server.Sessions
@@ -119,12 +121,13 @@ func (h *harness) run(args ...string) result {
 	h.t.Helper()
 	var out, errOut bytes.Buffer
 	d := Deps{
-		IO:      IOStreams{In: strings.NewReader(h.stdin), Out: &out, ErrOut: &errOut, InTTY: h.tty, OutTTY: h.tty},
-		Env:     func(k string) (string, bool) { v, ok := h.env[k]; return v, ok },
-		Store:   h.store,
-		Getwd:   func() (string, error) { return h.dir, nil },
-		Now:     time.Now,
-		Version: "0.1.0",
+		IO:            IOStreams{In: strings.NewReader(h.stdin), Out: &out, ErrOut: &errOut, InTTY: h.tty, OutTTY: h.tty},
+		Env:           func(k string) (string, bool) { v, ok := h.env[k]; return v, ok },
+		Store:         h.store,
+		Getwd:         func() (string, error) { return h.dir, nil },
+		Now:           time.Now,
+		Version:       "0.1.0",
+		DefaultAPIURL: h.defaultAPI,
 	}
 	code := Run(context.Background(), d, args)
 	return result{out.String(), errOut.String(), code}
@@ -276,6 +279,18 @@ func TestUsageErrors(t *testing.T) {
 	r = h.fails(2, "service", "list")
 	if !strings.Contains(r.err, "forge context set") {
 		t.Errorf("missing context hint: %v", r)
+	}
+}
+
+func TestBuiltInAPI(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	delete(h.env, "FORGE_API_URL")
+	h.defaultAPI = h.api.URL
+
+	h.ok("service", "list")
+	if r := h.ok("doctor"); !strings.Contains(r.out, h.api.URL+" (built-in)") {
+		t.Errorf("doctor should name the built-in API:\n%s", r.out)
 	}
 }
 

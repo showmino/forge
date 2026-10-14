@@ -15,6 +15,15 @@ detail and [`docs/index.md`](docs/index.md) the design.
 [`AGENTS.md`](AGENTS.md) first. It has the rules (the cluster is production),
 the commands and the conventions, and points to the runbook.
 
+## Install
+
+Download the archive for your OS from the
+[latest release](https://github.com/showmino/forge/releases/latest) (the repo
+is private, so use `gh release download -R showmino/forge`), put `forge` on
+your `PATH`, then run `forge auth login`. Release builds talk to
+`https://forge-api.showmino.com` unless a context, `FORGE_API_URL` or
+`--api-url` names another API.
+
 ```
 cmd/forge/          CLI entry point; maps errors to exit codes
 cmd/forge-api/      API server entry point
