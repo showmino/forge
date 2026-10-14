@@ -1,0 +1,563 @@
+# Forge Phase 1 on k3s: Dex + forge-api. How they are reached comes from
+# ingress.yaml.tmpl (Traefik) or loadbalancer.yaml.tmpl (MetalLB and similar).
+# Render with deploy/k3s/render.sh; do not apply this file directly.
+#   dex.10.150.1.220.nip.io         host name of Dex, the same for you and for pods
+#   ghcr.io/showmino/forge-api:v0.11.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
+#   The GitHub App settings (ID, org, template repo): see render.sh.
+#   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who may write.
+#   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: forge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+  namespace: forge
+data:
+  config.yaml: |
+    issuer: https://forge-login.showmino.com/dex
+    storage:
+      type: postgres
+      config:
+        host: forge-db-rw.forge.svc
+        port: 5432
+        database: dex
+        user: forge
+        password: $DEX_DB_PASSWORD # from the Secret forge-db-app
+        ssl:
+          mode: require
+    web:
+      http: 0.0.0.0:5556
+      allowedOrigins: ["https://forge.showmino.com", "https://forge-staging.showmino.com"]
+    oauth2:
+      grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
+      skipApprovalScreen: true
+    expiry:
+      idTokens: 1h
+    staticClients:
+      - id: forge-cli
+        name: Forge CLI
+        public: true
+        redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
+      - id: forge-web
+        name: Forge dashboard
+        public: true
+        redirectURIs: ["https://forge.showmino.com/auth/callback", "https://forge-staging.showmino.com/auth/callback"]
+    # Only members of the org log in; groups are "<org>:<team-slug>", and
+    # forge-api's FORGE_WRITER_GROUPS picks the teams that may write. Dex
+    # expands $GITHUB_CLIENT_* from its environment (the Secret dex-github).
+    connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $GITHUB_CLIENT_ID
+          clientSecret: $GITHUB_CLIENT_SECRET
+          redirectURI: https://forge-login.showmino.com/dex/callback
+          orgs:
+            - name: showmino
+          teamNameField: slug
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: forge
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: dex}
+  template:
+    metadata:
+      labels: {app: dex}
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.41.1
+          args: [dex, serve, /etc/dex/config.yaml]
+          env:
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef: {name: dex-github, key: client_id}
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: dex-github, key: client_secret}
+            - name: DEX_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: forge-db-app, key: password}
+          ports:
+            - {name: http, containerPort: 5556}
+          readinessProbe:
+            httpGet: {path: /dex/healthz, port: http}
+          volumeMounts:
+            - {name: config, mountPath: /etc/dex}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - name: config
+          configMap: {name: dex-config}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forge-api
+  namespace: forge
+spec:
+  replicas: 1 # operations are in memory; keep one replica
+  selector:
+    matchLabels: {app: forge-api}
+  template:
+    metadata:
+      labels: {app: forge-api}
+    spec:
+      serviceAccountName: forge-api
+      securityContext:
+        runAsNonRoot: true
+        # distroless "nonroot" by number: the kubelet cannot check a user name.
+        runAsUser: 65532
+        runAsGroup: 65532
+        # Secret files are root-owned; the group lets the API read its 0440 key.
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - name: github-app
+          secret: {secretName: forge-github-app, defaultMode: 0440}
+      containers:
+        - name: forge-api
+          image: ghcr.io/showmino/forge-api:v0.11.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: FORGE_OIDC_ISSUER, value: "https://forge-login.showmino.com/dex"}
+            - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
+            - {name: FORGE_OIDC_WEB_CLIENT_ID, value: forge-web}
+            - {name: FORGE_CORS_ORIGINS, value: "https://forge.showmino.com,https://forge-staging.showmino.com"}
+            - {name: FORGE_WRITER_GROUPS, value: "showmino:platform-engineering"}
+            - name: FORGE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: forge-db-app, key: uri}
+            - {name: FORGE_LOG_FORMAT, value: json}
+            - {name: FORGE_GITHUB_APP_ID, value: "5239131"}
+            - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key}
+            - {name: FORGE_GITHUB_ORG, value: showmino}
+            - {name: FORGE_TEMPLATES_REPO, value: showmino/forge-templates}
+            - {name: FORGE_PREVIEWS, value: "1"}
+            - {name: FORGE_PREVIEW_DOMAIN, value: preview.10.150.1.222.nip.io}
+            - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/mino-ghcr}
+            - {name: FORGE_DEPLOYS, value: "1"}
+            - {name: FORGE_ARGOCD_URL, value: "https://argocd.showmino.com"}
+            - {name: FORGE_SECRET_VAULTS, value: "Kube"}
+            - {name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,forge-dex-github,ghcr-secret,arc-runners,argocd-repo-kubernetes,cert-manager,Cloudflare,crossplane-cloudflare,crossplane-github-provider-creds,grafana-admin-credentials,renovate"}
+            - {name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud"}
+            - {name: FORGE_PUBLIC_DNS_TUNNEL, value: "production"}
+          volumeMounts:
+            - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            # Template releases are cached in memory (up to 100 MiB each).
+            limits: {memory: 256Mi}
+---
+# Clusters without Traefik: Dex and forge-api each on their own LoadBalancer
+# IP on port 80 (MetalLB 0.13+ honours the requested IPs; other implementations may
+# ignore the annotation, so check 'kubectl -n forge get svc').
+#   10.150.1.220  e.g. 10.150.1.220, reached as dex.10.150.1.220.nip.io
+#   10.150.1.221  e.g. 10.150.1.221, reached as forge.10.150.1.221.nip.io
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: forge
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 10.150.1.220
+spec:
+  type: LoadBalancer
+  selector: {app: dex}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-api
+  namespace: forge
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: 10.150.1.221
+spec:
+  type: LoadBalancer
+  selector: {app: forge-api}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+# Forge's database: the service catalog (forge-api) and Dex's logins.
+# CloudNativePG creates the Secret forge-db-app (keys uri, password, ...)
+# for the owner forge. No backups yet: the catalog can be re-registered from
+# each repo's forge.yaml, and Dex's data is only sessions.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: forge-db
+  namespace: forge
+spec:
+  instances: 2
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+  storage:
+    size: 5Gi
+    storageClass: longhorn-retain # the volumes outlive an accidental delete
+  bootstrap:
+    initdb:
+      database: forge
+      owner: forge
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {memory: 512Mi}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: forge-db-dex
+  namespace: forge
+spec:
+  name: dex
+  owner: forge
+  cluster:
+    name: forge-db
+---
+# Optional: the 1Password operator syncs the GitHub App key into the Secret
+# forge-github-app. render.sh adds this when FORGE_ONEPASSWORD_ITEM is set,
+# e.g. vaults/Kube/items/forge-github-app. The item needs a field named
+# github_app_private_key holding the App's private key (PEM).
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: forge-github-app
+  namespace: forge
+spec:
+  itemPath: vaults/Kube/items/forge-github-app
+---
+# Optional: the 1Password operator syncs Dex's GitHub OAuth App credentials
+# into the Secret dex-github. render.sh adds this when FORGE_DEX_ONEPASSWORD_ITEM
+# is set, e.g. vaults/Kube/items/forge-dex-github; the item needs the fields
+# client_id and client_secret.
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: dex-github
+  namespace: forge
+spec:
+  itemPath: vaults/Kube/items/forge-dex-github
+---
+# Preview environments: forge-api's ServiceAccount and cluster permissions, and
+# the LAN Gateway previews are reached through. render.sh adds this when
+# FORGE_PREVIEW_IP is set.
+#   10.150.1.222   MetalLB IP of the Gateway, e.g. 10.150.1.222
+#   mino-ghcr  dockerconfigjson Secret in namespace forge, e.g. mino-ghcr
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: forge-api
+  namespace: forge
+imagePullSecrets:
+  - name: mino-ghcr
+---
+# Exactly the calls internal/server/env_cluster.go makes. Kubernetes RBAC
+# cannot limit them to Forge's own namespaces; forge-api enforces that itself
+# (owned() in env_cluster.go).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: forge-api-previews
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [""]
+    resources: [secrets, services, resourcequotas, limitranges]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, create]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: forge-api-previews
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: forge-api-previews
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+---
+# forge-api reads the pull secret to copy it into previews and to check images.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-pull-secret
+  namespace: forge
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [mino-ghcr]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-pull-secret
+  namespace: forge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-pull-secret
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+---
+# LAN only: Istio deploys this Gateway as forge-previews-istio with a
+# LoadBalancer Service, which MetalLB gives 10.150.1.222.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: forge-previews
+  namespace: forge
+spec:
+  gatewayClassName: istio
+  infrastructure:
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 10.150.1.222
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: "*.preview.10.150.1.222.nip.io"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+    - name: staging
+      protocol: HTTP
+      port: 80
+      hostname: "*.staging.10.150.1.222.nip.io"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+              forge.dev/deploy-env: staging
+    - name: production
+      protocol: HTTP
+      port: 80
+      hostname: "*.production.10.150.1.222.nip.io"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+              forge.dev/deploy-env: production
+    # Public addresses (FORGE_PUBLIC_DOMAINS): one listener per domain, named
+    # public-<zone>, for the hosts the Cloudflare tunnel sends here. Each
+    # takes only hosts under its domain, and only routes from the namespace
+    # of a Forge deployment, never from a preview.
+    - name: public-showmino-com
+      protocol: HTTP
+      port: 80
+      hostname: "*.showmino.com"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+    - name: public-showmino-com-root
+      protocol: HTTP
+      port: 80
+      hostname: "showmino.com"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+    - name: public-deogratias-cloud
+      protocol: HTTP
+      port: 80
+      hostname: "*.deogratias.cloud"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+    - name: public-deogratias-cloud-root
+      protocol: HTTP
+      port: 80
+      hostname: "deogratias.cloud"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+---
+# Deploys: Forge's Argo CD objects and forge-api's read access to them.
+# render.sh adds this when FORGE_DEPLOYS=1.
+#   2b84f5e1676aa92090e43737790655e6436cb070  forge commit the chart is taken from (pinned)
+# Applications are named <service>-<env> and deploy into the namespace of that
+# name; forge-api refuses a namespace that exists and isn't Forge's.
+# Existing namespaces named like *-staging or *-production that are not Forge's
+# must be listed in the AppProject as "!<name>" deny destinations (forge-api
+# refuses them too, but this stops Argo even if a directory is committed by hand).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: forge-services
+  namespace: argocd
+spec:
+  description: Forge services, deployed by forge-api through showmino/forge-deploys
+  sourceRepos:
+    - https://github.com/showmino/forge.git
+    - https://github.com/showmino/forge-deploys.git
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: "!docs-dev-staging"}
+    - {server: https://kubernetes.default.svc, namespace: "*-staging"}
+    - {server: https://kubernetes.default.svc, namespace: "*-production"}
+  clusterResourceWhitelist:
+    - {group: "", kind: Namespace}
+  namespaceResourceWhitelist:
+    - {group: apps, kind: Deployment}
+    - {group: "", kind: Service}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute}
+    - {group: "", kind: ResourceQuota}
+    - {group: "", kind: LimitRange}
+    # run.secrets, run.jobs and run.autoscaling (forge.yaml).
+    - {group: onepassword.com, kind: OnePasswordItem}
+    - {group: batch, kind: CronJob}
+    - {group: keda.sh, kind: ScaledObject}
+    # Not deployed by the chart: Argo CD leaves out of an application's tree
+    # every kind its project does not allow, so without these the UI
+    # shows a Deployment (or CronJob, or ScaledObject) with nothing under it.
+    - {group: apps, kind: ReplicaSet}
+    - {group: "", kind: Pod}
+    - {group: batch, kind: Job}
+    - {group: autoscaling, kind: HorizontalPodAutoscaler}
+    # The DNS record of a public address (FORGE_PUBLIC_DOMAINS).
+    - {group: kro.run, kind: CloudflareRecordsApplication}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: forge-services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/showmino/forge-deploys.git
+        revision: main
+        directories:
+          - path: services/*/staging
+          - path: services/*/production
+        # LAN-only, so no webhooks; Argo's default is 180s.
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{ index .path.segments 1 }}-{{ .path.basename }}'
+      labels:
+        app.kubernetes.io/managed-by: forge
+      # Deleting a services/<service>/<env> directory removes its workload too.
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: forge-services
+      sources:
+        - repoURL: https://github.com/showmino/forge.git
+          targetRevision: 2b84f5e1676aa92090e43737790655e6436cb070
+          path: deploy/argocd/chart
+          helm:
+            releaseName: '{{ index .path.segments 1 }}'
+            valueFiles:
+              - '$values/{{ .path.path }}/values.yaml'
+        - repoURL: https://github.com/showmino/forge-deploys.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ index .path.segments 1 }}-{{ .path.basename }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
+        syncOptions:
+          - CreateNamespace=true
+          # Keep the replica count KEDA set on an autoscaled Deployment.
+          - RespectIgnoreDifferences=true
+        managedNamespaceMetadata:
+          labels:
+            app.kubernetes.io/managed-by: forge
+            forge.dev/service: '{{ index .path.segments 1 }}'
+            forge.dev/deploy-env: '{{ .path.basename }}'
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - 'select(.metadata.annotations["forge.dev/autoscaled"] == "true") | .spec.replicas'
+---
+# forge-api reads Applications to report sync and health.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-applications
+  namespace: argocd
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-applications
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-applications
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}

@@ -200,25 +200,29 @@ The cluster is production, and every change to it needs the owner's OK
    released: push a `vX.Y.Z` tag on `main` (tagging a merged change needs no
    extra OK) and wait for the `release` workflow to finish. It publishes
    `ghcr.io/showmino/forge-api:vX.Y.Z`.
-1. **Render what is live** with the command below and the image that runs now
-   (`kubectl -n forge get deploy forge-api -o jsonpath='{.spec.template.spec.containers[0].image}'`),
-   into a file in a temporary folder outside the repo (`mktemp -d`).
-   `kubectl diff -f` on it must show nothing. If it shows something, the
-   cluster has drifted or the command below is stale (the cluster is the
-   truth: for example the chart revision is what the ApplicationSet
-   `forge-services` in `argocd` says). Stop and find out which before changing
-   anything, and correct this file.
-2. **Render the new manifests** (the new image, or the new setting) and read
-   `kubectl diff -f` on them. It should show what you mean to change and
+1. **What is live** is `deploy/k3s/live/forge.yaml` on `main`: the render of
+   `deploy/k3s/live.env` by `sh deploy/k3s/render-live.sh` (CI's `test` job
+   fails when the file is not the render of `live.env`). Argo CD shows it as
+   the application `forge` (manual sync: it shows health and drift, and
+   changes nothing by itself). `kubectl diff -f deploy/k3s/live/forge.yaml`
+   on `main` must show nothing. If it shows something, the cluster has
+   drifted or the file is stale (the cluster is the truth: for example the
+   chart revision is what the ApplicationSet `forge-services` in `argocd`
+   says). Stop and find out which before changing anything, and correct it.
+   Keep a copy of that file outside the repo as the rollback file.
+2. **On a branch, change `live.env`** (the new image, or the new setting),
+   run `sh deploy/k3s/render-live.sh`, and read `kubectl diff -f
+   deploy/k3s/live/forge.yaml`. It should show what you mean to change and
    nothing else.
-3. **Show the owner the diff and wait for the OK.**
-4. `kubectl apply --dry-run=server -f`, then `kubectl apply -f`. Dex reads its
-   config at start: `kubectl -n forge rollout restart deploy/dex` after a
-   change to it. Wait for `rollout status`.
-5. **Verify** with the checks in this file for what changed, and keep the
-   render from step 1 as the rollback file (`kubectl apply -f` it to go back).
-6. **Update this file** in a pull request: the image, the command below, and
-   what was checked.
+3. **Show the owner the diff and wait for the OK.** Open the pull request
+   with `live.env`, `live/forge.yaml` and this file.
+4. `kubectl apply --dry-run=server -f`, then `kubectl apply -f` the file from
+   step 2. Dex reads its config at start: `kubectl -n forge rollout restart
+   deploy/dex` after a change to it. Wait for `rollout status`.
+5. **Verify** with the checks in this file for what changed. To go back,
+   `kubectl apply -f` the rollback file from step 1.
+6. **Merge the pull request** once its checks pass, so `main` says what is
+   live and Argo CD shows `forge` Synced. Note in this file what was checked.
 
 ### Secrets Forge uses (names and keys only)
 
@@ -232,20 +236,8 @@ The cluster is production, and every change to it needs the owner's OK
 To check one, list its key names and nothing else:
 `kubectl -n forge get secret <name> -o jsonpath='{.data}' | python3 -I -c 'import json,sys; print(sorted(json.load(sys.stdin)))'`.
 
-The render that is live (2026-10-11), to start every later rollout from; only `FORGE_API_IMAGE`, and the chart revision when the chart changes, move:
-
-```sh
-FORGE_GITHUB_APP_ID=5239131 FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app \
-FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOYS=1 \
-FORGE_DEPLOY_CHART_REVISION=2b84f5e1676aa92090e43737790655e6436cb070 \
-FORGE_WEB_ORIGINS=https://forge.showmino.com,https://forge-staging.showmino.com \
-FORGE_PUBLIC_DOMAINS=showmino.com=showmino-com,deogratias.cloud=deogratias-cloud \
-FORGE_LOGIN_URL=https://forge-login.showmino.com \
-FORGE_ARGOCD_URL=https://argocd.showmino.com \
-FORGE_SECRET_VAULTS=Kube \
-FORGE_SECRET_DENIED_ITEMS=forge-github-app,forge-dex-github,ghcr-secret,arc-runners,argocd-repo-kubernetes,cert-manager,Cloudflare,crossplane-cloudflare,crossplane-github-provider-creds,grafana-admin-credentials,renovate \
-FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.11.0 sh deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221
-```
+The settings that are live are `deploy/k3s/live.env` (since 2026-10-14; before that, this file held the command). Do not
+run text taken from this file: render with `sh deploy/k3s/render-live.sh` and apply the file it writes.
 
 Forge's own public names (live since 2026-10-11, forge-api `v0.4.0`):
 
