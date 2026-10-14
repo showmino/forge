@@ -66,6 +66,10 @@ type Options struct {
 	// CLIDir holds forge CLI builds (forge-linux-amd64, forge-linux-arm64)
 	// served at GET /cli/<name>; empty serves none.
 	CLIDir string
+	// CLIReleases and CLIRepo ("owner/repo") serve the CLI archives of the
+	// forge releases at GET /cli/releases/<tag>/<file>; nil serves none.
+	CLIReleases CLIReleases
+	CLIRepo     string
 	// Audit stores the audit log; nil keeps it in memory.
 	Audit  store.AuditStore
 	Logger *slog.Logger
@@ -131,6 +135,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewResourceServiceHandler(o.Resources, opts))
 	mux.Handle(forgev1connect.NewDocsServiceHandler(newDocsService(o.Docs, o.Catalog, o.GitHubOrg, o.Logger), opts))
 	mux.HandleFunc("GET /cli/{name}", cliDownload(o.CLIDir))
+	mux.HandleFunc("GET /cli/releases/{tag}/{file}", cliRelease(o.CLIReleases, o.CLIRepo, o.Logger))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("ok\n"))

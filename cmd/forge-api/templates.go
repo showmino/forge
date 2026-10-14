@@ -88,3 +88,11 @@ func repoHost(app *github.App) server.RepoHost {
 	}
 	return &github.Client{Token: app.Token}
 }
+
+// cliReleases reads the forge repo's release assets as the App, for 'forge upgrade'.
+func cliReleases(app *github.App) server.CLIReleases {
+	if app == nil {
+		return nil
+	}
+	return &github.Client{Token: app.Token}
+}

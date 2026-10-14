@@ -32,6 +32,11 @@ type harness struct {
 	issuer string
 	// defaultAPI is the API URL built into the binary; empty for a dev build.
 	defaultAPI string
+	// serverVersion is the API's version (default 0.1.0); cliReleases its
+	// release assets; executable the path 'forge upgrade' replaces.
+	serverVersion string
+	cliReleases   server.CLIReleases
+	executable    string
 
 	authn     server.Authenticator
 	sessions  *server.Sessions
@@ -75,8 +80,14 @@ func (h *harness) startAPI(authn server.Authenticator) {
 	if h.api != nil {
 		h.api.Close()
 	}
+	version := h.serverVersion
+	if version == "" {
+		version = "0.1.0"
+	}
 	handler, err := server.New(server.Options{
-		Version:       "0.1.0",
+		Version:       version,
+		CLIReleases:   h.cliReleases,
+		CLIRepo:       "showmino/forge",
 		OIDC:          server.OIDC{Issuer: h.issuer, ClientID: "forge-cli"},
 		Authenticator: authn,
 		Authorizer:    server.Authorizer{WriterGroups: []string{"platform"}},
@@ -128,6 +139,7 @@ func (h *harness) run(args ...string) result {
 		Now:           time.Now,
 		Version:       "0.1.0",
 		DefaultAPIURL: h.defaultAPI,
+		Executable:    func() (string, error) { return h.executable, nil },
 	}
 	code := Run(context.Background(), d, args)
 	return result{out.String(), errOut.String(), code}
