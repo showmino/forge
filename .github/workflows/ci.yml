@@ -12,8 +12,9 @@ permissions:
 
 jobs:
   test:
-    # The owner's runner (mino-runner): its Go caches stay on disk between runs.
-    runs-on: [self-hosted, Linux, X64]
+    # ARC on k3s, Docker-in-Docker for the service container; the pod uses
+    # whatever CPU its node has free.
+    runs-on: kube-runners
     services:
       postgres:
         # Docker Hub's official image through Google's mirror: Docker Hub
@@ -41,7 +42,7 @@ jobs:
         run: make chart-test
 
   lint:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: kube-runners
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
