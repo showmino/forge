@@ -21,8 +21,11 @@ func SampleValues(t *Template) Values {
 func sample(p Parameter) string {
 	switch p.Type {
 	case TypeInt:
-		if p.Min != nil {
+		switch {
+		case p.Min != nil:
 			return strconv.Itoa(*p.Min)
+		case p.Max != nil && *p.Max < 1:
+			return strconv.Itoa(*p.Max)
 		}
 		return "1"
 	case TypeBool:
@@ -124,6 +127,10 @@ func Lint(fsys fs.FS, dir string) ([]File, []Finding) {
 	if t.IsFile() {
 		if len(files) == 0 {
 			add([]Finding{{File: SkeletonDir, Message: "renders no files"}})
+			return nil, out
+		}
+		if err := CheckFilePaths(files); err != nil {
+			add([]Finding{{File: SkeletonDir, Message: err.Error()}})
 			return nil, out
 		}
 		return files, nil

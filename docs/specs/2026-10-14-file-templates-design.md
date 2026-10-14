@@ -12,12 +12,12 @@ portal.
 
 | Question | Decision |
 | --- | --- |
-| What it does | forge-api renders the skeleton, commits the files on top of the target's default branch to a new branch `forge/<template>-<name>` and opens a pull request. Merging is a person's call in that repo; the repo's own workflows deploy it. |
+| What it does | forge-api renders the skeleton, commits the files on top of the target's default branch to a new branch `forge/<template>/<name>` and opens a pull request. Merging is a person's call in that repo; the repo's own workflows deploy it. |
 | How it is started | The same `CreateService` call, `forge create` and dashboard form as a service template. `<name>` (the service name field) names the branch and is `.Service.Name` in the skeleton; the team is `.Service.Team`. No new RPC or command. |
 | Where it is declared | `template.yaml`: `type: file` and `target: owner/repo`. Without `type`, a template is a service template. |
 | Where the files go | The skeleton's paths, rendered as always, relative to the target repo's root. |
 | Catalog | Nothing is registered: a landing zone is not a Forge service. |
-| Safety | The target must be in the org. Nothing is written when a file is on the default branch already or the branch exists (`already_exists`), so a second create never overwrites a landing zone. |
+| Safety | The target must be in the org. Nothing is written when a file is on the default branch already (`already_exists`), so a second create never overwrites a landing zone; a retry whose branch has an open pull request gets that pull request, and a branch whose pull request GitHub refused is deleted again. A file template may not write under `.git` or `.github` (lint and API refuse it: workflows there would run with the target's secrets). Every parameter value is one line; the team must be a GitHub team slug. Text goes into a file through an escaping function such as `bicepString`. |
 | GitHub access | The Forge GitHub App, with Contents and Pull requests write on the target repo (given for `showmino/landingzone`). |
 
 ## `template.yaml`
@@ -43,8 +43,11 @@ parameters:
     placeholder: "60168"         # an example in the empty input
 ```
 
-Two render functions come with it: `has` (`{% has .Params.environments "prod" %}`
-gives `true` or `false`) and `title` (`corp` gives `Corp`, for folder names).
+Three render functions come with it: `has` (`{% has .Params.environments "prod" %}`
+gives `true` or `false`), `title` (`corp` gives `Corp`, for folder names)
+and `bicepString` (escapes `\`, `'` and `${` for a single-quoted Bicep string).
+The template has to use an escaping function for free text: a value is not
+escaped by itself.
 
 ## The stream
 

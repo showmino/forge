@@ -31,6 +31,8 @@ var funcs = gotemplate.FuncMap{
 		}
 		return strings.ToUpper(s[:1]) + s[1:]
 	},
+	// bicepString escapes s for a single-quoted Bicep string, interpolation included.
+	"bicepString": strings.NewReplacer(`\`, `\\`, `'`, `\'`, "${", `\${`).Replace,
 }
 
 // File is one rendered file.

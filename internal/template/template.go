@@ -179,8 +179,22 @@ func (t *Template) Delims() (left, right string) {
 var (
 	identifier = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
 	tagWord    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	ownerRepo  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
+	ownerRepo  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
+
+// CheckFilePaths refuses rendered paths a file template must not write: Git
+// metadata and GitHub's own files, such as workflows that would run with the
+// target repo's secrets.
+func CheckFilePaths(files []File) error {
+	for _, f := range files {
+		for _, seg := range strings.Split(f.Path, "/") {
+			if strings.HasPrefix(strings.ToLower(seg), ".git") {
+				return fmt.Errorf("%s: a file template may not write under .git or .github", f.Path)
+			}
+		}
+	}
+	return nil
+}
 
 // Validate checks the field rules of template.yaml. Defaults are checked by
 // Lint, because a string default may use built-in values.
@@ -273,6 +287,14 @@ func (t *Template) Validate() []Finding {
 		}
 		if p.Min != nil && p.Max != nil && *p.Min > *p.Max {
 			add(p.Line, "parameter %q: min is above max", p.Name)
+		}
+		if d, ok := p.Default.(int); ok && p.Type == TypeInt && ((p.Min != nil && d < *p.Min) || (p.Max != nil && d > *p.Max)) {
+			add(p.Line, "parameter %q: default %d is outside min and max", p.Name, d)
+		}
+		for _, v := range p.Values {
+			if v == "" || strings.Contains(v, ",") || strings.TrimSpace(v) != v {
+				add(p.Line, "parameter %q: value %q must not be empty, contain a comma or start or end with a space", p.Name, v)
+			}
 		}
 		if strings.Contains(p.Label+p.Placeholder+p.Group, "\n") {
 			add(p.Line, "parameter %q: label, placeholder and group must be one line", p.Name)

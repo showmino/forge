@@ -341,8 +341,12 @@ func (c *creator) propose(ctx context.Context, req *forgev1.CreateServiceRequest
 	done := func(step, detail string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_DONE, detail)) }
 	id := req.GetServiceId()
 	owner, repo, _ := strings.Cut(t.Target, "/")
-	if owner != c.org {
+	if !strings.EqualFold(owner, c.org) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s targets %s, outside the %s organization", t.Name, version, t.Target, c.org))
+	}
+	// The team goes into the file as it is: only a GitHub team slug.
+	if !manifest.ValidID(req.GetOwnerTeam()) {
+		return nil, invalid(fmt.Sprintf("owner_team %q must be a GitHub team slug (a-z, 0-9, '-')", req.GetOwnerTeam()))
 	}
 	if req.GetRunOptions() != nil {
 		return nil, invalid("run_options are only for a service template")
@@ -372,6 +376,9 @@ func (c *creator) propose(ctx context.Context, req *forgev1.CreateServiceRequest
 	if len(files) == 0 {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s renders no files with these parameters", t.Name, version))
 	}
+	if err := template.CheckFilePaths(files); err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", t.Name, version, err))
+	}
 	paths := make([]string, len(files))
 	for i, f := range files {
 		paths[i] = f.Path
@@ -385,7 +392,7 @@ func (c *creator) propose(ctx context.Context, req *forgev1.CreateServiceRequest
 	}
 
 	started("pull_request")
-	branch := "forge/" + t.Name + "-" + id
+	branch := "forge/" + t.Name + "/" + id
 	p, _ := PrincipalFrom(ctx)
 	pushFiles := make([]github.File, 0, len(files))
 	for _, f := range files {

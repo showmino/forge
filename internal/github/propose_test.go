@@ -7,22 +7,25 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
 
 // fakeLZ is a repo with a main branch, one existing file and pull requests.
 type fakeLZ struct {
-	mu     sync.Mutex
-	refs   map[string]string // branch -> commit
-	tree   map[string]any    // body of the last tree
-	commit map[string]any    // body of the last commit
-	pull   map[string]any    // body of the last pull request
+	mu       sync.Mutex
+	refs     map[string]string // branch -> commit
+	pulls    map[string]string // head branch -> URL
+	failPull bool
+	tree     map[string]any // body of the last tree
+	commit   map[string]any // body of the last commit
+	pull     map[string]any // body of the last pull request
 }
 
 func newFakeLZ(t *testing.T) (*fakeLZ, *Client) {
 	t.Helper()
-	f := &fakeLZ{refs: map[string]string{"main": "c0"}}
+	f := &fakeLZ{refs: map[string]string{"main": "c0"}, pulls: map[string]string{}}
 	decode := func(r *http.Request, v any) { _ = json.NewDecoder(r.Body).Decode(v) }
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /repos/showmino/lz", func(w http.ResponseWriter, _ *http.Request) {
@@ -71,8 +74,29 @@ func newFakeLZ(t *testing.T) (*fakeLZ, *Client) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		decode(r, &f.pull)
+		if f.failPull {
+			http.Error(w, `{"message":"Validation Failed"}`, http.StatusUnprocessableEntity)
+			return
+		}
+		url := fmt.Sprintf("https://github.com/showmino/lz/pull/%d", 3+len(f.pulls))
+		f.pulls[f.pull["head"].(string)] = url
 		w.WriteHeader(http.StatusCreated)
-		fmt.Fprint(w, `{"html_url":"https://github.com/showmino/lz/pull/3"}`)
+		fmt.Fprintf(w, `{"html_url":%q}`, url)
+	})
+	mux.HandleFunc("GET /repos/showmino/lz/pulls", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if url, ok := f.pulls[strings.TrimPrefix(r.URL.Query().Get("head"), "showmino:")]; ok && r.URL.Query().Get("state") == "open" {
+			fmt.Fprintf(w, `[{"html_url":%q}]`, url)
+			return
+		}
+		fmt.Fprint(w, `[]`)
+	})
+	mux.HandleFunc("DELETE /repos/showmino/lz/git/refs/heads/{branch...}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		delete(f.refs, r.PathValue("branch"))
+		w.WriteHeader(http.StatusNoContent)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -90,20 +114,44 @@ func TestProposeFiles(t *testing.T) {
 	if url != "https://github.com/showmino/lz/pull/3" {
 		t.Errorf("url %q", url)
 	}
+	f.mu.Lock()
 	if f.tree["base_tree"] != "t0" || f.commit["parents"].([]any)[0] != "c0" || f.refs["forge/lz-a"] != "c1" {
 		t.Errorf("tree %v commit %v refs %v", f.tree, f.commit, f.refs)
 	}
 	if f.pull["head"] != "forge/lz-a" || f.pull["base"] != "main" || f.pull["title"] != "Add a" {
 		t.Errorf("pull %v", f.pull)
 	}
+	f.mu.Unlock()
 
-	// Nothing is written when a file is there already, or the branch is.
+	// Nothing is written when a file is there already.
 	p.Files = []File{{Path: "zones/taken.txt", Content: []byte("x")}}
 	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); !errors.Is(err, ErrFileExists) {
 		t.Errorf("existing file: %v", err)
 	}
-	p.Files = []File{{Path: "zones/b.txt", Content: []byte("b")}}
+	// A retry finds the pull request it opened.
+	p.Files = []File{{Path: "zones/a.txt", Content: []byte("a\n")}}
+	if url, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); err != nil || url != "https://github.com/showmino/lz/pull/3" {
+		t.Errorf("retry: %q %v", url, err)
+	}
+	// A branch without a pull request is someone else's: refused.
+	f.mu.Lock()
+	f.refs["forge/stale"] = "cx"
+	f.mu.Unlock()
+	p.Branch = "forge/stale"
 	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); !errors.Is(err, ErrBranchExists) {
 		t.Errorf("existing branch: %v", err)
+	}
+	// A pull request GitHub refuses takes its branch with it.
+	f.mu.Lock()
+	f.failPull = true
+	f.mu.Unlock()
+	p.Branch = "forge/lz-b"
+	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); err == nil {
+		t.Fatal("refused pull request: no error")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.refs["forge/lz-b"]; ok {
+		t.Error("the branch of a refused pull request is left behind")
 	}
 }

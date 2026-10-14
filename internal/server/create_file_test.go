@@ -67,11 +67,11 @@ func TestCreateFromFileTemplate(t *testing.T) {
 		t.Errorf("steps %s", got)
 	}
 	c := msgs[len(msgs)-1].GetChange()
-	if c.GetPullRequestUrl() != "https://github.com/showmino/landingzone/pull/1" || c.GetBranch() != "forge/lz-infosystems" || c.GetRepoUrl() != "https://github.com/showmino/landingzone" {
+	if c.GetPullRequestUrl() != "https://github.com/showmino/landingzone/pull/1" || c.GetBranch() != "forge/lz/infosystems" || c.GetRepoUrl() != "https://github.com/showmino/landingzone" {
 		t.Errorf("change: %v", c)
 	}
 	p := repos.proposals[0]
-	if p.repo != "showmino/landingzone" || p.Branch != "forge/lz-infosystems" || !strings.Contains(p.Title, "infosystems") ||
+	if p.repo != "showmino/landingzone" || p.Branch != "forge/lz/infosystems" || !strings.Contains(p.Title, "infosystems") ||
 		len(p.Files) != 1 || string(p.Files[0].Content) != "team=platform-engineering prod=true\n" {
 		t.Errorf("proposal: %+v", p)
 	}
@@ -102,5 +102,21 @@ func TestCreateFromFileTemplateRefused(t *testing.T) {
 	bad.Parameters["envs"] = "prod,qa"
 	if _, err := newCreateEnv(t, fileRelease, newFakeRepos()).create(ctx, "writer", bad); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("bad list value: %v", err)
+	}
+	// The team is written into the file as it is: a slug, nothing else.
+	team := fileRequest()
+	team.OwnerTeam = "x'\nparam evil = 1 //"
+	if _, err := newCreateEnv(t, fileRelease, newFakeRepos()).create(ctx, "writer", team); connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), "owner_team") {
+		t.Errorf("team that is not a slug: %v", err)
+	}
+	// A file template may not write GitHub's own files.
+	workflow := staticSource{versions: []string{"v1.0.0"}, trees: map[string]fs.FS{"v1.0.0": fstest.MapFS{
+		"wf/template.yaml":                    {Data: []byte("apiVersion: forge.dev/v1\nkind: Template\nname: wf\ntitle: Workflow\ndescription: A workflow\ntype: file\ntarget: showmino/landingzone\n")},
+		"wf/skeleton/.github/workflows/x.yml": {Data: []byte("on: push\n")},
+	}}}
+	wf := fileRequest()
+	wf.Template, wf.Parameters = "templates/wf", nil
+	if _, err := newCreateEnv(t, workflow, newFakeRepos()).create(ctx, "writer", wf); connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), ".github") {
+		t.Errorf("a workflow file: %v", err)
 	}
 }

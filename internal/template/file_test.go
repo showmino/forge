@@ -104,6 +104,19 @@ func TestFileTemplateParamErrors(t *testing.T) {
 	if err != nil || len(got["environments"].([]string)) != 0 {
 		t.Errorf("empty list: %#v %v", got["environments"], err)
 	}
+	// Values are one line: a newline could start a line of its own in the file.
+	if _, err := tp.ResolveParams(sampleBuiltins(), map[string]string{"type": "corp", "ipAddresses": "5", "costCenter": "1\nparam x = 1"}); err == nil || !strings.Contains(err.Error(), "one line") {
+		t.Errorf("newline: %v", err)
+	}
+}
+
+func TestBicepString(t *testing.T) {
+	t.Parallel()
+	tp := mustParse(t, fileYAML)
+	got, err := tp.renderString("x", `'{% bicepString .Params.s %}'`, Values{Params: map[string]any{"s": `O'Brien \ ${env()}`}})
+	if want := `'O\'Brien \\ \${env()}'`; err != nil || got != want {
+		t.Errorf("got %s %v, want %s", got, err, want)
+	}
 }
 
 func TestValidateFileTemplate(t *testing.T) {
@@ -118,6 +131,9 @@ func TestValidateFileTemplate(t *testing.T) {
 		{"min above max", "    min: 1\n    max: 1024", "    min: 10\n    max: 5", "min is above max"},
 		{"list values", "    values: [prod, staging, dev, test]", "    values: []", "type list needs values"},
 		{"list default", "    default: [prod]", "    default: [qa]", `default "qa" must be one of`},
+		{"value with a comma", "    values: [prod, staging, dev, test]", "    values: [prod, \"a,b\"]", "must not be empty, contain a comma"},
+		{"default out of bounds", "    min: 1\n    max: 1024", "    min: 1\n    max: 1024\n    default: 2000", "default 2000 is outside min and max"},
+		{"dot repo", "target: showmino/landingzone", "target: showmino/..", `target "showmino/.." must be owner/repo`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -144,5 +160,12 @@ func TestLintFileTemplate(t *testing.T) {
 	}
 	if len(files) != 1 || files[0].Path != "landingZones/Corp/lz-corp-sample-service.bicepparam" {
 		t.Errorf("files %+v", files)
+	}
+	_, findings = Lint(repo(map[string]string{
+		"landing-zone/template.yaml":                    fileYAML,
+		"landing-zone/skeleton/.github/workflows/x.yml": "on: push\n",
+	}), "landing-zone")
+	if !strings.Contains(messages(findings), "may not write under .git or .github") {
+		t.Errorf("a workflow in a file template: %s", messages(findings))
 	}
 }

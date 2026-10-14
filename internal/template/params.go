@@ -54,6 +54,9 @@ func (p Parameter) Convert(raw string) (any, error) {
 	if len(raw) > MaxParamLen {
 		return nil, &ParamError{p.Name, fmt.Sprintf("value is longer than %d bytes", MaxParamLen)}
 	}
+	if strings.ContainsFunc(raw, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return nil, &ParamError{p.Name, "value must be one line, without control characters"}
+	}
 	switch p.Type {
 	case TypeInt:
 		n, err := strconv.Atoi(raw)
