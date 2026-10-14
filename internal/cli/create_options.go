@@ -24,7 +24,7 @@ func (r *runFlags) register(fl *pflag.FlagSet) {
 	fl.StringArrayVar(&r.secrets, "secret", nil, "run option: a 1Password item as name=vaults/<vault>/items/<item>:VAR=field,VAR2=field (repeatable)")
 	fl.StringArrayVar(&r.jobs, "job", nil, `run option: a cron job as name=<schedule>:<command>, e.g. 'cleanup=0 3 * * *:node cleanup.js' (repeatable)`)
 	fl.IntVar(&r.autoscalingMax, "autoscaling-max", 0, "run option: let production grow on CPU up to this many pods")
-	fl.BoolVar(&r.networkOnly, "network-only", false, "reach the service only on the platform's network, with no public address (run.domain: none)")
+	fl.BoolVar(&r.networkOnly, "internal", false, "reach the service only on the platform's network, with no public address (run.domain: none)")
 }
 
 // options returns the run options set by the flags, nil when none is. The
