@@ -89,7 +89,7 @@ Config is layered and contexts work like kubeconfig: one file lists Forge instal
 2. Environment variables, prefixed `FORGE_` (`FORGE_CONTEXT`, `FORGE_TOKEN`, `FORGE_API_URL`).
 3. Repo manifest `forge.yaml` for service-scoped defaults.
 4. User config at `$XDG_CONFIG_HOME/forge/config.yaml` (`~/.config/forge` on Linux and macOS).
-5. Built-in defaults.
+5. Built-in defaults. Release builds of the CLI default the API to `https://forge-api.showmino.com`; local builds have no default.
 
 ```yaml
 current-context: staging-eu

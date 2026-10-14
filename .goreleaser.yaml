@@ -18,6 +18,7 @@ builds:
       - -X github.com/showmino/forge/internal/version.Version={{ .Version }}
       - -X github.com/showmino/forge/internal/version.Commit={{ .FullCommit }}
       - -X github.com/showmino/forge/internal/version.Date={{ .Date }}
+      - -X github.com/showmino/forge/internal/version.APIURL=https://forge-api.showmino.com
   - id: forge-api
     main: ./cmd/forge-api
     binary: forge-api

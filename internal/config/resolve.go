@@ -18,6 +18,7 @@ type Overrides struct {
 type Defaults struct {
 	Namespace string // from forge.yaml
 	Output    string // built-in
+	APIURL    string // built-in; set in release builds
 }
 
 // Resolved is the effective configuration for one command.
@@ -75,6 +76,7 @@ func Resolve(c *Config, env Env, o Overrides, d Defaults) (Resolved, error) {
 		[2]string{o.APIURL, "flag --api-url"},
 		[2]string{get("FORGE_API_URL"), "env FORGE_API_URL"},
 		[2]string{ctx.API, "context " + ctx.Name},
+		[2]string{d.APIURL, "built-in"},
 	)
 	r.Namespace = pick("namespace",
 		[2]string{o.Namespace, "flag --namespace"},

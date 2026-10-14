@@ -50,16 +50,19 @@ type Deps struct {
 	Now   func() time.Time
 	// Version is the CLI's version, normally version.Get().Version.
 	Version string
+	// DefaultAPIURL is used when no flag, env or context names an API.
+	DefaultAPIURL string
 }
 
 // DefaultDeps wires Deps to the real process.
 func DefaultDeps(stdin io.Reader, stdout, stderr io.Writer, inTTY, outTTY bool) Deps {
 	return Deps{
-		IO:      IOStreams{In: stdin, Out: stdout, ErrOut: stderr, InTTY: inTTY, OutTTY: outTTY},
-		Env:     os.LookupEnv,
-		Getwd:   os.Getwd,
-		Now:     time.Now,
-		Version: version.Get().Version,
+		IO:            IOStreams{In: stdin, Out: stdout, ErrOut: stderr, InTTY: inTTY, OutTTY: outTTY},
+		Env:           os.LookupEnv,
+		Getwd:         os.Getwd,
+		Now:           time.Now,
+		Version:       version.Get().Version,
+		DefaultAPIURL: version.APIURL,
 	}
 }
 
@@ -127,6 +130,7 @@ func (f *Factory) load() error {
 		}
 		var d config.Defaults
 		d.Output = string(output.Table)
+		d.APIURL = f.DefaultAPIURL
 		if wd, err := f.Getwd(); err == nil {
 			if p, err := manifest.Find(wd); err == nil && p != "" {
 				// Resolve the rest even if forge.yaml is invalid, so doctor can report it.

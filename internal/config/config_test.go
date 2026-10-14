@@ -125,6 +125,21 @@ func TestResolvePrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveBuiltInAPI(t *testing.T) {
+	t.Parallel()
+	d := Defaults{APIURL: "https://forge-api.example.com", Output: "table"}
+
+	r, err := Resolve(&Config{}, mapEnv(nil), Overrides{}, d)
+	if err != nil || r.APIURL != "https://forge-api.example.com" || r.Sources["api"] != "built-in" {
+		t.Errorf("no context should fall back to the built-in API: %+v %v", r, err)
+	}
+
+	r, _ = Resolve(sample(), mapEnv(nil), Overrides{}, d)
+	if r.APIURL != "https://forge.staging.example.com" {
+		t.Errorf("a context should beat the built-in API: %+v", r)
+	}
+}
+
 func TestResolveUnknownContext(t *testing.T) {
 	t.Parallel()
 	_, err := Resolve(sample(), mapEnv(nil), Overrides{Context: "nope"}, Defaults{})
