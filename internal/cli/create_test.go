@@ -113,7 +113,7 @@ func TestCreate(t *testing.T) {
 		t.Errorf("-o json -q: out %q err %q", r.out, r.err)
 	}
 	// Any service template may be reached only on the network.
-	h.ok("create", "intranet", "--template", "svc", "--team", "platform", "--set", "tier=gold", "--network-only")
+	h.ok("create", "intranet", "--template", "svc", "--team", "platform", "--set", "tier=gold", "--internal")
 }
 
 func TestCreateDryRun(t *testing.T) {
