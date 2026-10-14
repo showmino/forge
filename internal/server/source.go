@@ -76,13 +76,16 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
 }
 
 // waitForImage polls the registry until the image exists, failing fast when
-// a CI run for the commit finished without success, or when every run
-// finished and the image is still missing on the next look.
+// a CI run for the commit finished without success, or when every run has
+// been finished, with no image, for a tenth of the timeout (and two looks).
 func waitForImage(ctx context.Context, gh EnvGitHub, images ImageChecker, s source, timeout, poll time.Duration, emit func(step, message string)) error {
 	tm := time.NewTimer(timeout)
 	defer tm.Stop()
 	last := ""
-	finished := 0 // consecutive looks with every CI run done and no image
+	// The grace covers runs GitHub creates late, such as a workflow_run build.
+	grace := max(timeout/10, 2*poll)
+	var finishedSince time.Time // zero unless every CI run is done and the image is missing
+	looks := 0
 	for {
 		ok, err := images.Exists(ctx, s.image)
 		if err == nil && ok {
@@ -90,6 +93,7 @@ func waitForImage(ctx context.Context, gh EnvGitHub, images ImageChecker, s sour
 			return nil
 		}
 		status := "unknown"
+		runsDone := false
 		if runs, rerr := gh.RunsFor(ctx, s.owner, s.repo, s.commit); rerr == nil {
 			if r := failedRun(runs); r != nil {
 				return &OpError{Code: "ci_failed", Message: fmt.Sprintf("CI %q for %s finished with %s: %s", r.Name, shortSHA(s.commit), r.Conclusion, r.HTMLURL)}
@@ -98,12 +102,16 @@ func waitForImage(ctx context.Context, gh EnvGitHub, images ImageChecker, s sour
 			if len(runs) > 0 {
 				status = runs[0].Status
 			}
-			if err == nil && allCompleted(runs) {
-				if finished++; finished >= 2 {
-					return &OpError{Code: "no_image", Message: fmt.Sprintf("CI for %s passed but did not push %s: its workflow builds no image for this commit (in a service made from an older template, the image job of .github/workflows/ci.yml runs only on main)", shortSHA(s.commit), s.image)}
-				}
-			} else {
-				finished = 0
+			runsDone = err == nil && allCompleted(runs)
+		}
+		if !runsDone {
+			finishedSince, looks = time.Time{}, 0
+		} else {
+			if finishedSince.IsZero() {
+				finishedSince = time.Now()
+			}
+			if looks++; looks >= 2 && time.Since(finishedSince) >= grace {
+				return &OpError{Code: "no_image", Message: fmt.Sprintf("every CI run for %s has finished and %s is not in the registry. Likely: the workflow builds no image for this commit (in a service made from an older template, the image job of .github/workflows/ci.yml runs only on main), the image was deleted, or it is pushed under another name", shortSHA(s.commit), s.image)}
 			}
 		}
 		msg := fmt.Sprintf("waiting for %s (CI: %s)", s.image, status)
