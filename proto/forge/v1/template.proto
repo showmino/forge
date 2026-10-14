@@ -31,6 +31,10 @@ message Template {
   // The run options of forge.yaml the create form offers: "replicas",
   // "resources", "env", "secrets", "jobs", "autoscaling".
   repeated string options = 8;
+  // "service" makes a new repo; "file" adds files to target_repo by pull request.
+  string type = 9;
+  // For a file template, "owner/repo".
+  string target_repo = 10;
 }
 
 // TemplateParameter is one typed input of a template.
@@ -42,6 +46,8 @@ message TemplateParameter {
     TYPE_INT = 2;
     TYPE_BOOL = 3;
     TYPE_ENUM = 4;
+    // Several of values, sent comma-separated.
+    TYPE_LIST = 5;
   }
   string name = 1;
   Type type = 2;
@@ -54,6 +60,15 @@ message TemplateParameter {
   // Allowed values of an enum.
   repeated string values = 6;
   string description = 7;
+  // What a form shows instead of the name; empty means the name.
+  string label = 8;
+  // An example value a form shows in an empty input.
+  string placeholder = 9;
+  // A heading a form shows the parameter under, such as "Tags".
+  string group = 10;
+  // Bounds of an int, when set.
+  optional int64 min = 11;
+  optional int64 max = 12;
 }
 
 message ListTemplatesRequest {

@@ -26,6 +26,8 @@ type RepoHost interface {
 	CreateOrgRepo(ctx context.Context, org, name, description string) (*github.Repo, error)
 	DeleteRepo(ctx context.Context, owner, name string) error
 	PushFiles(ctx context.Context, owner, repo, branch, message string, files []github.File) (string, error)
+	// ProposeFiles opens a pull request that adds files; for file templates.
+	ProposeFiles(ctx context.Context, owner, repo string, p github.Proposal) (string, error)
 }
 
 var _ RepoHost = (*github.Client)(nil)
@@ -156,28 +158,31 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 	return err
 }
 
-// create checks that the name is free in the catalog and on GitHub, then
-// runs the pipeline. It returns the last message (nil when it ended with an
-// error before any side effect).
+// create runs the pipeline. It returns the last message (nil when it ended
+// with an error before any side effect).
 func (c *creator) create(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) (*forgev1.CreateServiceResponse, error) {
-	id := req.GetServiceId()
+	return c.scaffold(ctx, req, stream)
+}
+
+// checkFree checks that a new service's name is free in the catalog and on GitHub.
+func (c *creator) checkFree(ctx context.Context, id string) error {
 	exists, err := c.catalog.has(ctx, servicePrefix+id)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if exists {
-		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s%s already exists", servicePrefix, id))
+		return connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s%s already exists", servicePrefix, id))
 	}
 	if c.repos != nil {
 		exists, err = c.repos.RepoExists(ctx, c.org, id)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("check github.com/%s/%s: %w", c.org, id, err))
+			return connect.NewError(connect.CodeUnavailable, fmt.Errorf("check github.com/%s/%s: %w", c.org, id, err))
 		}
 		if exists {
-			return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("github.com/%s/%s already exists", c.org, id))
+			return connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("github.com/%s/%s already exists", c.org, id))
 		}
 	}
-	return c.scaffold(ctx, req, stream)
+	return nil
 }
 
 // sender sends stream messages and remembers the first send error: once
@@ -219,6 +224,12 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	skeleton, err := fs.Sub(tree, path.Join(tname, template.SkeletonDir))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if t.IsFile() {
+		return c.propose(ctx, req, t, version, skeleton, w)
+	}
+	if err := c.checkFree(ctx, id); err != nil {
+		return nil, err
 	}
 	done("fetch", tname+"@"+version)
 
@@ -319,6 +330,93 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	p, _ := PrincipalFrom(ctx)
 	c.log.InfoContext(ctx, "service created", "service", id, "template", tname, "version", version, "repo", repoURL, "by", p.Subject)
 	final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Service{Service: resp.Msg.GetService()}}
+	w.send(final)
+	return final, nil
+}
+
+// propose runs a file template: render, then open a pull request that adds
+// the files to the template's target repo. Nothing is registered.
+func (c *creator) propose(ctx context.Context, req *forgev1.CreateServiceRequest, t *template.Template, version string, skeleton fs.FS, w *sender) (*forgev1.CreateServiceResponse, error) {
+	started := func(step string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_STARTED, "")) }
+	done := func(step, detail string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_DONE, detail)) }
+	id := req.GetServiceId()
+	owner, repo, _ := strings.Cut(t.Target, "/")
+	if !strings.EqualFold(owner, c.org) {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s targets %s, outside the %s organization", t.Name, version, t.Target, c.org))
+	}
+	// The team goes into the file as it is: only a GitHub team slug.
+	if !manifest.ValidID(req.GetOwnerTeam()) {
+		return nil, invalid(fmt.Sprintf("owner_team %q must be a GitHub team slug (a-z, 0-9, '-')", req.GetOwnerTeam()))
+	}
+	if req.GetRunOptions() != nil {
+		return nil, invalid("run_options are only for a service template")
+	}
+	repoURL := "https://github.com/" + t.Target
+	done("fetch", t.Name+"@"+version)
+
+	started("render")
+	v := template.Values{
+		Service:  template.ServiceValues{Name: id, Team: req.GetOwnerTeam(), Owners: req.GetOwners()},
+		Repo:     template.RepoValues{Owner: owner, Name: repo, URL: repoURL},
+		Template: template.TemplateValues{Name: t.Name, Version: version},
+	}
+	params, err := t.ResolveParams(v, req.GetParameters())
+	var pe *template.ParamError
+	if errors.As(err, &pe) {
+		return nil, invalid(pe.Error())
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+	v.Params = params
+	files, err := t.Render(skeleton, v)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s does not render: %w", t.Name, version, err))
+	}
+	if len(files) == 0 {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s renders no files with these parameters", t.Name, version))
+	}
+	if err := template.CheckFilePaths(files); err != nil {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", t.Name, version, err))
+	}
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	done("render", fmt.Sprintf("%d files", len(files)))
+
+	if req.GetValidateOnly() {
+		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Plan{Plan: &forgev1.CreatePlan{TemplateVersion: version, RepoUrl: repoURL, Files: paths}}}
+		w.send(final)
+		return final, w.err
+	}
+
+	started("pull_request")
+	branch := "forge/" + t.Name + "/" + id
+	p, _ := PrincipalFrom(ctx)
+	pushFiles := make([]github.File, 0, len(files))
+	for _, f := range files {
+		pushFiles = append(pushFiles, github.File{Path: f.Path, Executable: f.Mode&0o111 != 0, Content: f.Data})
+	}
+	url, err := c.repos.ProposeFiles(context.WithoutCancel(ctx), owner, repo, github.Proposal{
+		Branch:  branch,
+		Title:   fmt.Sprintf("%s: %s", t.Title, id),
+		Body:    fmt.Sprintf("Made with Forge from %s@%s by %s, for the team %s.\n\nFiles:\n- %s\n", t.Name, version, actorOf(ctx), req.GetOwnerTeam(), strings.Join(paths, "\n- ")),
+		Message: fmt.Sprintf("Add %s from %s@%s\n\nMade with Forge.", id, t.Name, version),
+		Files:   pushFiles,
+	})
+	if errors.Is(err, github.ErrFileExists) || errors.Is(err, github.ErrBranchExists) {
+		return nil, connect.NewError(connect.CodeAlreadyExists, err)
+	}
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("open the pull request in %s: %w", t.Target, err))
+	}
+	done("pull_request", url)
+
+	c.log.InfoContext(ctx, "change proposed", "name", id, "template", t.Name, "version", version, "repo", t.Target, "pull_request", url, "by", p.Subject)
+	final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Change{Change: &forgev1.ProposedChange{
+		RepoUrl: repoURL, Branch: branch, PullRequestUrl: url, Files: paths,
+	}}}
 	w.send(final)
 	return final, nil
 }

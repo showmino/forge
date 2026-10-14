@@ -264,6 +264,13 @@ env, secrets, jobs]`) names the run options its create form offers;
 `forge create` sets them with `--replicas`, `--resources`, `--env`,
 `--secret`, `--job` and `--autoscaling-max`, and forge-api writes them into
 the new repo's `forge.yaml` (see "Run options").
+A file template (`type: file`, `target: <owner>/<repo>` in `template.yaml`)
+makes no repo: `forge create <name> --template <template> --team <team>`
+renders it and opens a pull request that adds its files to the target repo,
+and prints the pull request's URL. It refuses when a file is there already.
+Parameters can carry a `label`, `placeholder` and `group` for forms, an int
+`min` and `max`, and the type `list` (several of `values`, comma-separated);
+see `docs/specs/2026-10-14-file-templates-design.md`.
 `forge op list`, `forge op watch <id>` and `forge op cancel <id>` show and stop long-running work on the API (operations). Phase 3's environments are the first to use them.
 `forge template lint [dir]` checks templates locally, with no API or login;
 see `docs/specs/2026-10-08-phase-2-templates-design.md` for the format.

@@ -224,6 +224,8 @@ message CreateServiceResponse {
     CreateFailure failure = 3;
     // validate_only: what would be created (last message).
     CreatePlan plan = 4;
+    // Success of a file template: the pull request that adds its files (last message).
+    ProposedChange change = 5;
   }
 }
 
@@ -252,6 +254,15 @@ message CreateFailure {
 // CreatePlan is what a validate_only create would do.
 message CreatePlan {
   string template_version = 1;
+  // The new repo, or for a file template the repo the files go to.
   string repo_url = 2;
   repeated string files = 3;
+}
+
+// ProposedChange is the pull request a file template opened in its target repo.
+message ProposedChange {
+  string repo_url = 1;
+  string branch = 2;
+  string pull_request_url = 3;
+  repeated string files = 4;
 }
