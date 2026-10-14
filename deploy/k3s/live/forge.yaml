@@ -2,7 +2,7 @@
 # ingress.yaml.tmpl (Traefik) or loadbalancer.yaml.tmpl (MetalLB and similar).
 # Render with deploy/k3s/render.sh; do not apply this file directly.
 #   dex.10.150.1.220.nip.io         host name of Dex, the same for you and for pods
-#   ghcr.io/showmino/forge-api:v0.12.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
+#   ghcr.io/showmino/forge-api:v0.13.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
 #   The GitHub App settings (ID, org, template repo): see render.sh.
 #   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who may write.
 #   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
@@ -128,7 +128,7 @@ spec:
           secret: {secretName: forge-github-app, defaultMode: 0440}
       containers:
         - name: forge-api
-          image: ghcr.io/showmino/forge-api:v0.12.0
+          image: ghcr.io/showmino/forge-api:v0.13.0
           imagePullPolicy: IfNotPresent
           env:
             - {name: FORGE_OIDC_ISSUER, value: "https://forge-login.showmino.com/dex"}
