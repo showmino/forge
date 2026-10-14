@@ -27,7 +27,8 @@
           ],
           "description": "Support tier"
         }
-      ]
+      ],
+      "type": "service"
     },
     {
       "name": "templates/web",
@@ -36,7 +37,8 @@
       "description": "Web fixture",
       "tags": [
         "node"
-      ]
+      ],
+      "type": "service"
     }
   ]
 }

@@ -60,7 +60,29 @@ func (p Parameter) Convert(raw string) (any, error) {
 		if err != nil {
 			return nil, &ParamError{p.Name, fmt.Sprintf("%q is not an int", raw)}
 		}
+		if p.Min != nil && n < *p.Min {
+			return nil, &ParamError{p.Name, fmt.Sprintf("%d must be at least %d", n, *p.Min)}
+		}
+		if p.Max != nil && n > *p.Max {
+			return nil, &ParamError{p.Name, fmt.Sprintf("%d must be at most %d", n, *p.Max)}
+		}
 		return n, nil
+	case TypeList:
+		out := []string{}
+		if strings.TrimSpace(raw) == "" {
+			return out, nil
+		}
+		for _, v := range strings.Split(raw, ",") {
+			v = strings.TrimSpace(v)
+			if !slices.Contains(p.Values, v) {
+				return nil, &ParamError{p.Name, fmt.Sprintf("%q must be one of %s", v, strings.Join(p.Values, ", "))}
+			}
+			if slices.Contains(out, v) {
+				return nil, &ParamError{p.Name, fmt.Sprintf("%q is given twice", v)}
+			}
+			out = append(out, v)
+		}
+		return out, nil
 	case TypeBool:
 		b, err := strconv.ParseBool(raw)
 		if err != nil {

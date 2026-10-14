@@ -22,6 +22,15 @@ var funcs = gotemplate.FuncMap{
 	"replace":    func(old, repl, s string) string { return strings.ReplaceAll(s, old, repl) },
 	"trimPrefix": func(prefix, s string) string { return strings.TrimPrefix(s, prefix) },
 	"trimSuffix": func(suffix, s string) string { return strings.TrimSuffix(s, suffix) },
+	// has reports whether a list parameter holds v: {% has .Params.envs "prod" %}.
+	"has": slices.Contains[[]string],
+	// title upper-cases the first letter: "corp" gives "Corp".
+	"title": func(s string) string {
+		if s == "" {
+			return s
+		}
+		return strings.ToUpper(s[:1]) + s[1:]
+	},
 }
 
 // File is one rendered file.

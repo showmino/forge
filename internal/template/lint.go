@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"strconv"
 )
 
 // SampleValues are the built-in values lint renders with. The service name
@@ -20,10 +21,13 @@ func SampleValues(t *Template) Values {
 func sample(p Parameter) string {
 	switch p.Type {
 	case TypeInt:
+		if p.Min != nil {
+			return strconv.Itoa(*p.Min)
+		}
 		return "1"
 	case TypeBool:
 		return "false"
-	case TypeEnum:
+	case TypeEnum, TypeList:
 		if len(p.Values) > 0 {
 			return p.Values[0]
 		}
@@ -116,6 +120,13 @@ func Lint(fsys fs.FS, dir string) ([]File, []Finding) {
 	if err != nil {
 		add([]Finding{{File: SkeletonDir, Message: err.Error()}})
 		return nil, out
+	}
+	if t.IsFile() {
+		if len(files) == 0 {
+			add([]Finding{{File: SkeletonDir, Message: "renders no files"}})
+			return nil, out
+		}
+		return files, nil
 	}
 	if err := CheckManifest(files, v.Service.Name, v.Service.Team); err != nil {
 		add([]Finding{{File: path.Join(SkeletonDir, "forge.yaml"), Message: err.Error()}})

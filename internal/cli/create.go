@@ -37,7 +37,11 @@ for missing required ones. See 'forge template get <template>'.
 Run options (--replicas, --resources, --env, --secret, --job,
 --autoscaling-max) go into the new repo's forge.yaml, run section; a
 template offers some of them (see 'forge template get'), and the rest are
-refused. Change them later in forge.yaml.`,
+refused. Change them later in forge.yaml.
+
+A file template (type file in 'forge template get') makes no repo: it opens
+a pull request that adds its files to the template's target repo, and
+prints the pull request's URL. <name> names the branch and the files.`,
 		Example: `  forge create payments --template go-grpc --team billing
   forge create ledger --template go-grpc@v1.0.0 --team billing --owner ana@example.com --set port=9090
   forge create shop --template nextjs --team web --replicas 2 --env LOG_LEVEL=info \
@@ -116,8 +120,15 @@ refused. Change them later in forge.yaml.`,
 			switch {
 			case final.GetService() != nil:
 				return f.printMutation(final.GetService(), "created", false)
+			case final.GetChange() != nil:
+				ch := final.GetChange()
+				if format == output.Table {
+					_, err := fmt.Fprintln(f.IO.Out, ch.GetPullRequestUrl())
+					return err
+				}
+				return output.Print(f.IO.Out, format, output.View{Names: []string{ch.GetPullRequestUrl()}, Data: ch})
 			case final.GetPlan() != nil:
-				return f.printPlan(format, strings.TrimPrefix(t.GetName(), "templates/"), final.GetPlan())
+				return f.printPlan(format, strings.TrimPrefix(t.GetName(), "templates/"), t.GetType() == "file", final.GetPlan())
 			case final.GetFailure() != nil:
 				fl := final.GetFailure()
 				hint := "the repo was deleted again; fix the cause and run the same command"
@@ -155,12 +166,21 @@ func parseSets(sets []string) (map[string]string, error) {
 // templateParam turns the API's parameter into the template package's, to
 // reuse its type, pattern and enum checks before calling the API.
 func templateParam(p *forgev1.TemplateParameter) template.Parameter {
-	return template.Parameter{
+	tp := template.Parameter{
 		Name:    p.GetName(),
 		Type:    template.ParamType(strings.ToLower(strings.TrimPrefix(p.GetType().String(), "TYPE_"))),
 		Pattern: p.GetPattern(),
 		Values:  p.GetValues(),
 	}
+	if p.Min != nil {
+		m := int(p.GetMin())
+		tp.Min = &m
+	}
+	if p.Max != nil {
+		m := int(p.GetMax())
+		tp.Max = &m
+	}
+	return tp
 }
 
 // completeParams rejects unknown or invalid values and fills in missing
@@ -207,7 +227,7 @@ func (f *Factory) completeParams(t *forgev1.Template, raw map[string]string) err
 // stepVerbs turn step names into progress lines.
 var stepVerbs = map[string]string{
 	"fetch": "fetched template", "render": "rendered", "create_repo": "created",
-	"push": "pushed initial commit", "register": "registered",
+	"push": "pushed initial commit", "register": "registered", "pull_request": "opened pull request",
 }
 
 // errMayStillFinish wraps a stream error after the server may have started
@@ -268,7 +288,7 @@ func (f *Factory) streamCreate(ctx context.Context, c *client.Client, req *forge
 }
 
 // printPlan prints what a --dry-run would create.
-func (f *Factory) printPlan(format output.Format, tmpl string, p *forgev1.CreatePlan) error {
+func (f *Factory) printPlan(format output.Format, tmpl string, file bool, p *forgev1.CreatePlan) error {
 	if format != output.Table {
 		return output.Print(f.IO.Out, format, output.View{Names: p.GetFiles(), Data: p})
 	}
@@ -276,7 +296,11 @@ func (f *Factory) printPlan(format output.Format, tmpl string, p *forgev1.Create
 	if len(p.GetFiles()) == 1 {
 		files = "file"
 	}
-	if _, err := fmt.Fprintf(f.IO.Out, "Would create %s from %s@%s with %d %s:\n", p.GetRepoUrl(), tmpl, p.GetTemplateVersion(), len(p.GetFiles()), files); err != nil {
+	line := fmt.Sprintf("Would create %s from %s@%s with %d %s:\n", p.GetRepoUrl(), tmpl, p.GetTemplateVersion(), len(p.GetFiles()), files)
+	if file {
+		line = fmt.Sprintf("Would add %d %s to %s with %s@%s:\n", len(p.GetFiles()), files, p.GetRepoUrl(), tmpl, p.GetTemplateVersion())
+	}
+	if _, err := fmt.Fprint(f.IO.Out, line); err != nil {
 		return err
 	}
 	for _, path := range p.GetFiles() {
