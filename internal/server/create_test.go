@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,24 @@ type fakeRepos struct {
 	deleteErr error
 	onCreate  func() // runs inside CreateOrgRepo, for disconnect tests
 	pushGate  chan struct{}
+	// proposals are the pull requests of file templates.
+	proposals  []proposal
+	proposeErr error
+}
+
+type proposal struct {
+	repo string
+	github.Proposal
+}
+
+func (f *fakeRepos) ProposeFiles(_ context.Context, owner, repo string, p github.Proposal) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.proposeErr != nil {
+		return "", f.proposeErr
+	}
+	f.proposals = append(f.proposals, proposal{owner + "/" + repo, p})
+	return fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, len(f.proposals)), nil
 }
 
 func newFakeRepos(existing ...string) *fakeRepos {

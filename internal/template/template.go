@@ -41,19 +41,33 @@ const (
 	TypeInt    ParamType = "int"
 	TypeBool   ParamType = "bool"
 	TypeEnum   ParamType = "enum"
+	// TypeList is several of Values, given comma-separated; it renders as []string.
+	TypeList ParamType = "list"
+)
+
+// Template types.
+const (
+	// TypeService makes a new repo and registers a service.
+	TypeService = "service"
+	// TypeFile adds the rendered files to Target by pull request.
+	TypeFile = "file"
 )
 
 // Template is the content of template.yaml.
 type Template struct {
-	APIVersion  string      `yaml:"apiVersion"`
-	Kind        string      `yaml:"kind"`
-	Name        string      `yaml:"name"`
-	Title       string      `yaml:"title"`
-	Description string      `yaml:"description"`
-	Tags        []string    `yaml:"tags,omitempty"`
-	Owner       string      `yaml:"owner,omitempty"`
-	Delimiters  []string    `yaml:"delimiters,omitempty"`
-	Parameters  []Parameter `yaml:"parameters,omitempty"`
+	APIVersion  string   `yaml:"apiVersion"`
+	Kind        string   `yaml:"kind"`
+	Name        string   `yaml:"name"`
+	Title       string   `yaml:"title"`
+	Description string   `yaml:"description"`
+	Tags        []string `yaml:"tags,omitempty"`
+	Owner       string   `yaml:"owner,omitempty"`
+	// Type is TypeService (also when empty) or TypeFile.
+	Type string `yaml:"type,omitempty"`
+	// Target is the "owner/repo" a file template adds its files to.
+	Target     string      `yaml:"target,omitempty"`
+	Delimiters []string    `yaml:"delimiters,omitempty"`
+	Parameters []Parameter `yaml:"parameters,omitempty"`
 	// Options are the run options of forge.yaml (manifest.Options) the create
 	// form offers for this template.
 	Options []string `yaml:"options,omitempty"`
@@ -67,11 +81,22 @@ type Parameter struct {
 	Pattern     string    `yaml:"pattern,omitempty"`
 	Values      []string  `yaml:"values,omitempty"`
 	Description string    `yaml:"description,omitempty"`
+	// Label, Placeholder and Group are for forms: a display name, an example
+	// value and a heading to show the parameter under.
+	Label       string `yaml:"label,omitempty"`
+	Placeholder string `yaml:"placeholder,omitempty"`
+	Group       string `yaml:"group,omitempty"`
+	// Min and Max bound an int.
+	Min *int `yaml:"min,omitempty"`
+	Max *int `yaml:"max,omitempty"`
 	// Line is where the parameter starts in template.yaml, for findings.
 	Line int `yaml:"-"`
 }
 
-var parameterKeys = map[string]bool{"name": true, "type": true, "default": true, "pattern": true, "values": true, "description": true}
+var parameterKeys = map[string]bool{
+	"name": true, "type": true, "default": true, "pattern": true, "values": true, "description": true,
+	"label": true, "placeholder": true, "group": true, "min": true, "max": true,
+}
 
 // UnmarshalYAML records the parameter's line. yaml.v3 does not pass strict
 // decoding into custom unmarshalers, so unknown keys are checked here.
@@ -96,12 +121,23 @@ func (p *Parameter) UnmarshalYAML(n *yaml.Node) error {
 func (p Parameter) Required() bool { return p.Default == nil }
 
 // DefaultString returns the default as written, and whether there is one.
+// A list's default is comma-separated, as a list is given.
 func (p Parameter) DefaultString() (string, bool) {
 	if p.Default == nil {
 		return "", false
 	}
+	if l, ok := p.Default.([]any); ok {
+		s := make([]string, len(l))
+		for i, v := range l {
+			s[i] = fmt.Sprint(v)
+		}
+		return strings.Join(s, ","), true
+	}
 	return fmt.Sprint(p.Default), true
 }
+
+// IsFile reports whether t adds files to an existing repo.
+func (t *Template) IsFile() bool { return t.Type == TypeFile }
 
 // Finding is one problem lint found.
 type Finding struct {
@@ -143,7 +179,22 @@ func (t *Template) Delims() (left, right string) {
 var (
 	identifier = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*$`)
 	tagWord    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	ownerRepo  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
 )
+
+// CheckFilePaths refuses rendered paths a file template must not write: Git
+// metadata and GitHub's own files, such as workflows that would run with the
+// target repo's secrets.
+func CheckFilePaths(files []File) error {
+	for _, f := range files {
+		for _, seg := range strings.Split(f.Path, "/") {
+			if strings.HasPrefix(strings.ToLower(seg), ".git") {
+				return fmt.Errorf("%s: a file template may not write under .git or .github", f.Path)
+			}
+		}
+	}
+	return nil
+}
 
 // Validate checks the field rules of template.yaml. Defaults are checked by
 // Lint, because a string default may use built-in values.
@@ -180,6 +231,23 @@ func (t *Template) Validate() []Finding {
 			add(0, "option %q must be one of %s, listed once", o, strings.Join(manifest.Options, ", "))
 		}
 	}
+	switch t.Type {
+	case "", TypeService:
+		if t.Target != "" {
+			add(0, "target is only for a file template")
+		}
+	case TypeFile:
+		if t.Target == "" {
+			add(0, "a file template needs target: the owner/repo its files go to")
+		} else if !ownerRepo.MatchString(t.Target) {
+			add(0, "target %q must be owner/repo", t.Target)
+		}
+		if len(t.Options) > 0 {
+			add(0, "options are only for a service template")
+		}
+	default:
+		add(0, "type must be %q or %q, got %q", TypeService, TypeFile, t.Type)
+	}
 	seen := map[string]bool{}
 	for _, p := range t.Parameters {
 		if !identifier.MatchString(p.Name) {
@@ -198,8 +266,38 @@ func (t *Template) Validate() []Finding {
 			if len(p.Values) == 0 {
 				add(p.Line, "parameter %q: type enum needs values", p.Name)
 			}
+		case TypeList:
+			if len(p.Values) == 0 {
+				add(p.Line, "parameter %q: type list needs values", p.Name)
+			}
+			if d, ok := p.Default.([]any); ok {
+				for _, v := range d {
+					if !slices.Contains(p.Values, fmt.Sprint(v)) {
+						add(p.Line, "parameter %q: default %q must be one of %s", p.Name, fmt.Sprint(v), strings.Join(p.Values, ", "))
+					}
+				}
+			} else if p.Default != nil {
+				add(p.Line, "parameter %q: the default of a list is a list, such as [a, b]", p.Name)
+			}
 		default:
-			add(p.Line, "parameter %q: type must be string, int, bool or enum, got %q", p.Name, p.Type)
+			add(p.Line, "parameter %q: type must be string, int, bool, enum or list, got %q", p.Name, p.Type)
+		}
+		if (p.Min != nil || p.Max != nil) && p.Type != TypeInt {
+			add(p.Line, "parameter %q: min and max are only allowed for type int", p.Name)
+		}
+		if p.Min != nil && p.Max != nil && *p.Min > *p.Max {
+			add(p.Line, "parameter %q: min is above max", p.Name)
+		}
+		if d, ok := p.Default.(int); ok && p.Type == TypeInt && ((p.Min != nil && d < *p.Min) || (p.Max != nil && d > *p.Max)) {
+			add(p.Line, "parameter %q: default %d is outside min and max", p.Name, d)
+		}
+		for _, v := range p.Values {
+			if v == "" || strings.Contains(v, ",") || strings.TrimSpace(v) != v {
+				add(p.Line, "parameter %q: value %q must not be empty, contain a comma or start or end with a space", p.Name, v)
+			}
+		}
+		if strings.Contains(p.Label+p.Placeholder+p.Group, "\n") {
+			add(p.Line, "parameter %q: label, placeholder and group must be one line", p.Name)
 		}
 		if p.Pattern != "" {
 			if p.Type != TypeString {

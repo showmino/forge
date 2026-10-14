@@ -87,7 +87,7 @@ func TestValidate(t *testing.T) {
 		{"delimiters", `delimiters: ["{%", "%}"]`, `delimiters: ["{%", "{%"]`, "delimiters must be two different"},
 		{"param name", "  - name: port", "  - name: 9port", `parameter "9port": name must be`},
 		{"duplicate", "  - name: debug", "  - name: port", `parameter "port" is defined twice`},
-		{"type", "    type: bool", "    type: float", `type must be string, int, bool or enum`},
+		{"type", "    type: bool", "    type: float", `type must be string, int, bool, enum or list`},
 		{"enum values", "    values: [gold, silver]", "    values: []", "needs values"},
 		{"pattern type", "    type: int\n    default: 8080", "    type: int\n    pattern: '^1'\n    default: 8080", "pattern is only allowed for type string"},
 		{"bad pattern", `pattern: '^[a-z0-9./-]+$'`, `pattern: '('`, "invalid pattern"},

@@ -63,6 +63,10 @@ func (m *memRepos) PushFiles(_ context.Context, _, repo, _, _ string, files []gi
 	return "abc1234def", nil
 }
 
+func (m *memRepos) ProposeFiles(_ context.Context, owner, repo string, _ github.Proposal) (string, error) {
+	return "https://github.com/" + owner + "/" + repo + "/pull/7", nil
+}
+
 func (m *memRepos) count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/manifest"
@@ -153,6 +154,7 @@ var paramTypes = map[template.ParamType]forgev1.TemplateParameter_Type{
 	template.TypeInt:    forgev1.TemplateParameter_TYPE_INT,
 	template.TypeBool:   forgev1.TemplateParameter_TYPE_BOOL,
 	template.TypeEnum:   forgev1.TemplateParameter_TYPE_ENUM,
+	template.TypeList:   forgev1.TemplateParameter_TYPE_LIST,
 }
 
 func templateProto(t *template.Template, version string) *forgev1.Template {
@@ -164,10 +166,15 @@ func templateProto(t *template.Template, version string) *forgev1.Template {
 		Tags:        slices.Clone(t.Tags),
 		Owner:       t.Owner,
 		Options:     slices.Clone(t.Options),
+		Type:        template.TypeService,
+		TargetRepo:  t.Target,
+	}
+	if t.IsFile() {
+		out.Type = template.TypeFile
 	}
 	for _, p := range t.Parameters {
 		def, _ := p.DefaultString()
-		out.Parameters = append(out.Parameters, &forgev1.TemplateParameter{
+		tp := &forgev1.TemplateParameter{
 			Name:         p.Name,
 			Type:         paramTypes[p.Type],
 			Required:     p.Required(),
@@ -175,7 +182,17 @@ func templateProto(t *template.Template, version string) *forgev1.Template {
 			Pattern:      p.Pattern,
 			Values:       slices.Clone(p.Values),
 			Description:  p.Description,
-		})
+			Label:        p.Label,
+			Placeholder:  p.Placeholder,
+			Group:        p.Group,
+		}
+		if p.Min != nil {
+			tp.Min = proto.Int64(int64(*p.Min))
+		}
+		if p.Max != nil {
+			tp.Max = proto.Int64(int64(*p.Max))
+		}
+		out.Parameters = append(out.Parameters, tp)
 	}
 	return out
 }
