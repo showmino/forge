@@ -49,8 +49,9 @@ These were set by the owner. They are not suggestions.
   promoting a service to production, deleting anything.
 - A rollout follows one procedure, written out in `docs/agents/verifying.md`:
   what is live is `deploy/k3s/live/forge.yaml` (rendered from
-  `deploy/k3s/live.env` by `render-live.sh`) and `kubectl diff` on it must
-  show nothing (no drift); change `live.env`, render, read the diff; show it
+  `deploy/k3s/live.env` by `render-live.sh`) and there is no drift (Argo CD
+  shows it Synced; `kubectl diff` on it shows nothing but Argo CD's
+  `tracking-id` annotations); change `live.env`, render, read the diff; show it
   to the owner; after the OK, server dry run, then apply; verify; merge the
   pull request so `main` says what is live. Argo CD shows Forge as the
   application `forge`, with manual sync: never press Sync without the OK.

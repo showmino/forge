@@ -204,8 +204,11 @@ The cluster is production, and every change to it needs the owner's OK
    `deploy/k3s/live.env` by `sh deploy/k3s/render-live.sh` (CI's `test` job
    fails when the file is not the render of `live.env`). Argo CD shows it as
    the application `forge` (manual sync: it shows health and drift, and
-   changes nothing by itself). `kubectl diff -f deploy/k3s/live/forge.yaml`
-   on `main` must show nothing. If it shows something, the cluster has
+   changes nothing by itself). There is no drift when Argo CD shows `forge`
+   Synced, and `kubectl diff -f deploy/k3s/live/forge.yaml` on `main` shows
+   nothing but `argocd.argoproj.io/tracking-id` annotations being removed
+   (Argo CD adds them when it syncs; the render does not carry them). If it
+   shows anything else, the cluster has
    drifted or the file is stale (the cluster is the truth: for example the
    chart revision is what the ApplicationSet `forge-services` in `argocd`
    says). Stop and find out which before changing anything, and correct it.
@@ -213,7 +216,7 @@ The cluster is production, and every change to it needs the owner's OK
 2. **On a branch, change `live.env`** (the new image, or the new setting),
    run `sh deploy/k3s/render-live.sh`, and read `kubectl diff -f
    deploy/k3s/live/forge.yaml`. It should show what you mean to change and
-   nothing else.
+   nothing else (besides the tracking annotations of step 1).
 3. **Show the owner the diff and wait for the OK.** Open the pull request
    with `live.env`, `live/forge.yaml` and this file.
 4. `kubectl apply --dry-run=server -f`, then `kubectl apply -f` the file from
@@ -222,7 +225,10 @@ The cluster is production, and every change to it needs the owner's OK
 5. **Verify** with the checks in this file for what changed. To go back,
    `kubectl apply -f` the rollback file from step 1.
 6. **Merge the pull request** once its checks pass, so `main` says what is
-   live and Argo CD shows `forge` Synced. Note in this file what was checked.
+   live. `kubectl apply` drops the tracking annotations, so Argo CD shows
+   `forge` OutOfSync until it is synced on the merged `main`; a Sync then
+   changes nothing but the annotations, and still needs the owner's OK.
+   Note in this file what was checked.
 
 ### Secrets Forge uses (names and keys only)
 
