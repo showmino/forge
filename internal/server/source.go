@@ -76,11 +76,13 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
 }
 
 // waitForImage polls the registry until the image exists, failing fast when
-// a CI run for the commit finished without success.
+// a CI run for the commit finished without success, or when every run
+// finished and the image is still missing on the next look.
 func waitForImage(ctx context.Context, gh EnvGitHub, images ImageChecker, s source, timeout, poll time.Duration, emit func(step, message string)) error {
 	tm := time.NewTimer(timeout)
 	defer tm.Stop()
 	last := ""
+	finished := 0 // consecutive looks with every CI run done and no image
 	for {
 		ok, err := images.Exists(ctx, s.image)
 		if err == nil && ok {
@@ -95,6 +97,13 @@ func waitForImage(ctx context.Context, gh EnvGitHub, images ImageChecker, s sour
 			status = "not started"
 			if len(runs) > 0 {
 				status = runs[0].Status
+			}
+			if err == nil && allCompleted(runs) {
+				if finished++; finished >= 2 {
+					return &OpError{Code: "no_image", Message: fmt.Sprintf("CI for %s passed but did not push %s: its workflow builds no image for this commit (in a service made from an older template, the image job of .github/workflows/ci.yml runs only on main)", shortSHA(s.commit), s.image)}
+				}
+			} else {
+				finished = 0
 			}
 		}
 		msg := fmt.Sprintf("waiting for %s (CI: %s)", s.image, status)
@@ -113,6 +122,16 @@ func waitForImage(ctx context.Context, gh EnvGitHub, images ImageChecker, s sour
 		case <-time.After(poll):
 		}
 	}
+}
+
+// allCompleted reports whether there are runs and every one has finished.
+func allCompleted(runs []github.WorkflowRun) bool {
+	for _, r := range runs {
+		if r.Status != "completed" {
+			return false
+		}
+	}
+	return len(runs) > 0
 }
 
 // failedRun returns the newest run of a workflow when it finished without
