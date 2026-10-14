@@ -24,6 +24,11 @@ your `PATH`, then run `forge auth login`. Release builds talk to
 `https://forge-api.showmino.com` unless a context, `FORGE_API_URL` or
 `--api-url` names another API.
 
+After that, `forge upgrade` brings the CLI to the API's version on Linux,
+macOS and Windows: the API serves the release's archives at
+`/cli/releases/v<version>/<file>`, so no GitHub access is needed, and the
+download is checked against the release's checksums (`--check` only looks).
+
 ```
 cmd/forge/          CLI entry point; maps errors to exit codes
 cmd/forge-api/      API server entry point

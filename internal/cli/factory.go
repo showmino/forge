@@ -52,6 +52,8 @@ type Deps struct {
 	Version string
 	// DefaultAPIURL is used when no flag, env or context names an API.
 	DefaultAPIURL string
+	// Executable returns this binary's path, for 'forge upgrade'.
+	Executable func() (string, error)
 }
 
 // DefaultDeps wires Deps to the real process.
@@ -63,6 +65,7 @@ func DefaultDeps(stdin io.Reader, stdout, stderr io.Writer, inTTY, outTTY bool) 
 		Now:           time.Now,
 		Version:       version.Get().Version,
 		DefaultAPIURL: version.APIURL,
+		Executable:    os.Executable,
 	}
 }
 
@@ -108,6 +111,9 @@ func newFactory(d Deps) *Factory {
 	}
 	if d.Getwd == nil {
 		d.Getwd = os.Getwd
+	}
+	if d.Executable == nil {
+		d.Executable = os.Executable
 	}
 	if d.Version == "" {
 		d.Version = version.Get().Version
