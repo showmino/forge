@@ -75,7 +75,12 @@ a yes to the next one.
   result; do not chain a merge behind a wait and assume it passed. A merge
   with a red test happened once here. A flaky test is fixed, not merged past.
 - In this repo no job is skipped on a pull request: all five (`test`, `lint`,
-  `proto`, `goreleaser-check`, `runner-image`) must pass. In `forge-web` the
+  `proto`, `goreleaser-check`, `runner-image`) must pass. The exception is a
+  pull request that only changes `docs/**` or the Markdown files at the root
+  (`README.md`, `AGENTS.md`, ...): CI does not run for it at all (the owner's
+  rule: checks on docs alone only cost time), and it merges once it contains
+  the current `main`. Docs elsewhere (test data, templates) run CI as usual.
+  In `forge-web` the
   jobs `image` and `deploy` only run on `main` and show as skipped on a pull
   request; that is expected, and `test` must pass. Any other skip is a stop.
 - **The checks run once, on the pull request, and not again after the merge**
