@@ -136,6 +136,7 @@ Each step is an operation event.
    - Every 10 s, ask the registry whether the image tag exists.
    - The registry call is `HEAD /v2/<owner>/<service>/manifests/<sha7>` on ghcr.io, using the credentials in the pull secret forge-api is configured with.
    - Each wait also checks the CI run for that commit (`GET /repos/{o}/{r}/actions/runs?head_sha=`). The event shows its status, and a run that finished unsuccessfully fails the operation at once with `ci_failed`.
+   - When every run for the commit has finished and the image is still missing on two looks in a row, the workflow builds no image for that commit (older templates build only on `main`): `no_image`, without waiting for the timeout.
    - Gives up after `FORGE_PREVIEW_IMAGE_TIMEOUT` (default 10m) with `image_timeout`.
 4. **namespace:** create `preview-<name>`.
    - Labels: `app.kubernetes.io/managed-by=forge`, `forge.dev/environment=<name>`, `forge.dev/service=<service>`.
