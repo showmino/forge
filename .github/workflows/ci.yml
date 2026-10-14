@@ -4,8 +4,12 @@ name: ci
 # after the merge: `main` only changes through pull requests, and a branch is
 # merged only when it contains the current `main` and its checks passed
 # (AGENTS.md, "Merging"), so the merge commit is the tree that was tested.
+# A pull request that only changes docs runs nothing (the owner's rule).
 on:
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
 
 permissions:
   contents: read
