@@ -78,6 +78,37 @@ func SetRunOptions(data []byte, r *Run) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+// SetRunDomain sets run.domain in the forge.yaml in data ("none": only the
+// internal address), keeping everything else and its comments.
+func SetRunDomain(data []byte, domain string) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, errors.New("forge.yaml is not a mapping")
+	}
+	root := doc.Content[0]
+	run := mapValue(root, "run")
+	if run == nil {
+		run = &yaml.Node{Kind: yaml.MappingNode}
+		root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "run"}, run)
+	}
+	run.Style = 0
+	removeKey(run, "domain")
+	run.Content = append(run.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "domain"}, &yaml.Node{Kind: yaml.ScalarNode, Value: domain})
+	var b bytes.Buffer
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
 func mapValue(m *yaml.Node, key string) *yaml.Node {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {

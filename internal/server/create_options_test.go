@@ -93,3 +93,23 @@ func TestTemplateOptionsInAPI(t *testing.T) {
 		t.Errorf("options: %v", got)
 	}
 }
+
+func TestCreateNetworkOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newCreateEnv(t, optionsRelease, newFakeRepos())
+	// Every service template allows it, also one that offers no run options.
+	if _, err := e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "intranet", Template: "templates/plain", OwnerTeam: "billing", RunOptions: &forgev1.RunOptions{NetworkOnly: true}}); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := e.repos.files("intranet")
+	for _, f := range files {
+		if f.Path != "forge.yaml" {
+			continue
+		}
+		m, err := manifest.Parse(f.Content)
+		if err != nil || m.RunDomain() != "none" {
+			t.Errorf("forge.yaml: %v\n%s", err, f.Content)
+		}
+	}
+}

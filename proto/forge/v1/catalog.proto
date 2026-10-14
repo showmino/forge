@@ -187,6 +187,9 @@ message RunOptions {
   repeated RunJob jobs = 5;
   // Production grows from replicas up to this on CPU; 0 is no autoscaling.
   int32 autoscaling_max = 6;
+  // Reached only on the platform's network: forge.yaml gets run.domain: none.
+  // Every service template allows it.
+  bool network_only = 7;
 }
 
 // RunResources are the app container's requests and limits, as Kubernetes

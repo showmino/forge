@@ -67,3 +67,20 @@ func TestRunOptionsOf(t *testing.T) {
 		t.Error("ValidOption")
 	}
 }
+
+func TestSetRunDomain(t *testing.T) {
+	t.Parallel()
+	in := "# top\napiVersion: forge.dev/v1\nservice:\n  name: a\n  team: b\nrun:\n  port: 3000 # app\n"
+	out, err := SetRunDomain([]byte(in), "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Parse(out)
+	if err != nil || m.RunDomain() != "none" || m.RunPort() != 3000 || !strings.Contains(string(out), "port: 3000 # app") {
+		t.Errorf("%v:\n%s", err, out)
+	}
+	out, err = SetRunDomain([]byte("apiVersion: forge.dev/v1\nservice:\n  name: a\n  team: b\n"), "none")
+	if m, perr := Parse(out); err != nil || perr != nil || m.RunDomain() != "none" {
+		t.Errorf("without run: %v %v\n%s", err, perr, out)
+	}
+}

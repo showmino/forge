@@ -366,6 +366,10 @@ each domain with the name of its DNS zone, the default first).
   `run.host` cannot be the name of another service in the catalog, and like
   every new address it must not resolve yet.
 
+  A new service can start that way: `forge create <name> ... --network-only`
+  (in the dashboard: "Only on our network") writes `run.domain: none` into
+  its forge.yaml, for every service template.
+
 A writer can also set a service's address in Forge, where it wins over
 `run.host` and `run.domain` (in the dashboard: Settings, Danger zone, Change
 address). It is meant for the rare move, for example a service that takes
