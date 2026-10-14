@@ -308,7 +308,9 @@ After an API change, run `sh scripts/sync-proto.sh ../forge` in that repo: the s
 Releasing Forge itself: push a `vX.Y.Z` tag on `main` of `showmino/forge`. `release.yml` (goreleaser) publishes the
 GitHub release with the CLI for Linux, macOS and Windows (checksums signed with cosign, SBOMs) and
 `ghcr.io/showmino/forge-api:vX.Y.Z` (also `latest`), which is the image to roll out. The Homebrew cask is skipped
-until there is a `showmino/homebrew-tap` and the secret `HOMEBREW_TAP_GITHUB_TOKEN`. The image package must let the
+until there is a `showmino/homebrew-tap` and the secret `HOMEBREW_TAP_GITHUB_TOKEN`. Release builds of the CLI link
+`version.APIURL=https://forge-api.showmino.com` as the lowest-precedence API (`forge doctor` shows it as
+`(built-in)`); change it in `.goreleaser.yaml` if the API's address changes. The image package must let the
 repo's workflows write: package settings, "Manage Actions access", `forge` with role Write (set on 2026-10-11; the
 first run failed with `permission_denied: write_package` without it). A run that failed before publishing can be
 re-run on the same tag.
