@@ -40,6 +40,8 @@ jobs:
       - run: go test -race -count=1 ./...
       - name: Deploy chart golden
         run: make chart-test
+      - name: The live render is the render of live.env
+        run: sh deploy/k3s/render-live.sh --check
 
   lint:
     runs-on: ubuntu-latest

@@ -48,10 +48,12 @@ These were set by the owner. They are not suggestions.
   explicit OK each time:** applying manifests, restarting a workload,
   promoting a service to production, deleting anything.
 - A rollout follows one procedure, written out in `docs/agents/verifying.md`:
-  render the manifests that are live and confirm `kubectl diff` shows nothing
-  (no drift); render the new ones and read the diff; show it to the owner;
-  after the OK, server dry run, then apply; verify; keep the previous render
-  as the rollback file.
+  what is live is `deploy/k3s/live/forge.yaml` (rendered from
+  `deploy/k3s/live.env` by `render-live.sh`) and `kubectl diff` on it must
+  show nothing (no drift); change `live.env`, render, read the diff; show it
+  to the owner; after the OK, server dry run, then apply; verify; merge the
+  pull request so `main` says what is live. Argo CD shows Forge as the
+  application `forge`, with manual sync: never press Sync without the OK.
 - Never write to the production database directly. Migrations run when
   forge-api starts.
 - A reviewer or subagent you start gets no cluster access: tell it to run no
