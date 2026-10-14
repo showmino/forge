@@ -86,6 +86,11 @@ func applyRunOptions(files []template.File, t *template.Template, ro *forgev1.Ru
 	if err != nil {
 		return nil, invalid(err.Error())
 	}
+	if ro.GetNetworkOnly() {
+		if data, err = manifest.SetRunDomain(data, "none"); err != nil {
+			return nil, invalid(err.Error())
+		}
+	}
 	if _, err := manifest.Parse(data); err != nil {
 		return nil, invalid("run options: " + err.Error())
 	}
