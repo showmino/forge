@@ -366,6 +366,21 @@ each domain with the name of its DNS zone, the default first).
   `run.host` cannot be the name of another service in the catalog, and like
   every new address it must not resolve yet.
 
+  To keep staging on the internal address while production is public:
+
+  ```yaml
+  run:
+    staging:
+      public: false            # staging: http://<service>.staging.<deploy domain>
+  ```
+
+  Production keeps its public address, and an address set in Forge (below)
+  still names it; staging gets no DNS record. It is kept with each deploy, so
+  a promotion or rollback carries it (a rollback never makes an internal
+  staging public), and it applies at the next staging deploy, which says the
+  public staging address stops working. A forge-api
+  older than this field rejects a `forge.yaml` that has it.
+
   A new service can start that way: `forge create <name> ... --internal`
   (in the dashboard: "Only on our network") writes `run.domain: none` into
   its forge.yaml, for every service template.

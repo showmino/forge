@@ -87,6 +87,21 @@ type Run struct {
 	Secrets     []Secret          `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 	Jobs        []Job             `yaml:"jobs,omitempty" json:"jobs,omitempty"`
 	Autoscaling *Autoscaling      `yaml:"autoscaling,omitempty" json:"autoscaling,omitempty"`
+	// Staging holds what differs in staging.
+	Staging *StagingRun `yaml:"staging,omitempty" json:"staging,omitempty"`
+}
+
+// StagingRun is run.staging.
+type StagingRun struct {
+	// Public false keeps staging on the platform's internal address while
+	// production has its public one. Unset or true, staging is reached like
+	// production: at "<host>-staging.<domain>".
+	Public *bool `yaml:"public,omitempty" json:"public,omitempty"`
+}
+
+// StagingInternal reports whether run.staging.public is false.
+func (m *Manifest) StagingInternal() bool {
+	return m.Run != nil && m.Run.Staging != nil && m.Run.Staging.Public != nil && !*m.Run.Staging.Public
 }
 
 // RunHost returns run.host as it is written: "" for the service's name.
@@ -218,6 +233,9 @@ func (m *Manifest) Validate() error {
 		}
 		if r.Domain != "" && r.Domain != DomainNone && !domainName.MatchString(r.Domain) {
 			return fmt.Errorf("run.domain %q must be a domain such as example.com, or %q", r.Domain, DomainNone)
+		}
+		if r.Domain == DomainNone && r.Staging != nil && r.Staging.Public != nil && *r.Staging.Public {
+			return fmt.Errorf("run.staging.public cannot be true with run.domain %q: the service has no public address", DomainNone)
 		}
 		if err := r.validateOptions(); err != nil {
 			return err
