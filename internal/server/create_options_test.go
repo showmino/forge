@@ -94,6 +94,31 @@ func TestTemplateOptionsInAPI(t *testing.T) {
 	}
 }
 
+func TestCreateStagingNetworkOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newCreateEnv(t, optionsRelease, newFakeRepos())
+	// Every service template allows it, also one that offers no run options.
+	if _, err := e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "shop", Template: "templates/plain", OwnerTeam: "billing", RunOptions: &forgev1.RunOptions{StagingNetworkOnly: true}}); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := e.repos.files("shop")
+	found := false
+	for _, f := range files {
+		if f.Path != "forge.yaml" {
+			continue
+		}
+		found = true
+		m, err := manifest.Parse(f.Content)
+		if err != nil || !m.StagingInternal() || m.RunDomain() != "" {
+			t.Errorf("forge.yaml: %v\n%s", err, f.Content)
+		}
+	}
+	if !found {
+		t.Error("no forge.yaml")
+	}
+}
+
 func TestCreateNetworkOnly(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

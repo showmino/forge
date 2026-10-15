@@ -381,9 +381,10 @@ each domain with the name of its DNS zone, the default first).
   public staging address stops working. A forge-api
   older than this field rejects a `forge.yaml` that has it.
 
-  A new service can start that way: `forge create <name> ... --internal`
-  (in the dashboard: "Only on our network") writes `run.domain: none` into
-  its forge.yaml, for every service template.
+  A new service can start either way, with every service template:
+  `forge create <name> ... --internal` (in the dashboard: "Internal") writes
+  `run.domain: none` into its forge.yaml, and `--internal-staging` (in the
+  dashboard: "Internal staging") writes `run.staging.public: false`.
 
 A writer can also set a service's address in Forge, where it wins over
 `run.host` and `run.domain` (in the dashboard: Settings, Danger zone, Change

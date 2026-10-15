@@ -68,6 +68,23 @@ func TestRunOptionsOf(t *testing.T) {
 	}
 }
 
+func TestSetStagingPublic(t *testing.T) {
+	t.Parallel()
+	in := "# top\napiVersion: forge.dev/v1\nservice:\n  name: a\n  team: b\nrun:\n  port: 3000 # app\n  staging:\n    public: true\n"
+	out, err := SetStagingPublic([]byte(in), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Parse(out)
+	if err != nil || !m.StagingInternal() || m.RunPort() != 3000 || !strings.Contains(string(out), "port: 3000 # app") || strings.Count(string(out), "public:") != 1 {
+		t.Errorf("%v:\n%s", err, out)
+	}
+	out, err = SetStagingPublic([]byte("apiVersion: forge.dev/v1\nservice:\n  name: a\n  team: b\n"), false)
+	if m, perr := Parse(out); err != nil || perr != nil || !m.StagingInternal() {
+		t.Errorf("without run: %v %v\n%s", err, perr, out)
+	}
+}
+
 func TestSetRunDomain(t *testing.T) {
 	t.Parallel()
 	in := "# top\napiVersion: forge.dev/v1\nservice:\n  name: a\n  team: b\nrun:\n  port: 3000 # app\n"

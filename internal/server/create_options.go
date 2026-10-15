@@ -91,6 +91,11 @@ func applyRunOptions(files []template.File, t *template.Template, ro *forgev1.Ru
 			return nil, invalid(err.Error())
 		}
 	}
+	if ro.GetStagingNetworkOnly() {
+		if data, err = manifest.SetStagingPublic(data, false); err != nil {
+			return nil, invalid(err.Error())
+		}
+	}
 	if _, err := manifest.Parse(data); err != nil {
 		return nil, invalid("run options: " + err.Error())
 	}
