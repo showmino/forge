@@ -15,6 +15,7 @@ type runFlags struct {
 	resources, env, secrets  []string
 	jobs                     []string
 	networkOnly              bool
+	stagingNetworkOnly       bool
 }
 
 func (r *runFlags) register(fl *pflag.FlagSet) {
@@ -25,13 +26,14 @@ func (r *runFlags) register(fl *pflag.FlagSet) {
 	fl.StringArrayVar(&r.jobs, "job", nil, `run option: a cron job as name=<schedule>:<command>, e.g. 'cleanup=0 3 * * *:node cleanup.js' (repeatable)`)
 	fl.IntVar(&r.autoscalingMax, "autoscaling-max", 0, "run option: let production grow on CPU up to this many pods")
 	fl.BoolVar(&r.networkOnly, "internal", false, "reach the service only on the platform's network, with no public address (run.domain: none)")
+	fl.BoolVar(&r.stagingNetworkOnly, "internal-staging", false, "reach staging only on the platform's network; production stays public (run.staging.public: false)")
 }
 
 // options returns the run options set by the flags, nil when none is. The
 // Forge API checks them by forge.yaml's rules and the template's offer.
 func (r *runFlags) options() (*forgev1.RunOptions, error) {
-	ro := &forgev1.RunOptions{Replicas: int32(min(max(r.replicas, -1), 1000)), AutoscalingMax: int32(min(max(r.autoscalingMax, -1), 1000)), NetworkOnly: r.networkOnly} //nolint:gosec // clamped
-	set := r.replicas != 0 || r.autoscalingMax != 0 || r.networkOnly
+	ro := &forgev1.RunOptions{Replicas: int32(min(max(r.replicas, -1), 1000)), AutoscalingMax: int32(min(max(r.autoscalingMax, -1), 1000)), NetworkOnly: r.networkOnly, StagingNetworkOnly: r.stagingNetworkOnly} //nolint:gosec // clamped
+	set := r.replicas != 0 || r.autoscalingMax != 0 || r.networkOnly || r.stagingNetworkOnly
 	if len(r.resources) > 0 {
 		set = true
 		ro.Resources = &forgev1.RunResources{}

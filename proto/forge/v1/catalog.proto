@@ -190,6 +190,9 @@ message RunOptions {
   // Reached only on the platform's network: forge.yaml gets run.domain: none.
   // Every service template allows it.
   bool network_only = 7;
+  // Staging reached only on the platform's network, production public:
+  // forge.yaml gets run.staging.public: false. Every service template allows it.
+  bool staging_network_only = 8;
 }
 
 // RunResources are the app container's requests and limits, as Kubernetes

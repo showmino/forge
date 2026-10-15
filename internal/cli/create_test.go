@@ -114,6 +114,8 @@ func TestCreate(t *testing.T) {
 	}
 	// Any service template may be reached only on the network.
 	h.ok("create", "intranet", "--template", "svc", "--team", "platform", "--set", "tier=gold", "--internal")
+	// And any may keep only staging on the network.
+	h.ok("create", "shop", "--template", "svc", "--team", "platform", "--set", "tier=gold", "--internal-staging")
 }
 
 func TestCreateDryRun(t *testing.T) {
