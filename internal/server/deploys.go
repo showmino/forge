@@ -599,7 +599,12 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	// restored commit asked for, under today's settings. An older deploy's
 	// address may be one the platform no longer hands out, or someone else's
 	// by now, and a rollback must not take a public service off the internet.
-	addr, moved, err := d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host, stagingInternal: v.Forge.StagingInternal}, d.currentValues(ctx, svc, env))
+	// Nor put an internal staging on it: run.staging.public: false stays.
+	cur := d.currentValues(ctx, svc, env)
+	if cur != nil && cur.Forge.StagingInternal {
+		v.Forge.StagingInternal = true
+	}
+	addr, moved, err := d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host, stagingInternal: v.Forge.StagingInternal}, cur)
 	if err != nil {
 		return nil, err
 	}

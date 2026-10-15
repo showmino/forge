@@ -458,4 +458,20 @@ func TestStagingInternal(t *testing.T) {
 	if v := values("staging"); v.Host != "pay-staging.showmino.com" || v.DNS == nil || v.Forge.StagingInternal {
 		t.Errorf("staging public again: %+v dns %+v", v, v.DNS)
 	}
+
+	// Internal again, then a rollback to the commit without the flag: staging
+	// was made internal on purpose, and a rollback does not undo that.
+	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	rb, err = f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: "deployments/payments/staging"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, rb.Msg.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	if v := values("staging"); v.Host != "payments.staging.10.150.1.222.nip.io" || v.DNS != nil || !v.Forge.StagingInternal || v.Forge.Commit != ciOldSHA {
+		t.Errorf("staging rolled back past the flag: %+v dns %+v", v, v.DNS)
+	}
 }
