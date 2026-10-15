@@ -40,6 +40,7 @@ func TestAddress(t *testing.T) {
 		d              *Deploys
 		svc, env, want string
 		as             string // run.host
+		internal       bool   // run.staging.public: false
 		host, url      string
 		dns            string // "<name> <zone> <tunnel>", "" for none
 		refused        string // in the error
@@ -67,8 +68,14 @@ func TestAddress(t *testing.T) {
 		{name: "the root, staging", d: pub, svc: "deogratias", env: "staging", as: "@", want: "deogratias.cloud", host: "staging.deogratias.cloud", url: "https://staging.deogratias.cloud", dns: "staging deogratias-cloud production"},
 		{name: "an environment's name as the host", d: pub, svc: "web", env: "production", as: "staging", refused: "staging.showmino.com is where the service at the root of showmino.com is reached in staging"},
 		{name: "the root means nothing for an internal address", d: pub, svc: "deogratias", env: "staging", as: "@", want: "none", host: "deogratias.staging.10.150.1.222.nip.io", url: "http://deogratias.staging.10.150.1.222.nip.io"},
+		// run.staging.public: false keeps staging internal and leaves production as it is.
+		{name: "staging kept internal", d: pub, svc: "payments", env: "staging", internal: true, host: "payments.staging.10.150.1.222.nip.io", url: "http://payments.staging.10.150.1.222.nip.io"},
+		{name: "production public all the same", d: pub, svc: "payments", env: "production", internal: true, host: "payments.showmino.com", url: "https://payments.showmino.com", dns: "payments showmino-com production"},
+		{name: "staging kept internal, another name and domain", d: pub, svc: "forge-web", env: "staging", as: "forge", want: "deogratias.cloud", internal: true, host: "forge-web.staging.10.150.1.222.nip.io", url: "http://forge-web.staging.10.150.1.222.nip.io"},
+		{name: "staging kept internal, the root", d: pub, svc: "deogratias", env: "staging", as: "@", want: "deogratias.cloud", internal: true, host: "deogratias.staging.10.150.1.222.nip.io", url: "http://deogratias.staging.10.150.1.222.nip.io"},
+		{name: "staging kept internal, a domain the platform does not have", d: pub, svc: "payments", env: "staging", want: "example.org", internal: true, refused: "use showmino.com or deogratias.cloud"},
 	} {
-		a, err := tc.d.address(tc.svc, tc.env, wanted{domain: tc.want, host: tc.as})
+		a, err := tc.d.address(tc.svc, tc.env, wanted{domain: tc.want, host: tc.as, stagingInternal: tc.internal})
 		if tc.refused != "" {
 			if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), tc.refused) {
 				t.Errorf("%s: %v, want a refusal with %q", tc.name, err, tc.refused)
@@ -350,5 +357,105 @@ func TestPublicAddressOtherName(t *testing.T) {
 	defer dns.mu.Unlock()
 	if strings.Join(dns.asked, " ") != "pay-staging.showmino.com pay.showmino.com" {
 		t.Errorf("asked DNS for %v", dns.asked)
+	}
+}
+
+// run.staging.public: false keeps staging on the internal address while
+// production is public: through a promotion, an address set in Forge, and
+// until a commit drops it.
+func TestStagingInternal(t *testing.T) {
+	t.Parallel()
+	dns := &taken{hosts: map[string]bool{}}
+	manifest := func(run string) []byte {
+		return []byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n  port: 9090\n" + run)
+	}
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		o.PublicDomains = []PublicDomain{{Name: "showmino.com", Zone: "showmino-com"}}
+		o.HostTaken = dns.check
+		files := o.GitHub.(*envtest.GitHub).Files
+		files[envSHA+":forge.yaml"] = manifest("  staging:\n    public: false\n")
+		files[ciOldSHA+":forge.yaml"] = manifest("")
+	})
+	ctx := context.Background()
+	values := func(env string) deployValues {
+		t.Helper()
+		data, err := f.repo.Read(ctx, valuesPath("payments", env), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := parseValues(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	// Staging: the internal address, no record, nothing to point out.
+	op := f.deployRef(t, "staging", "")
+	if op.GetError() != nil || stepMessage(op, "address") != "" {
+		t.Fatalf("deploy: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	if v := values("staging"); v.Host != "payments.staging.10.150.1.222.nip.io" || v.DNS != nil || v.Listener != "" || v.isPublic() || !v.Forge.StagingInternal {
+		t.Errorf("staging: %+v dns %+v", v, v.DNS)
+	}
+	// Production, by promotion: public under the default domain.
+	op = f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED)
+	if op.GetError() != nil || !strings.HasPrefix(stepMessage(op, "address"), "https://payments.showmino.com (public") {
+		t.Fatalf("promote: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	if v := values("production"); v.Host != "payments.showmino.com" || v.DNS == nil || v.DNS.Name != "payments" || v.Listener != "public-showmino-com" {
+		t.Errorf("production: %+v dns %+v", v, v.DNS)
+	}
+
+	// An address set in Forge renames the service; staging stays internal.
+	resp, err := f.client.SetAddress(ctx, as("writer", &forgev1.SetAddressRequest{Service: "services/payments", Host: "pay", Domain: "showmino.com"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range resp.Msg.GetAddresses() {
+		got = append(got, p.GetEnv()+" "+p.GetUrl())
+	}
+	if want := "staging http://payments.staging.10.150.1.222.nip.io\nproduction https://pay.showmino.com"; strings.Join(got, "\n") != want {
+		t.Errorf("planned:\n%s\nwant\n%s", strings.Join(got, "\n"), want)
+	}
+	if op := f.deployRef(t, "staging", ""); op.GetError() != nil || strings.Contains(stepMessage(op, "address"), "public") {
+		t.Fatalf("redeploy: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	if v := values("staging"); v.Host != "payments.staging.10.150.1.222.nip.io" || v.DNS != nil {
+		t.Errorf("staging with the setting: %+v dns %+v", v, v.DNS)
+	}
+	if op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	if v := values("production"); v.Host != "pay.showmino.com" || v.DNS == nil || v.DNS.Name != "pay" {
+		t.Errorf("production with the setting: %+v dns %+v", v, v.DNS)
+	}
+	// A rollback of staging keeps it internal.
+	rb, err := f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: "deployments/payments/staging"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, rb.Msg.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	if v := values("staging"); v.Host != "payments.staging.10.150.1.222.nip.io" || v.DNS != nil {
+		t.Errorf("staging after a rollback: %+v dns %+v", v, v.DNS)
+	}
+	// DNS was never asked about a staging name: none was handed out.
+	dns.mu.Lock()
+	asked := strings.Join(dns.asked, " ")
+	dns.mu.Unlock()
+	if strings.Contains(asked, "staging") {
+		t.Errorf("asked DNS for %s", asked)
+	}
+
+	// A commit without run.staging.public makes staging public, and says so.
+	op = f.deployRef(t, "staging", "release")
+	if op.GetError() != nil || stepMessage(op, "address") != "https://pay-staging.showmino.com (public: reachable from the internet); http://payments.staging.10.150.1.222.nip.io stops working; the address set in Forge (host \"pay\", domain \"showmino.com\") wins over forge.yaml's (run.host \"\", run.domain \"\")" {
+		t.Fatalf("public again: %v, address step %q", op.GetError(), stepMessage(op, "address"))
+	}
+	if v := values("staging"); v.Host != "pay-staging.showmino.com" || v.DNS == nil || v.Forge.StagingInternal {
+		t.Errorf("staging public again: %+v dns %+v", v, v.DNS)
 	}
 }

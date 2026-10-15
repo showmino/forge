@@ -110,7 +110,19 @@ func TestRun(t *testing.T) {
 	if h, err := Parse([]byte(base + "run:\n  host: forge\n")); err != nil || h.RunHost() != "forge" || m.RunHost() != "" {
 		t.Errorf("run.host: %v %v", h, err)
 	}
+	// run.staging.public: false keeps staging on the internal address; unset
+	// or true, staging is reached like production.
+	if s, err := Parse([]byte(base + "run:\n  staging:\n    public: false\n")); err != nil || !s.StagingInternal() || m.StagingInternal() {
+		t.Errorf("run.staging.public false: %v %v", s, err)
+	}
+	if s, err := Parse([]byte(base + "run:\n  staging:\n    public: true\n")); err != nil || s.StagingInternal() {
+		t.Errorf("run.staging.public true: %v %v", s, err)
+	}
+	if s, err := Parse([]byte(base + "run:\n  domain: none\n  staging:\n    public: false\n")); err != nil || !s.StagingInternal() {
+		t.Errorf("an internal service with an internal staging: %v %v", s, err)
+	}
 	for _, bad := range []string{"run:\n  port: 70000\n", "run:\n  port: -1\n", "run:\n  health: ready\n", "run:\n  nope: 1\n",
+		"run:\n  staging:\n    nope: 1\n", "run:\n  staging:\n    public: maybe\n", "run:\n  domain: none\n  staging:\n    public: true\n",
 		"run:\n  host: Forge\n", "run:\n  host: forge.showmino.com\n", "run:\n  host: -forge\n", "run:\n  host: \"*\"\n",
 		"run:\n  domain: Example.com\n", "run:\n  domain: localhost\n", "run:\n  domain: https://example.com\n", "run:\n  domain: \"*.example.com\"\n", "run:\n  domain: example.com.\n"} {
 		if _, err := Parse([]byte(base + bad)); err == nil {

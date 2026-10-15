@@ -88,10 +88,13 @@ func hostURL(host string, public bool) string {
 // wanted is the address a service asks for: forge.yaml's run.domain and
 // run.host, each "" for the default, or the setting made in Forge, which
 // wins (set). claimed are addresses in use the service may take over.
+// stagingInternal is forge.yaml's run.staging.public: false; a setting in
+// Forge changes the name, not that.
 type wanted struct {
-	domain, host string
-	claimed      []string
-	set          bool
+	domain, host    string
+	claimed         []string
+	set             bool
+	stagingInternal bool
 }
 
 // HostRoot is the host of a service reached at the domain itself.
@@ -118,7 +121,7 @@ func (d *Deploys) withSetting(ctx context.Context, svc string, fromYAML wanted) 
 	if a == nil {
 		return fromYAML, "", nil
 	}
-	w := wanted{domain: a.GetDomain(), host: a.GetHost(), claimed: a.GetClaimed(), set: true}
+	w := wanted{domain: a.GetDomain(), host: a.GetHost(), claimed: a.GetClaimed(), set: true, stagingInternal: fromYAML.stagingInternal}
 	note := ""
 	if fromYAML.domain != w.domain || fromYAML.host != w.host {
 		note = fmt.Sprintf("the address set in Forge (host %q, domain %q) wins over forge.yaml's (run.host %q, run.domain %q)", w.host, w.domain, fromYAML.host, fromYAML.domain)
@@ -131,7 +134,8 @@ func (d *Deploys) withSetting(ctx context.Context, svc string, fromYAML wanted) 
 // Otherwise it is one label under the chosen domain, because a certificate
 // for *.example.com covers nothing deeper: <name>.<domain> in production and
 // <name>-<env>.<domain> elsewhere, where the name is the service's own unless
-// it asks for another with run.host.
+// it asks for another with run.host. With stagingInternal every environment
+// but production keeps the internal address.
 func (d *Deploys) address(svc, env string, w wanted) (address, error) {
 	want := w.domain
 	refuse := func(format string, a ...any) (address, error) {
@@ -154,6 +158,9 @@ func (d *Deploys) address(svc, env string, w wanted) (address, error) {
 			return refuse("run.domain %s is not a domain of this platform: use %s, or %q for no public address", want, strings.Join(offered, " or "), manifest.DomainNone)
 		}
 		domain = d.o.PublicDomains[i]
+	}
+	if w.stagingInternal && env != finalEnv {
+		return address{host: d.host(svc, env)}, nil
 	}
 	name, named := svc, "a service named "+svc
 	if w.host != "" && w.host != svc {
@@ -282,11 +289,14 @@ func (d *Deploys) heldByOther(ctx context.Context, svc, host string) error {
 		}
 		for _, env := range deployEnvs {
 			held := false
-			if v := d.currentValues(ctx, id, env); v != nil && v.Host == host {
+			v := d.currentValues(ctx, id, env)
+			if v != nil && v.Host == host {
 				held = true
 			}
 			if setting != nil {
-				if a, err := d.address(id, env, *setting); err == nil && a.host == host {
+				w := *setting
+				w.stagingInternal = v != nil && v.Forge.StagingInternal
+				if a, err := d.address(id, env, w); err == nil && a.host == host {
 					held = true
 				}
 			}

@@ -55,12 +55,14 @@ func (d *Deploys) SetAddress(ctx context.Context, req *connect.Request[forgev1.S
 	var inUse []string
 	for _, env := range deployEnvs {
 		cur := d.currentValues(ctx, svc, env)
-		want := wanted{domain: domain, host: host, set: true}
+		// run.staging.public stays as the last deploy here had it.
+		internal := cur != nil && cur.Forge.StagingInternal
+		want := wanted{domain: domain, host: host, set: true, stagingInternal: internal}
 		if m.GetClear() {
 			// Back to forge.yaml: what it asked for at the last deploy here.
-			want = wanted{}
+			want = wanted{stagingInternal: internal}
 			if cur != nil {
-				want = wanted{domain: cur.Forge.Domain, host: cur.Forge.Host}
+				want = wanted{domain: cur.Forge.Domain, host: cur.Forge.Host, stagingInternal: internal}
 			}
 		}
 		a, err := d.address(svc, env, want)

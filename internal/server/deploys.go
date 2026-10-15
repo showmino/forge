@@ -170,6 +170,8 @@ type deployRecord struct {
 	// service asked for.
 	Domain string `yaml:"domain,omitempty"`
 	Host   string `yaml:"host,omitempty"`
+	// StagingInternal is run.staging.public: false, kept with them.
+	StagingInternal bool `yaml:"stagingInternal,omitempty"`
 	// Replicas and AutoscaleMax are run.replicas and run.autoscaling.max, kept
 	// so that a promotion gives production what the service asked for.
 	Replicas     int `yaml:"replicas,omitempty"`
@@ -597,7 +599,7 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	// restored commit asked for, under today's settings. An older deploy's
 	// address may be one the platform no longer hands out, or someone else's
 	// by now, and a rollback must not take a public service off the internet.
-	addr, moved, err := d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host}, d.currentValues(ctx, svc, env))
+	addr, moved, err := d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host, stagingInternal: v.Forge.StagingInternal}, d.currentValues(ctx, svc, env))
 	if err != nil {
 		return nil, err
 	}
@@ -661,7 +663,7 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	addr, moved, err := d.addressFor(ctx, svc, to, wanted{domain: src.Forge.Domain, host: src.Forge.Host}, d.currentValues(ctx, svc, to))
+	addr, moved, err := d.addressFor(ctx, svc, to, wanted{domain: src.Forge.Domain, host: src.Forge.Host, stagingInternal: src.Forge.StagingInternal}, d.currentValues(ctx, svc, to))
 	if err != nil {
 		return nil, err
 	}
