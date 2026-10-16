@@ -198,6 +198,13 @@ type createEnv struct {
 
 func newCreateEnv(t *testing.T, src TemplateSource, repos *fakeRepos) *createEnv {
 	t.Helper()
+	return newCreateEnvWith(t, src, repos, nil)
+}
+
+// newCreateEnvWith is newCreateEnv with a deploy engine, whose public
+// domains a create may choose from.
+func newCreateEnvWith(t *testing.T, src TemplateSource, repos *fakeRepos, deploys *Deploys) *createEnv {
+	t.Helper()
 	e := &createEnv{catalog: NewCatalog(nil), repos: repos}
 	opts := Options{
 		Authenticator: StaticAuthenticator{
@@ -212,6 +219,7 @@ func newCreateEnv(t *testing.T, src TemplateSource, repos *fakeRepos) *createEnv
 	if repos != nil {
 		opts.Repos = repos
 	}
+	opts.Deploys = deploys
 	h, err := New(opts)
 	if err != nil {
 		t.Fatal(err)

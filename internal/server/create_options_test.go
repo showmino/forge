@@ -138,3 +138,65 @@ func TestCreateNetworkOnly(t *testing.T) {
 		}
 	}
 }
+
+// newDomainEnv is a create env whose API offers showmino.com (the default)
+// and forgegate.io.
+func newDomainEnv(t *testing.T) *createEnv {
+	t.Helper()
+	return newCreateEnvWith(t, optionsRelease, newFakeRepos(), NewDeploys(DeployOptions{PublicDomains: []PublicDomain{
+		{Name: "showmino.com", Zone: "showmino-com"}, {Name: "forgegate.io", Zone: "forgegate-io"},
+	}}))
+}
+
+func TestCreateDomain(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newDomainEnv(t)
+	// Every service template allows it, also one that offers no run options.
+	if _, err := e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "gate", Template: "templates/plain", OwnerTeam: "billing", RunOptions: &forgev1.RunOptions{Domain: "forgegate.io", StagingNetworkOnly: true}}); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := e.repos.files("gate")
+	found := false
+	for _, f := range files {
+		if f.Path != "forge.yaml" {
+			continue
+		}
+		found = true
+		m, err := manifest.Parse(f.Content)
+		if err != nil || m.RunDomain() != "forgegate.io" || !m.StagingInternal() {
+			t.Errorf("forge.yaml: %v\n%s", err, f.Content)
+		}
+	}
+	if !found {
+		t.Error("no forge.yaml")
+	}
+}
+
+func TestCreateDomainRefused(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		e    func(*testing.T) *createEnv
+		ro   *forgev1.RunOptions
+		want string
+	}{
+		{"unknown", newDomainEnv, &forgev1.RunOptions{Domain: "example.org"}, "use showmino.com or forgegate.io"},
+		{"with internal", newDomainEnv, &forgev1.RunOptions{Domain: "forgegate.io", NetworkOnly: true}, "not both"},
+		{"none", newDomainEnv, &forgev1.RunOptions{Domain: "none"}, "use showmino.com or forgegate.io"},
+		{"no public domains", func(t *testing.T) *createEnv { return newCreateEnv(t, optionsRelease, newFakeRepos()) }, &forgev1.RunOptions{Domain: "forgegate.io"}, "offers no public domains"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := tc.e(t)
+			_, err := e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "gate", Template: "templates/plain", OwnerTeam: "billing", RunOptions: tc.ro})
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want InvalidArgument with %q", err, tc.want)
+			}
+			if files, _ := e.repos.files("gate"); len(files) > 0 {
+				t.Error("a repo was filled")
+			}
+		})
+	}
+}

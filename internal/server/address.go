@@ -11,6 +11,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/manifest"
 )
 
@@ -344,4 +345,32 @@ func ResolvesInDNS(ctx context.Context, host string) (bool, error) {
 		return false, nil
 	}
 	return len(addrs) > 0, err
+}
+
+// ListDomains returns the public domains, the default first.
+func (d *Deploys) ListDomains(ctx context.Context, _ *connect.Request[forgev1.ListDomainsRequest]) (*connect.Response[forgev1.ListDomainsResponse], error) {
+	if err := d.ready(); err != nil {
+		return nil, err
+	}
+	if err := require(ctx, PermServicesRead); err != nil {
+		return nil, err
+	}
+	out := &forgev1.ListDomainsResponse{}
+	for i, p := range d.o.PublicDomains {
+		out.Domains = append(out.Domains, &forgev1.PublicDomain{Name: p.Name, IsDefault: i == 0})
+	}
+	return connect.NewResponse(out), nil
+}
+
+// publicDomainNames are the names of d's public domains, the default first;
+// none when d is nil.
+func (d *Deploys) publicDomainNames() []string {
+	if d == nil {
+		return nil
+	}
+	var out []string
+	for _, p := range d.o.PublicDomains {
+		out = append(out, p.Name)
+	}
+	return out
 }

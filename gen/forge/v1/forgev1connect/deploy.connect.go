@@ -54,6 +54,9 @@ const (
 	// DeployServiceSetAddressProcedure is the fully-qualified name of the DeployService's SetAddress
 	// RPC.
 	DeployServiceSetAddressProcedure = "/forge.v1.DeployService/SetAddress"
+	// DeployServiceListDomainsProcedure is the fully-qualified name of the DeployService's ListDomains
+	// RPC.
+	DeployServiceListDomainsProcedure = "/forge.v1.DeployService/ListDomains"
 )
 
 // DeployServiceClient is a client for the forge.v1.DeployService service.
@@ -74,6 +77,9 @@ type DeployServiceClient interface {
 	// run.host and run.domain. It applies at the next deploy of each
 	// environment.
 	SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error)
+	// ListDomains returns the public domains services can be reached under,
+	// the default first. A service picks one with forge.yaml's run.domain.
+	ListDomains(context.Context, *connect.Request[v1.ListDomainsRequest]) (*connect.Response[v1.ListDomainsResponse], error)
 }
 
 // NewDeployServiceClient constructs a client for the forge.v1.DeployService service. By default, it
@@ -132,6 +138,13 @@ func NewDeployServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(deployServiceMethods.ByName("SetAddress")),
 			connect.WithClientOptions(opts...),
 		),
+		listDomains: connect.NewClient[v1.ListDomainsRequest, v1.ListDomainsResponse](
+			httpClient,
+			baseURL+DeployServiceListDomainsProcedure,
+			connect.WithSchema(deployServiceMethods.ByName("ListDomains")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -144,6 +157,7 @@ type deployServiceClient struct {
 	rollbackDeploy    *connect.Client[v1.RollbackDeployRequest, v1.RollbackDeployResponse]
 	promoteDeploy     *connect.Client[v1.PromoteDeployRequest, v1.PromoteDeployResponse]
 	setAddress        *connect.Client[v1.SetAddressRequest, v1.SetAddressResponse]
+	listDomains       *connect.Client[v1.ListDomainsRequest, v1.ListDomainsResponse]
 }
 
 // StartDeploy calls forge.v1.DeployService.StartDeploy.
@@ -181,6 +195,11 @@ func (c *deployServiceClient) SetAddress(ctx context.Context, req *connect.Reque
 	return c.setAddress.CallUnary(ctx, req)
 }
 
+// ListDomains calls forge.v1.DeployService.ListDomains.
+func (c *deployServiceClient) ListDomains(ctx context.Context, req *connect.Request[v1.ListDomainsRequest]) (*connect.Response[v1.ListDomainsResponse], error) {
+	return c.listDomains.CallUnary(ctx, req)
+}
+
 // DeployServiceHandler is an implementation of the forge.v1.DeployService service.
 type DeployServiceHandler interface {
 	// StartDeploy deploys ref (default main) of service to env.
@@ -199,6 +218,9 @@ type DeployServiceHandler interface {
 	// run.host and run.domain. It applies at the next deploy of each
 	// environment.
 	SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error)
+	// ListDomains returns the public domains services can be reached under,
+	// the default first. A service picks one with forge.yaml's run.domain.
+	ListDomains(context.Context, *connect.Request[v1.ListDomainsRequest]) (*connect.Response[v1.ListDomainsResponse], error)
 }
 
 // NewDeployServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -253,6 +275,13 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(deployServiceMethods.ByName("SetAddress")),
 		connect.WithHandlerOptions(opts...),
 	)
+	deployServiceListDomainsHandler := connect.NewUnaryHandler(
+		DeployServiceListDomainsProcedure,
+		svc.ListDomains,
+		connect.WithSchema(deployServiceMethods.ByName("ListDomains")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.DeployService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case DeployServiceStartDeployProcedure:
@@ -269,6 +298,8 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 			deployServicePromoteDeployHandler.ServeHTTP(w, r)
 		case DeployServiceSetAddressProcedure:
 			deployServiceSetAddressHandler.ServeHTTP(w, r)
+		case DeployServiceListDomainsProcedure:
+			deployServiceListDomainsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -304,4 +335,8 @@ func (UnimplementedDeployServiceHandler) PromoteDeploy(context.Context, *connect
 
 func (UnimplementedDeployServiceHandler) SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.SetAddress is not implemented"))
+}
+
+func (UnimplementedDeployServiceHandler) ListDomains(context.Context, *connect.Request[v1.ListDomainsRequest]) (*connect.Response[v1.ListDomainsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.ListDomains is not implemented"))
 }

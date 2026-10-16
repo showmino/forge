@@ -230,6 +230,30 @@ The cluster is production, and every change to it needs the owner's OK
    changes nothing but the annotations, and still needs the owner's OK.
    Note in this file what was checked.
 
+### Adding a public domain
+
+A domain services can be reached under is one item of `FORGE_PUBLIC_DOMAINS`
+in `live.env`: `<domain>=<zone name>`, where the zone name is the domain's
+Crossplane `Zone` in `showmino/kubernetes`
+(`infrastructure/crossplane/production/zones.yaml`), which the
+`CloudflareRecordsApplication`s name in `dnsZones.zones`. The first item is
+the default; add new ones at the end. `forge domain list`, `forge create
+--domain` and the dashboard's Domain list read it from forge-api, so nothing
+else in Forge changes. What must exist first, in `showmino/kubernetes` (a pull
+request there; the owner merges):
+
+1. The Crossplane `Zone` for the domain.
+2. The Cloudflare tunnel's route `"*.<domain>"` to the Gateway
+   (`10.150.1.222:80`, `infrastructure/cloudflare/production/configmap.yaml`).
+   The domain itself (`<domain>`, for `--host @`) needs its own route.
+
+Then, as a rollout (the procedure above, with the owner's OK): add the item,
+`sh deploy/k3s/render-live.sh` (never edit `live/forge.yaml` by hand: the
+render also adds the Gateway listeners `public-<zone>` and
+`public-<zone>-root`), read `kubectl diff`, server dry run, apply. Check:
+`forge domain list` lists it, the Gateway has both listeners, and a throwaway
+service created with `--domain` answers on `https://<svc>-staging.<domain>`.
+
 ### Secrets Forge uses (names and keys only)
 
 | Secret (namespace `forge`) | Keys | From |

@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -473,5 +475,33 @@ func TestStagingInternal(t *testing.T) {
 	}
 	if v := values("staging"); v.Host != "payments.staging.10.150.1.222.nip.io" || v.DNS != nil || !v.Forge.StagingInternal || v.Forge.Commit != ciOldSHA {
 		t.Errorf("staging rolled back past the flag: %+v dns %+v", v, v.DNS)
+	}
+}
+
+func TestListDomains(t *testing.T) {
+	t.Parallel()
+	ctx := writerCtx()
+	d := NewDeploys(DeployOptions{PublicDomains: []PublicDomain{{Name: "showmino.com", Zone: "showmino-com"}, {Name: "forgegate.io", Zone: "forgegate-io"}}})
+	resp, err := d.ListDomains(ctx, connect.NewRequest(&forgev1.ListDomainsRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, p := range resp.Msg.GetDomains() {
+		got = append(got, fmt.Sprintf("%s %v", p.GetName(), p.GetIsDefault()))
+	}
+	if want := []string{"showmino.com true", "forgegate.io false"}; !slices.Equal(got, want) {
+		t.Errorf("domains = %v, want %v", got, want)
+	}
+	resp, err = NewDeploys(DeployOptions{}).ListDomains(ctx, connect.NewRequest(&forgev1.ListDomainsRequest{}))
+	if err != nil || len(resp.Msg.GetDomains()) != 0 {
+		t.Errorf("without public domains: %v, %v", resp, err)
+	}
+	if _, err := d.ListDomains(context.Background(), connect.NewRequest(&forgev1.ListDomainsRequest{})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("signed out: %v", err)
+	}
+	var none *Deploys
+	if _, err := none.ListDomains(ctx, connect.NewRequest(&forgev1.ListDomainsRequest{})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("without deploys: %v", err)
 	}
 }

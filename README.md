@@ -425,6 +425,12 @@ each domain with the name of its DNS zone, the default first).
   `--internal-staging` (in the dashboard: "Public production") writes
   `run.staging.public: false`.
 
+  It can also pick its domain: `forge create <name> ... --domain forgegate.io`
+  (in the dashboard's Visibility step: the Domain list) writes
+  `run.domain: forgegate.io`. `forge domain list` shows the domains this
+  Forge API offers, the default first; a domain it does not offer is refused
+  before anything is created, and `--domain` with `--internal` is refused.
+
 A writer can also set a service's address in Forge, where it wins over
 `run.host` and `run.domain` (in the dashboard: Settings, Danger zone, Change
 address). It is meant for the rare move, for example a service that takes
