@@ -84,7 +84,9 @@ may always cancel it.
   (`policy/deploys.rego`), built into the binary like `forge.resources`. Input:
   the service, `from`/`to`, staging's deployment (Argo CD sync and health,
   commit, version) and the actor. Rules: deny when staging is not `Synced`, deny
-  when it is not `Healthy`. `PromoteDeploy` evaluates it after `authorize`;
+  when it is not `Healthy`, and deny when Argo CD has not yet synced
+  staging's latest deploy (it can still report Synced and Healthy about the
+  one before; added while building M2). `PromoteDeploy` evaluates it after `authorize`;
   `--dry-run` shows the result too. Every rule gets a passing and a failing
   case in `policy/policy_test.go`.
 

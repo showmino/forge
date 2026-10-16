@@ -459,3 +459,59 @@ func TestRulesOnCapturedPlans(t *testing.T) {
 		}
 	}
 }
+
+func TestPromotionRules(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := Promotion{Service: "payments", From: "staging", To: "production",
+		Source: Source{Sync: "Synced", Health: "Healthy", AtRevision: true, Commit: "1a2b3c4", DeployCommit: "9f8e7d6"}}
+	mod := func(f func(*Promotion)) Promotion { p := ok; f(&p); return p }
+	for _, tc := range []struct {
+		name string
+		p    Promotion
+		deny string
+	}{
+		{"a synced and healthy staging passes", ok, ""},
+		{"out of sync", mod(func(p *Promotion) { p.Source.Sync = "OutOfSync" }), "staging is OutOfSync; it must be Synced to be promoted"},
+		{"no sync status", mod(func(p *Promotion) { p.Source.Sync = "" }), "staging is unknown; it must be Synced to be promoted"},
+		{"degraded", mod(func(p *Promotion) { p.Source.Health = "Degraded" }), "staging is Degraded; it must be Healthy to be promoted"},
+		{"progressing", mod(func(p *Promotion) { p.Source.Health = "Progressing" }), "staging is Progressing; it must be Healthy to be promoted"},
+		{"missing", mod(func(p *Promotion) { p.Source.Health = "Missing" }), "staging is Missing; it must be Healthy to be promoted"},
+		{"not at its latest deploy", mod(func(p *Promotion) { p.Source.AtRevision = false }), "staging does not run its latest deploy (9f8e7d6) yet; wait for Argo CD to sync it"},
+		{"both", mod(func(p *Promotion) { p.Source.Sync = "OutOfSync"; p.Source.Health = "Degraded" }),
+			"staging is Degraded; it must be Healthy to be promoted|staging is OutOfSync; it must be Synced to be promoted"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, err := e.EvaluatePromotion(ctx, tc.p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(r.Deny, "|"); got != tc.deny {
+				t.Errorf("deny %q, want %q", got, tc.deny)
+			}
+			if r.Denied() != (tc.deny != "") {
+				t.Errorf("denied %v", r.Denied())
+			}
+		})
+	}
+}
+
+// Rules with no forge.deploys package cannot judge a promotion: that is an
+// error, never a pass.
+func TestPromotionWithoutRules(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	rule := "package forge.resources\nimport rego.v1\ndeny contains \"no\" if false\nwarn contains \"hm\" if false\n"
+	e, err := NewFromFS(ctx, fstest.MapFS{"x.rego": {Data: []byte(rule)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.EvaluatePromotion(ctx, Promotion{}); err == nil {
+		t.Error("no promotion rules must be an error")
+	}
+}

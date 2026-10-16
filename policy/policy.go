@@ -1,5 +1,6 @@
-// Package policy checks resource plans against Forge's Rego rules. The rules
-// are the .rego files next to this file, built into the binary.
+// Package policy checks resource plans and promotions against Forge's Rego
+// rules. The rules are the .rego files next to this file, built into the
+// binary: package forge.resources for plans, forge.deploys for promotions.
 package policy
 
 import (
@@ -42,6 +43,29 @@ type Actor struct {
 	Subject string `json:"subject"`
 }
 
+// Promotion is what the promotion rules know.
+type Promotion struct {
+	Service string `json:"service"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Source  Source `json:"source"`
+	Actor   Actor  `json:"actor"`
+}
+
+// Source is what runs in the environment a promotion takes from, as Argo CD
+// reports it.
+type Source struct {
+	Sync   string `json:"sync"`
+	Health string `json:"health"`
+	// AtRevision: Argo CD has synced the environment's latest deploy, not an
+	// earlier one.
+	AtRevision   bool   `json:"at_revision"`
+	Commit       string `json:"commit"`
+	DeployCommit string `json:"deploy_commit"`
+	Version      string `json:"version"`
+	Image        string `json:"image"`
+}
+
 // Result is what the rules said about one plan. Both lists are sorted.
 type Result struct {
 	Deny []string
@@ -54,6 +78,7 @@ func (r Result) Denied() bool { return len(r.Deny) > 0 }
 // Engine evaluates a compiled rule set.
 type Engine struct {
 	query       rego.PreparedEvalQuery
+	promotion   rego.PreparedEvalQuery
 	fingerprint string
 }
 
@@ -71,7 +96,7 @@ func NewFromFS(ctx context.Context, fsys fs.FS) (*Engine, error) {
 	}
 	slices.Sort(names)
 	sum := sha256.New()
-	opts := []func(*rego.Rego){rego.Query("deny = data.forge.resources.deny; warn = data.forge.resources.warn")}
+	var modules []func(*rego.Rego)
 	for _, n := range names {
 		src, err := fs.ReadFile(fsys, n)
 		if err != nil {
@@ -79,13 +104,24 @@ func NewFromFS(ctx context.Context, fsys fs.FS) (*Engine, error) {
 		}
 		fmt.Fprintf(sum, "%s\x00%d\x00", n, len(src))
 		sum.Write(src)
-		opts = append(opts, rego.Module(n, string(src)))
+		modules = append(modules, rego.Module(n, string(src)))
 	}
-	q, err := rego.New(opts...).PrepareForEval(ctx)
+	prepare := func(query string) (rego.PreparedEvalQuery, error) {
+		q, err := rego.New(append([]func(*rego.Rego){rego.Query(query)}, modules...)...).PrepareForEval(ctx)
+		if err != nil {
+			return q, fmt.Errorf("policy: compile the rules: %w", err)
+		}
+		return q, nil
+	}
+	q, err := prepare("deny = data.forge.resources.deny; warn = data.forge.resources.warn")
 	if err != nil {
-		return nil, fmt.Errorf("policy: compile the rules: %w", err)
+		return nil, err
 	}
-	return &Engine{query: q, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
+	pq, err := prepare("deny = data.forge.deploys.deny")
+	if err != nil {
+		return nil, err
+	}
+	return &Engine{query: q, promotion: pq, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
 }
 
 // Fingerprint identifies the rule set: the first 12 hex characters of the
@@ -105,7 +141,25 @@ func (e *Engine) Evaluate(ctx context.Context, planJSON []byte, f Forge) (Result
 	if f.Resources == nil {
 		f.Resources = []Resource{}
 	}
-	rs, err := e.query.Eval(ctx, rego.EvalInput(map[string]any{"plan": plan, "forge": f}))
+	return results(e.query.Eval(ctx, rego.EvalInput(map[string]any{"plan": plan, "forge": f})))
+}
+
+// EvaluatePromotion checks a promotion. An error means it could not be
+// checked; it must then not go ahead. Promotions have no warnings.
+func (e *Engine) EvaluatePromotion(ctx context.Context, p Promotion) (Result, error) {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return Result{}, err
+	}
+	var input map[string]any
+	if err := json.Unmarshal(b, &input); err != nil {
+		return Result{}, err
+	}
+	return results(e.promotion.Eval(ctx, rego.EvalInput(input)))
+}
+
+// results reads the deny and, when bound, warn sets of one evaluation.
+func results(rs rego.ResultSet, err error) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("policy: evaluate: %w", err)
 	}
@@ -117,7 +171,11 @@ func (e *Engine) Evaluate(ctx context.Context, planJSON []byte, f Forge) (Result
 		name string
 		dst  *[]string
 	}{{"deny", &out.Deny}, {"warn", &out.Warn}} {
-		set, ok := rs[0].Bindings[part.name].([]any)
+		bound, present := rs[0].Bindings[part.name]
+		if !present && part.name == "warn" {
+			continue
+		}
+		set, ok := bound.([]any)
 		if !ok {
 			return Result{}, fmt.Errorf("policy: %s is not a set of messages", part.name)
 		}

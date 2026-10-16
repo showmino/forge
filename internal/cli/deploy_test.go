@@ -9,6 +9,7 @@ import (
 
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/server"
+	"github.com/showmino/forge/policy"
 )
 
 // serveDeploys restarts the harness API with deploys on fakes and Argo
@@ -19,7 +20,12 @@ func (h *harness) serveDeploys(unhealthy map[string]string) *envtest.Repo {
 	images := &envtest.Images{}
 	images.Add("ghcr.io/showmino/payments:1a2b3c4")
 	repo := &envtest.Repo{}
+	rules, err := policy.New(context.Background())
+	if err != nil {
+		h.t.Fatal(err)
+	}
 	h.deploys = server.NewDeploys(server.DeployOptions{
+		Policy:  rules,
 		Cluster: cluster, Images: images, Repo: repo, Catalog: h.catalog, Operations: h.ops,
 		GitHub:   &envtest.GitHub{Refs: map[string]string{"main": cliSHA}},
 		Releases: &envtest.Releases{},
@@ -114,6 +120,12 @@ func TestDeployFailureAndOff(t *testing.T) {
 	if !strings.Contains(r.err, "(not_healthy)") || !strings.Contains(r.err, "forge deploy rollback payments --env staging") {
 		t.Errorf("not healthy:\n%s", r.err)
 	}
+	// A degraded staging is not promoted, with the reason; a rollback still goes.
+	if r := h.fails(5, "deploy", "promote", "payments", "--dry-run"); !strings.Contains(r.err, "staging is Degraded; it must be Healthy to be promoted") {
+		t.Errorf("promote of a degraded staging:\n%s", r.err)
+	}
+	h.fails(7, "deploy", "start", "payments", "--env", "staging")
+	h.ok("deploy", "rollback", "payments", "--env", "staging", "--dry-run")
 	h.ok("init", "--team", "billing", "--name", "payments")
 	if r := h.ok("deploy", "start", "--env", "staging", "--dry-run"); !strings.Contains(r.out, "deployments/payments/staging") {
 		t.Errorf("service from forge.yaml: %q", r.out)
