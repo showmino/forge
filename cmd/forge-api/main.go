@@ -174,6 +174,9 @@ func run() error {
 	catalog, ops := server.NewCatalogWithStore(st, nil), server.NewOperations(nil)
 	// Also with resources off: records made while they were on keep their service.
 	catalog.GuardResources(st)
+	if app != nil {
+		catalog.ManageRepoAccess(&github.Client{Token: app.Token}, *githubOrg)
+	}
 	envs, cluster, images, err := previews(previewFlags{
 		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, max: *previewMax,
 		imageTimeout: env("FORGE_PREVIEW_IMAGE_TIMEOUT", "10m"), readyTimeout: env("FORGE_PREVIEW_READY_TIMEOUT", "5m"),

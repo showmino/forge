@@ -210,6 +210,16 @@ A service belongs to a team of the GitHub organization. `forge team list` (and
 the dashboard's Create form) read the teams from GitHub as the App, which needs
 the organization permission "Members: read" for it.
 
+The owner team also gets the role `maintain` on the service's repo, when
+forge-api has a GitHub App: `forge create` gives it right after making the
+repo (step `grant_team`; if that fails the repo is deleted again),
+`forge service register` before it registers, and moving a service to
+another team or repo gives the new team the repo and takes it from the old
+one (unless another service of that repo still belongs to the old team).
+If GitHub refuses, nothing is registered or moved. Only repos in the
+organization are touched; deleting a service leaves the repo and its access
+as they are.
+
 Who may do what follows the team. Every member of the organization can read
 everything. The members of a service's owner team may update it, deploy,
 promote and roll it back, manage its previews and plan and apply its
@@ -273,7 +283,7 @@ GitHub as the Forge GitHub App (`--github-app-id`, `--github-app-key-file`,
 version `dev`).
 `forge create <name> --template <template> --team <team>` asks forge-api to
 render the template, create the private repo `github.com/<org>/<name>` as the
-Forge GitHub App, push the first commit (which starts its CI) and register the
+Forge GitHub App, give the owner team `maintain` on it, push the first commit (which starts its CI) and register the
 service. `--set name=value` sets parameters, `--dry-run` lists the files
 without creating anything, and a failure after the repo exists deletes it again.
 A template's `options:` list (in `template.yaml`, e.g. `options: [replicas,

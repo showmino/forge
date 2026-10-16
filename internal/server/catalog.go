@@ -36,6 +36,9 @@ type Catalog struct {
 	resources store.ResourceStore
 	// teardown, when set, takes down what a service runs before it is deleted.
 	teardown *teardown
+	// access, when set, gives a service's owner team its repo in accessOrg.
+	access    TeamAccess
+	accessOrg string
 
 	// deleting maps a service being deleted to the operation doing it. While
 	// a service is in it nothing new may be started for it: no deploy, no
@@ -251,13 +254,15 @@ func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forg
 	if err := authorize(ctx, ActServiceRegister, ""); err != nil {
 		return nil, err
 	}
-	return c.register(ctx, req)
+	return c.register(ctx, req, true)
 }
 
 // register adds a service to the catalog without checking who asks. Its
 // callers check: RegisterService for an existing repo (an admin's), and
-// CreateService for the repo it has just made (service.create).
-func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.RegisterServiceRequest]) (*connect.Response[forgev1.RegisterServiceResponse], error) {
+// CreateService for the repo it has just made (service.create). With grant
+// it also gives the owner team its repo, before the service is stored: a
+// service is not registered when its team cannot get the repo.
+func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.RegisterServiceRequest], grant bool) (*connect.Response[forgev1.RegisterServiceResponse], error) {
 	m := req.Msg
 	if !manifest.ValidID(m.GetServiceId()) {
 		return nil, invalid(fmt.Sprintf("service_id %q must be a lowercase DNS label (a-z, 0-9, '-', max 63)", m.GetServiceId()))
@@ -303,6 +308,11 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 		if m.GetValidateOnly() {
 			return nil
 		}
+		if grant {
+			if err := c.grantTeam(ctx, s.GetOwnerTeam(), s.GetRepoUrl()); err != nil {
+				return err
+			}
+		}
 		if err := tx.Put(ctx, s, 1); err != nil {
 			return err
 		}
@@ -345,7 +355,7 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		}
 	}
 
-	var out *forgev1.Service
+	var out, prev *forgev1.Service
 	err = c.store.Write(ctx, func(tx store.Tx) error {
 		cur, rev, err := tx.Get(ctx, name)
 		if errors.Is(err, store.ErrNotFound) {
@@ -372,6 +382,7 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 				return err
 			}
 		}
+		prev = cloneSvc(cur)
 		next := cur // the store returned a copy
 		for _, p := range paths {
 			switch p {
@@ -403,12 +414,26 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		if req.Msg.GetValidateOnly() {
 			return nil
 		}
+		if movedRepo(prev, next) {
+			if err := c.grantTeam(ctx, next.GetOwnerTeam(), next.GetRepoUrl()); err != nil {
+				return err
+			}
+		}
 		return tx.Put(ctx, next, rev+1)
 	})
 	if err != nil {
 		return nil, storeErr(err)
 	}
+	if !req.Msg.GetValidateOnly() && movedRepo(prev, out) {
+		c.revokeTeam(ctx, prev.GetOwnerTeam(), prev.GetRepoUrl())
+	}
 	return connect.NewResponse(&forgev1.UpdateServiceResponse{Service: out}), nil
+}
+
+// movedRepo reports whether an update changed the team or the repo, and
+// with it who should have access to which repo.
+func movedRepo(prev, next *forgev1.Service) bool {
+	return prev.GetOwnerTeam() != next.GetOwnerTeam() || prev.GetRepoUrl() != next.GetRepoUrl()
 }
 
 func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev1.DeleteServiceRequest]) (*connect.Response[forgev1.DeleteServiceResponse], error) {

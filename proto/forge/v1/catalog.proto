@@ -235,7 +235,8 @@ message CreateServiceResponse {
   }
 }
 
-// CreateStep reports progress of one step: fetch, render, create_repo, push, register.
+// CreateStep reports progress of one step: fetch, render, create_repo, grant_team,
+// push, register.
 message CreateStep {
   // State is where the step is.
   enum State {

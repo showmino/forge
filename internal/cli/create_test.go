@@ -36,6 +36,12 @@ func (m *memRepos) CreateOrgRepo(_ context.Context, org, name, _ string) (*githu
 	return &github.Repo{FullName: org + "/" + name, DefaultBranch: "main"}, nil
 }
 
+func (m *memRepos) SetTeamRepoPermission(context.Context, string, string, string, string, string) error {
+	return nil
+}
+
+func (m *memRepos) RemoveTeamRepo(context.Context, string, string, string, string) error { return nil }
+
 func (m *memRepos) DeleteRepo(_ context.Context, _, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -92,7 +98,7 @@ func TestCreate(t *testing.T) {
 	if r.out != "services/payments created\n" {
 		t.Errorf("stdout: %q", r.out)
 	}
-	for _, want := range []string{"✓ fetched template svc@dev", "✓ rendered 1 files", "✓ created github.com/showmino/payments", "✓ pushed initial commit abc1234 (CI started)", "✓ registered services/payments"} {
+	for _, want := range []string{"✓ fetched template svc@dev", "✓ rendered 1 files", "✓ created github.com/showmino/payments", "✓ gave access to platform (maintain)", "✓ pushed initial commit abc1234 (CI started)", "✓ registered services/payments"} {
 		if !strings.Contains(r.err, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, r.err)
 		}
