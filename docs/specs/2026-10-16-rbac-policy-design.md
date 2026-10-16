@@ -1,6 +1,6 @@
 # RBAC and policy
 
-Oct 16, 2026 · Showmino · Proposed
+Oct 16, 2026 · Showmino · Approved
 
 Today every member of the organization can read everything, and the members of
 one writer team (`showmino:platform-engineering`) can change every service;
