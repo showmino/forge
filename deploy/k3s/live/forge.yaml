@@ -2,7 +2,7 @@
 # ingress.yaml.tmpl (Traefik) or loadbalancer.yaml.tmpl (MetalLB and similar).
 # Render with deploy/k3s/render.sh; do not apply this file directly.
 #   dex.10.150.1.220.nip.io         host name of Dex, the same for you and for pods
-#   ghcr.io/showmino/forge-api:v0.18.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
+#   ghcr.io/showmino/forge-api:v0.19.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
 #   The GitHub App settings (ID, org, template repo): see render.sh.
 #   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who is an admin.
 #   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
@@ -128,7 +128,7 @@ spec:
           secret: {secretName: forge-github-app, defaultMode: 0440}
       containers:
         - name: forge-api
-          image: ghcr.io/showmino/forge-api:v0.18.0
+          image: ghcr.io/showmino/forge-api:v0.19.0
           imagePullPolicy: IfNotPresent
           env:
             - {name: FORGE_OIDC_ISSUER, value: "https://forge-login.showmino.com/dex"}
@@ -151,7 +151,7 @@ spec:
             - {name: FORGE_ARGOCD_URL, value: "https://argocd.showmino.com"}
             - {name: FORGE_SECRET_VAULTS, value: "Kube"}
             - {name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,forge-dex-github,ghcr-secret,arc-runners,argocd-repo-kubernetes,cert-manager,Cloudflare,crossplane-cloudflare,crossplane-github-provider-creds,grafana-admin-credentials,renovate"}
-            - {name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud"}
+            - {name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud,forgegate.io=forgegate-io"}
             - {name: FORGE_PUBLIC_DNS_TUNNEL, value: "production"}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
@@ -420,6 +420,30 @@ spec:
       protocol: HTTP
       port: 80
       hostname: "deogratias.cloud"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+    - name: public-forgegate-io
+      protocol: HTTP
+      port: 80
+      hostname: "*.forgegate.io"
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+    - name: public-forgegate-io-root
+      protocol: HTTP
+      port: 80
+      hostname: "forgegate.io"
       allowedRoutes:
         namespaces:
           from: Selector
