@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,5 +108,48 @@ func waitFor(t *testing.T, what string, done func() bool) {
 			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// staleTip answers reads of the branch tip with the values at an older
+// commit, as when a deploy lands between reading the values and their
+// history.
+type staleTip struct {
+	*envtest.Repo
+	mu  sync.Mutex
+	sha string
+}
+
+func (r *staleTip) Read(ctx context.Context, path, ref string) ([]byte, error) {
+	r.mu.Lock()
+	sha := r.sha
+	r.mu.Unlock()
+	if ref == "" && sha != "" && strings.HasSuffix(path, "/staging/values.yaml") {
+		ref = sha
+	}
+	return r.Repo.Read(ctx, path, ref)
+}
+
+// The policy checks the deploy whose values are promoted, never a newer one.
+func TestPromotionChecksWhatIsPromoted(t *testing.T) {
+	t.Parallel()
+	stale := &staleTip{}
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		stale.Repo = o.Repo.(*envtest.Repo)
+		o.Repo = stale
+	})
+	ctx := context.Background()
+	f.deployOK(t, "staging")
+	f.deployOK(t, "staging")
+	hist, err := f.client.ListDeployHistory(ctx, as("reader", &forgev1.ListDeployHistoryRequest{Name: "deployments/payments/staging"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.mu.Lock()
+	stale.sha = hist.Msg.GetRecords()[1].GetDeployCommit()
+	stale.mu.Unlock()
+	_, err = f.client.PromoteDeploy(ctx, as("writer", &forgev1.PromoteDeployRequest{Service: "services/payments", ValidateOnly: true}))
+	if connect.CodeOf(err) != connect.CodeAborted {
+		t.Errorf("values older than their history: %v, want aborted", err)
 	}
 }
