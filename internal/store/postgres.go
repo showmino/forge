@@ -192,6 +192,10 @@ func (t pgTx) Dependents(ctx context.Context, name string) ([]string, error) {
 		WHERE name <> $1 AND data->'dependencies' ? $1 ORDER BY name`, name)
 }
 
+func (t pgTx) ForRepo(ctx context.Context, owner, repo string) ([]string, error) {
+	return names(ctx, t.tx, "SELECT name FROM services WHERE repo = $1 ORDER BY name", strings.ToLower(owner+"/"+repo))
+}
+
 func (t pgTx) Recall(ctx context.Context, requestID string) (*forgev1.Service, error) {
 	var data []byte
 	err := t.tx.QueryRow(ctx, `SELECT service FROM service_requests

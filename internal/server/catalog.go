@@ -277,6 +277,7 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 	name := servicePrefix + m.GetServiceId()
 
 	var out *forgev1.Service
+	var undoGrant undo
 	err := c.store.Write(ctx, func(tx store.Tx) error {
 		if key := m.GetRequestId(); key != "" {
 			prev, err := tx.Recall(ctx, key)
@@ -309,7 +310,8 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 			return nil
 		}
 		if grant {
-			if err := c.grantTeam(ctx, s.GetOwnerTeam(), s.GetRepoUrl()); err != nil {
+			var err error
+			if undoGrant, err = c.grantTeam(ctx, s.GetOwnerTeam(), s.GetRepoUrl()); err != nil {
 				return err
 			}
 		}
@@ -322,6 +324,7 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 		return nil
 	})
 	if err != nil {
+		undoGrant.run()
 		return nil, storeErr(err)
 	}
 	return connect.NewResponse(&forgev1.RegisterServiceResponse{Service: out}), nil
@@ -355,7 +358,8 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		}
 	}
 
-	var out, prev *forgev1.Service
+	var out *forgev1.Service
+	var undoGrant, undoRevoke undo
 	err = c.store.Write(ctx, func(tx store.Tx) error {
 		cur, rev, err := tx.Get(ctx, name)
 		if errors.Is(err, store.ErrNotFound) {
@@ -382,7 +386,7 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 				return err
 			}
 		}
-		prev = cloneSvc(cur)
+		prev := cloneSvc(cur)
 		next := cur // the store returned a copy
 		for _, p := range paths {
 			switch p {
@@ -414,18 +418,24 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		if req.Msg.GetValidateOnly() {
 			return nil
 		}
-		if movedRepo(prev, next) {
-			if err := c.grantTeam(ctx, next.GetOwnerTeam(), next.GetRepoUrl()); err != nil {
-				return err
-			}
+		if !movedRepo(prev, next) {
+			return tx.Put(ctx, next, rev+1)
 		}
-		return tx.Put(ctx, next, rev+1)
+		// The new team gets the repo first: if it cannot, nothing changes.
+		// The old team loses it last, seeing this write's change.
+		if undoGrant, err = c.grantTeam(ctx, next.GetOwnerTeam(), next.GetRepoUrl()); err != nil {
+			return err
+		}
+		if err := tx.Put(ctx, next, rev+1); err != nil {
+			return err
+		}
+		undoRevoke = c.revokeTeam(ctx, tx, prev.GetOwnerTeam(), prev.GetRepoUrl())
+		return nil
 	})
 	if err != nil {
+		undoRevoke.run()
+		undoGrant.run()
 		return nil, storeErr(err)
-	}
-	if !req.Msg.GetValidateOnly() && movedRepo(prev, out) {
-		c.revokeTeam(ctx, prev.GetOwnerTeam(), prev.GetRepoUrl())
 	}
 	return connect.NewResponse(&forgev1.UpdateServiceResponse{Service: out}), nil
 }

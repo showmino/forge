@@ -58,6 +58,25 @@ func (f *fakeRepos) SetTeamRepoPermission(_ context.Context, org, slug, owner, r
 	return nil
 }
 
+func (f *fakeRepos) TeamRepoPermission(_ context.Context, _, slug, _, repo string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.access[repo][slug], nil
+}
+
+// give sets slug's role on repo, as someone on GitHub would.
+func (f *fakeRepos) give(repo, slug, role string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.access == nil {
+		f.access = map[string]map[string]string{}
+	}
+	if f.access[repo] == nil {
+		f.access[repo] = map[string]string{}
+	}
+	f.access[repo][slug] = role
+}
+
 func (f *fakeRepos) RemoveTeamRepo(_ context.Context, _, slug, _, repo string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

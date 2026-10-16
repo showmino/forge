@@ -175,7 +175,8 @@ func run() error {
 	// Also with resources off: records made while they were on keep their service.
 	catalog.GuardResources(st)
 	if app != nil {
-		catalog.ManageRepoAccess(&github.Client{Token: app.Token}, *githubOrg)
+		// Short: these calls run while the catalog's write lock is held.
+		catalog.ManageRepoAccess(&github.Client{Token: app.Token, HTTP: &http.Client{Timeout: 15 * time.Second}}, *githubOrg)
 	}
 	envs, cluster, images, err := previews(previewFlags{
 		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, max: *previewMax,

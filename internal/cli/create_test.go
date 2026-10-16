@@ -40,6 +40,10 @@ func (m *memRepos) SetTeamRepoPermission(context.Context, string, string, string
 	return nil
 }
 
+func (m *memRepos) TeamRepoPermission(context.Context, string, string, string, string) (string, error) {
+	return "", nil
+}
+
 func (m *memRepos) RemoveTeamRepo(context.Context, string, string, string, string) error { return nil }
 
 func (m *memRepos) DeleteRepo(_ context.Context, _, name string) error {

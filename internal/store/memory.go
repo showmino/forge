@@ -181,6 +181,25 @@ func (t *memTx) Dependents(_ context.Context, name string) ([]string, error) {
 	return out, nil
 }
 
+func (t *memTx) ForRepo(_ context.Context, owner, repo string) ([]string, error) {
+	key := strings.ToLower(owner + "/" + repo)
+	seen := map[string]bool{}
+	for n := range t.m.services {
+		seen[n] = true
+	}
+	for n := range t.services {
+		seen[n] = true
+	}
+	var out []string
+	for n := range seen {
+		if e, ok := t.lookup(n); ok && RepoKey(e.svc.GetRepoUrl()) == key {
+			out = append(out, n)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (t *memTx) Recall(_ context.Context, requestID string) (*forgev1.Service, error) {
 	if s, ok := t.requests[requestID]; ok {
 		return clone(s), nil

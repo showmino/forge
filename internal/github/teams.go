@@ -93,6 +93,31 @@ func (c *Client) RemoveTeamRepo(ctx context.Context, org, slug, owner, repo stri
 	return err
 }
 
+// TeamRepoPermission returns the highest role (admin, maintain, push, triage
+// or pull) org's team slug has on owner/repo, or "" when it has none.
+func (c *Client) TeamRepoPermission(ctx context.Context, org, slug, owner, repo string) (string, error) {
+	resp, err := c.doAccept(ctx, http.MethodGet, teamRepoPath(org, slug, owner, repo), nil, "application/vnd.github.v3.repository+json")
+	if errors.Is(err, ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Permissions map[string]bool `json:"permissions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("decode team permission: %w", err)
+	}
+	for _, role := range []string{"admin", "maintain", "push", "triage", "pull"} {
+		if out.Permissions[role] {
+			return role, nil
+		}
+	}
+	return "", nil
+}
+
 func teamRepoPath(org, slug, owner, repo string) string {
 	return "/orgs/" + url.PathEscape(org) + "/teams/" + url.PathEscape(slug) + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
 }

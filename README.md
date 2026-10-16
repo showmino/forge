@@ -216,7 +216,9 @@ repo (step `grant_team`; if that fails the repo is deleted again),
 `forge service register` before it registers, and moving a service to
 another team or repo gives the new team the repo and takes it from the old
 one (unless another service of that repo still belongs to the old team).
-If GitHub refuses, nothing is registered or moved. Only repos in the
+If GitHub refuses, nothing is registered or moved. A team that already has a
+higher role (admin) keeps it, and a move only takes away the role
+`maintain`. Only repos in the
 organization are touched; deleting a service leaves the repo and its access
 as they are.
 

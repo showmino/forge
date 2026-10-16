@@ -74,10 +74,24 @@ func TestTeamRepoAccess(t *testing.T) {
 	mux.HandleFunc("DELETE /orgs/showmino/teams/gone/repos/showmino/payments", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
+	mux.HandleFunc("GET /orgs/showmino/teams/billing/repos/showmino/payments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "application/vnd.github.v3.repository+json" {
+			w.WriteHeader(http.StatusNoContent) // what GitHub answers without the media type
+			return
+		}
+		_, _ = io.WriteString(w, `{"full_name":"showmino/payments","permissions":{"admin":false,"maintain":true,"push":true,"triage":true,"pull":true}}`)
+	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	c := &Client{BaseURL: srv.URL, Token: StaticToken("tok")}
 	ctx := context.Background()
+
+	if role, err := c.TeamRepoPermission(ctx, "showmino", "billing", "showmino", "payments"); err != nil || role != "maintain" {
+		t.Errorf("role %q %v, want maintain", role, err)
+	}
+	if role, err := c.TeamRepoPermission(ctx, "showmino", "stranger", "showmino", "payments"); err != nil || role != "" {
+		t.Errorf("no access: %q %v", role, err)
+	}
 
 	if err := c.SetTeamRepoPermission(ctx, "showmino", "billing", "showmino", "payments", "maintain"); err != nil {
 		t.Fatal(err)
