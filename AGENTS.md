@@ -86,8 +86,7 @@ a yes to the next one.
   the current `main`. Docs elsewhere (test data, templates) run CI as usual.
   A rollout pull request that only changes `deploy/k3s/live.env` and
   `deploy/k3s/live/forge.yaml` gets no CI either (the owner's rule,
-  2026-10-16: what it says is already live and was checked on the cluster).
-  CI's check that `live/forge.yaml` is the render of `live.env` then does not
+  2026-10-16). CI's check that `live/forge.yaml` is the render of `live.env` then does not
   run: run `sh deploy/k3s/render-live.sh --check` yourself before you push.
   In `forge-web` the
   jobs `image` and `deploy` only run on `main` and show as skipped on a pull
