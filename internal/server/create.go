@@ -28,6 +28,8 @@ type RepoHost interface {
 	PushFiles(ctx context.Context, owner, repo, branch, message string, files []github.File) (string, error)
 	// ProposeFiles opens a pull request that adds files; for file templates.
 	ProposeFiles(ctx context.Context, owner, repo string, p github.Proposal) (string, error)
+	// TeamAccess gives the owner team its new repo.
+	TeamAccess
 }
 
 var _ RepoHost = (*github.Client)(nil)
@@ -205,8 +207,8 @@ func stepMsg(name string, state forgev1.CreateStep_State, detail string) *forgev
 	return &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Step{Step: &forgev1.CreateStep{Name: name, State: state, Detail: detail}}}
 }
 
-// scaffold runs fetch, render and (unless validate_only) create_repo, push
-// and register.
+// scaffold runs fetch, render and (unless validate_only) create_repo,
+// grant_team, push and register.
 func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) (*forgev1.CreateServiceResponse, error) {
 	w := &sender{s: stream}
 	started := func(step string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_STARTED, "")) }
@@ -273,7 +275,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	// field) is found now, before anything is created.
 	svc := serviceFromManifest(m)
 	svc.RepoUrl = repoURL
-	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true})); err != nil {
+	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true}), false); err != nil {
 		return nil, err
 	}
 	done("render", fmt.Sprintf("%d files", len(files)))
@@ -312,6 +314,14 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		return final, nil
 	}
 
+	if team := svc.GetOwnerTeam(); team != "" {
+		started("grant_team")
+		if err := c.repos.SetTeamRepoPermission(work, c.org, team, c.org, id, teamRepoRole); err != nil {
+			return fail("grant_team", fmt.Errorf("give team %s %s access to github.com/%s/%s: %w", team, teamRepoRole, c.org, id, err))
+		}
+		done("grant_team", team+" ("+teamRepoRole+")")
+	}
+
 	started("push")
 	pushFiles := make([]github.File, 0, len(files))
 	for _, f := range files {
@@ -324,7 +334,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	done("push", shortSHA(sha)+" (CI started)")
 
 	started("register")
-	resp, err := c.catalog.register(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}))
+	resp, err := c.catalog.register(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}), false)
 	if err != nil {
 		return fail("register", err)
 	}

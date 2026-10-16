@@ -75,3 +75,49 @@ func (c *Client) OrgMember(ctx context.Context, org, login string) (bool, error)
 func (c *Client) TeamMember(ctx context.Context, org, slug, login string) (bool, error) {
 	return c.membership(ctx, "/orgs/"+url.PathEscape(org)+"/teams/"+url.PathEscape(slug)+"/memberships/"+url.PathEscape(login))
 }
+
+// SetTeamRepoPermission gives org's team slug the permission (pull, triage,
+// push, maintain or admin) on owner/repo, or changes the one it has. It
+// needs "Members: read" and, on the repo, "Administration: write".
+func (c *Client) SetTeamRepoPermission(ctx context.Context, org, slug, owner, repo, permission string) error {
+	return c.doJSON(ctx, http.MethodPut, teamRepoPath(org, slug, owner, repo), map[string]string{"permission": permission}, nil)
+}
+
+// RemoveTeamRepo takes away the access org's team slug has to owner/repo
+// through the team. A team that has none is not an error.
+func (c *Client) RemoveTeamRepo(ctx context.Context, org, slug, owner, repo string) error {
+	err := c.doJSON(ctx, http.MethodDelete, teamRepoPath(org, slug, owner, repo), nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// TeamRepoPermission returns the highest role (admin, maintain, push, triage
+// or pull) org's team slug has on owner/repo, or "" when it has none.
+func (c *Client) TeamRepoPermission(ctx context.Context, org, slug, owner, repo string) (string, error) {
+	resp, err := c.doAccept(ctx, http.MethodGet, teamRepoPath(org, slug, owner, repo), nil, "application/vnd.github.v3.repository+json")
+	if errors.Is(err, ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Permissions map[string]bool `json:"permissions"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("decode team permission: %w", err)
+	}
+	for _, role := range []string{"admin", "maintain", "push", "triage", "pull"} {
+		if out.Permissions[role] {
+			return role, nil
+		}
+	}
+	return "", nil
+}
+
+func teamRepoPath(org, slug, owner, repo string) string {
+	return "/orgs/" + url.PathEscape(org) + "/teams/" + url.PathEscape(slug) + "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
+}

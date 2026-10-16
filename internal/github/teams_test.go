@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -51,5 +52,61 @@ func TestListTeams(t *testing.T) {
 	var status *StatusError
 	if !errors.As(err, &status) || status.Status != http.StatusForbidden {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestTeamRepoAccess(t *testing.T) {
+	t.Parallel()
+	var got []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /orgs/showmino/teams/billing/repos/showmino/payments", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = append(got, "PUT "+string(body))
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("PUT /orgs/showmino/teams/nobody/repos/showmino/payments", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	mux.HandleFunc("DELETE /orgs/showmino/teams/billing/repos/showmino/payments", func(w http.ResponseWriter, _ *http.Request) {
+		got = append(got, "DELETE")
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("DELETE /orgs/showmino/teams/gone/repos/showmino/payments", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	mux.HandleFunc("GET /orgs/showmino/teams/billing/repos/showmino/payments", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "application/vnd.github.v3.repository+json" {
+			w.WriteHeader(http.StatusNoContent) // what GitHub answers without the media type
+			return
+		}
+		_, _ = io.WriteString(w, `{"full_name":"showmino/payments","permissions":{"admin":false,"maintain":true,"push":true,"triage":true,"pull":true}}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL, Token: StaticToken("tok")}
+	ctx := context.Background()
+
+	if role, err := c.TeamRepoPermission(ctx, "showmino", "billing", "showmino", "payments"); err != nil || role != "maintain" {
+		t.Errorf("role %q %v, want maintain", role, err)
+	}
+	if role, err := c.TeamRepoPermission(ctx, "showmino", "stranger", "showmino", "payments"); err != nil || role != "" {
+		t.Errorf("no access: %q %v", role, err)
+	}
+
+	if err := c.SetTeamRepoPermission(ctx, "showmino", "billing", "showmino", "payments", "maintain"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetTeamRepoPermission(ctx, "showmino", "nobody", "showmino", "payments", "maintain"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a team that does not exist: %v", err)
+	}
+	if err := c.RemoveTeamRepo(ctx, "showmino", "billing", "showmino", "payments"); err != nil {
+		t.Fatal(err)
+	}
+	// Already gone is done.
+	if err := c.RemoveTeamRepo(ctx, "showmino", "gone", "showmino", "payments"); err != nil {
+		t.Errorf("a team without access: %v", err)
+	}
+	if len(got) != 2 || got[0] != `PUT {"permission":"maintain"}` || got[1] != "DELETE" {
+		t.Errorf("calls: %q", got)
 	}
 }

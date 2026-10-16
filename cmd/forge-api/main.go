@@ -174,6 +174,10 @@ func run() error {
 	catalog, ops := server.NewCatalogWithStore(st, nil), server.NewOperations(nil)
 	// Also with resources off: records made while they were on keep their service.
 	catalog.GuardResources(st)
+	if app != nil {
+		// Short: these calls run while the catalog's write lock is held.
+		catalog.ManageRepoAccess(&github.Client{Token: app.Token, HTTP: &http.Client{Timeout: 15 * time.Second}}, *githubOrg)
+	}
 	envs, cluster, images, err := previews(previewFlags{
 		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, max: *previewMax,
 		imageTimeout: env("FORGE_PREVIEW_IMAGE_TIMEOUT", "10m"), readyTimeout: env("FORGE_PREVIEW_READY_TIMEOUT", "5m"),

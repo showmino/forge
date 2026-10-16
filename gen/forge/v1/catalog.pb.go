@@ -1437,7 +1437,8 @@ func (*CreateServiceResponse_Plan) isCreateServiceResponse_Event() {}
 
 func (*CreateServiceResponse_Change) isCreateServiceResponse_Event() {}
 
-// CreateStep reports progress of one step: fetch, render, create_repo, push, register.
+// CreateStep reports progress of one step: fetch, render, create_repo, grant_team,
+// push, register.
 type CreateStep struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`

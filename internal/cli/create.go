@@ -227,7 +227,7 @@ func (f *Factory) completeParams(t *forgev1.Template, raw map[string]string) err
 // stepVerbs turn step names into progress lines.
 var stepVerbs = map[string]string{
 	"fetch": "fetched template", "render": "rendered", "create_repo": "created",
-	"push": "pushed initial commit", "register": "registered", "pull_request": "opened pull request",
+	"grant_team": "gave access to", "push": "pushed initial commit", "register": "registered", "pull_request": "opened pull request",
 }
 
 // errMayStillFinish wraps a stream error after the server may have started

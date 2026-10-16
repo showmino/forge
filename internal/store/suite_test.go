@@ -125,6 +125,31 @@ func runSuite(t *testing.T, open func(t *testing.T) Store) {
 		if got, _ := s.ForRepo(ctx, "showmino", "payments-v2"); !slices.Equal(got, []string{"services/payments"}) {
 			t.Errorf("new repo maps to %v", got)
 		}
+
+		// Inside a write, the lookup sees the write's own changes.
+		err := s.Write(ctx, func(tx Tx) error {
+			if err := tx.Put(ctx, svc("twin-c", "b", "https://github.com/showmino/Twin"), 1); err != nil {
+				return err
+			}
+			if err := tx.Delete(ctx, "services/twin-a"); err != nil {
+				return err
+			}
+			if err := tx.Put(ctx, svc("payments", "b", "https://github.com/showmino/twin"), 3); err != nil {
+				return err
+			}
+			got, err := tx.ForRepo(ctx, "showmino", "twin")
+			if want := []string{"services/payments", "services/twin-b", "services/twin-c"}; err != nil || !slices.Equal(got, want) {
+				t.Errorf("tx.ForRepo = %v %v, want %v", got, err, want)
+			}
+			got, err = tx.ForRepo(ctx, "showmino", "payments-v2")
+			if err != nil || len(got) != 0 {
+				t.Errorf("tx.ForRepo(payments-v2) = %v %v, want none", got, err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	t.Run("update and delete", func(t *testing.T) {

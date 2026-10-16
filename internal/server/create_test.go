@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,66 @@ type fakeRepos struct {
 	// proposals are the pull requests of file templates.
 	proposals  []proposal
 	proposeErr error
+	// access is each repo's teams and their roles; grantErr fails a grant.
+	access   map[string]map[string]string
+	grantErr error
+}
+
+func (f *fakeRepos) SetTeamRepoPermission(_ context.Context, org, slug, owner, repo, permission string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.grantErr != nil {
+		return f.grantErr
+	}
+	if org != "showmino" || owner != "showmino" {
+		return fmt.Errorf("grant outside the org: %s %s", org, owner)
+	}
+	if f.access == nil {
+		f.access = map[string]map[string]string{}
+	}
+	if f.access[repo] == nil {
+		f.access[repo] = map[string]string{}
+	}
+	f.access[repo][slug] = permission
+	return nil
+}
+
+func (f *fakeRepos) TeamRepoPermission(_ context.Context, _, slug, _, repo string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.access[repo][slug], nil
+}
+
+// give sets slug's role on repo, as someone on GitHub would.
+func (f *fakeRepos) give(repo, slug, role string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.access == nil {
+		f.access = map[string]map[string]string{}
+	}
+	if f.access[repo] == nil {
+		f.access[repo] = map[string]string{}
+	}
+	f.access[repo][slug] = role
+}
+
+func (f *fakeRepos) RemoveTeamRepo(_ context.Context, _, slug, _, repo string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.access[repo], slug)
+	return nil
+}
+
+// teams returns repo's teams as "slug=role", sorted.
+func (f *fakeRepos) teams(repo string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for slug, role := range f.access[repo] {
+		out = append(out, slug+"="+role)
+	}
+	slices.Sort(out)
+	return out
 }
 
 type proposal struct {
@@ -281,6 +342,7 @@ func TestCreateService(t *testing.T) {
 		"fetch:STARTED:", "fetch:DONE:svc@v1.0.0",
 		"render:STARTED:", "render:DONE:3 files",
 		"create_repo:STARTED:", "create_repo:DONE:github.com/showmino/payments",
+		"grant_team:STARTED:", "grant_team:DONE:billing (maintain)",
 		"push:STARTED:", "push:DONE:abc1234 (CI started)",
 		"register:STARTED:", "register:DONE:services/payments",
 	}
@@ -302,6 +364,9 @@ func TestCreateService(t *testing.T) {
 	}
 	if !registered(t, e.catalog, "services/payments") {
 		t.Error("service not registered")
+	}
+	if got := e.repos.teams("payments"); !slices.Equal(got, []string{"billing=maintain"}) {
+		t.Errorf("the owner team's access: %v", got)
 	}
 }
 
@@ -385,6 +450,21 @@ func TestCreateFailuresRollBack(t *testing.T) {
 		t.Errorf("push failure: %v", last)
 	}
 	if _, ok := pushFails.files("payments"); ok {
+		t.Error("the repo must be deleted again")
+	}
+
+	// The owner team must get its access: without it the create fails
+	// before anything is pushed, and the repo goes again.
+	grantFails := newFakeRepos()
+	grantFails.grantErr = errBoom
+	msgs, err = newCreateEnv(t, createRelease, grantFails).create(ctx, "writer", validRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, last := steps(msgs); last.GetFailure().GetStep() != "grant_team" || !last.GetFailure().GetRolledBack() || !strings.Contains(last.GetFailure().GetMessage(), "billing") {
+		t.Errorf("grant failure: %v", last)
+	}
+	if _, ok := grantFails.files("payments"); ok {
 		t.Error("the repo must be deleted again")
 	}
 
