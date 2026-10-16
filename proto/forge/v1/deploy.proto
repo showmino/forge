@@ -39,6 +39,12 @@ service DeployService {
   // run.host and run.domain. It applies at the next deploy of each
   // environment.
   rpc SetAddress(SetAddressRequest) returns (SetAddressResponse) {}
+
+  // ListDomains returns the public domains services can be reached under,
+  // the default first. A service picks one with forge.yaml's run.domain.
+  rpc ListDomains(ListDomainsRequest) returns (ListDomainsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // Bump is the part of the version a final release raises.
@@ -240,4 +246,20 @@ message PlannedAddress {
   string current_url = 5;
   // The host to name in claim when in_use.
   string host = 6;
+}
+
+message ListDomainsRequest {}
+
+message ListDomainsResponse {
+  // The platform's public domains, the default first. Empty when services
+  // get internal addresses only.
+  repeated PublicDomain domains = 1;
+}
+
+// PublicDomain is a domain services can be reached under from the internet.
+message PublicDomain {
+  // The domain, e.g. "example.com".
+  string name = 1;
+  // A service that names no domain is reached under this one.
+  bool is_default = 2;
 }

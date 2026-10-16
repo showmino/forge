@@ -477,6 +477,7 @@ var auditReads = []string{
 	forgev1connect.DeployServiceGetDeploymentProcedure,
 	forgev1connect.DeployServiceListDeploymentsProcedure,
 	forgev1connect.DeployServiceListDeployHistoryProcedure,
+	forgev1connect.DeployServiceListDomainsProcedure,
 	forgev1connect.AuditServiceListAuditEventsProcedure,
 	forgev1connect.AuditServiceGetAuditEventProcedure,
 	forgev1connect.ResourceServiceGetResourcePlanProcedure,

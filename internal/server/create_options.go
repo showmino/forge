@@ -43,7 +43,18 @@ func runFromProto(ro *forgev1.RunOptions) *manifest.Run {
 // applyRunOptions writes the create form's run options into the rendered
 // forge.yaml, over the template's. It refuses an option the template does
 // not offer, and options forge.yaml's rules refuse.
-func applyRunOptions(files []template.File, t *template.Template, ro *forgev1.RunOptions) ([]template.File, error) {
+// domains are the platform's public domains, which ro.domain must be one of.
+func applyRunOptions(files []template.File, t *template.Template, ro *forgev1.RunOptions, domains []string) ([]template.File, error) {
+	if d := ro.GetDomain(); d != "" {
+		switch {
+		case ro.GetNetworkOnly():
+			return nil, invalid(fmt.Sprintf("domain %s is a public address and network_only is none: ask for one, not both", d))
+		case len(domains) == 0:
+			return nil, invalid(fmt.Sprintf("domain %s: this Forge API offers no public domains", d))
+		case !slices.Contains(domains, d):
+			return nil, invalid(fmt.Sprintf("domain %s is not a domain of this platform: use %s", d, strings.Join(domains, " or ")))
+		}
+	}
 	asked := runFromProto(ro)
 	for _, o := range asked.OptionsSet() {
 		if !slices.Contains(t.Options, o) {
@@ -88,6 +99,11 @@ func applyRunOptions(files []template.File, t *template.Template, ro *forgev1.Ru
 	}
 	if ro.GetNetworkOnly() {
 		if data, err = manifest.SetRunDomain(data, "none"); err != nil {
+			return nil, invalid(err.Error())
+		}
+	}
+	if d := ro.GetDomain(); d != "" {
+		if data, err = manifest.SetRunDomain(data, d); err != nil {
 			return nil, invalid(err.Error())
 		}
 	}

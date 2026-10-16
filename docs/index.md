@@ -43,6 +43,7 @@ The v1 CLI has twelve command groups; each maps one-to-one to an API resource so
 | `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `delete` | `forge service get payments -o yaml` | 1 |
 | `template` | `list`, `get`, `lint` | `forge template list --tag go` | 2 |
 | `team` | `list` | `forge team list` | 6 |
+| `domain` | `list` | `forge domain list` | 6 |
 | `create` (shortcut) | scaffold from a template | `forge create payments --template go-grpc --team billing` | 2 |
 | `env` | `list`, `create`, `get`, `destroy`, `extend` | `forge env create pr-142 --service payments --ttl 48h` | 3 |
 | `deploy` | `start`, `status`, `history`, `rollback`, `promote` | `forge deploy start payments --env staging --ref v1.4.2` | 4 |

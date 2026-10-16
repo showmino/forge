@@ -60,8 +60,10 @@ type creator struct {
 	catalog   *Catalog
 	templates TemplateSource
 	repos     RepoHost // nil: repos cannot be created; validate_only still works
-	org       string
-	log       *slog.Logger
+	// domains are the public domains a new service may choose (run.domain).
+	domains []string
+	org     string
+	log     *slog.Logger
 
 	mu sync.Mutex
 	// results tracks each create by request_id.
@@ -261,7 +263,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", tname, version, err))
 	}
 	if ro := req.GetRunOptions(); ro != nil {
-		if files, err = applyRunOptions(files, t, ro); err != nil {
+		if files, err = applyRunOptions(files, t, ro, c.domains); err != nil {
 			return nil, err
 		}
 	}
