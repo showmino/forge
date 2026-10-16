@@ -20,7 +20,7 @@ func workloadDenied(w *Workload, format string, a ...any) error {
 func startRef(ctx context.Context, service, env, ref string) (string, error) {
 	w := workloadOf(ctx)
 	if w == nil {
-		return ref, require(ctx, PermServicesWrite)
+		return ref, authorize(ctx, ActDeployStart, service)
 	}
 	if service != servicePrefix+w.Service || require(ctx, PermDeploy(w.Service, env)) != nil {
 		return "", workloadDenied(w, "only deploy %s%s to staging, not %s to %s", servicePrefix, w.Service, service, env)

@@ -205,7 +205,7 @@ func (r *Resources) view(rec *store.PlanRecord) *forgev1.ResourcePlan {
 func planAccess(ctx context.Context, service string, allowDestroy bool) error {
 	w := workloadOf(ctx)
 	if w == nil {
-		return require(ctx, PermServicesWrite)
+		return authorize(ctx, ActResourcePlan, servicePrefix+service)
 	}
 	if service != w.Service {
 		return workloadDenied(w, "only plan the resources of %s%s, not of %s%s", servicePrefix, w.Service, servicePrefix, service)

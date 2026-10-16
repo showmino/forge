@@ -535,3 +535,32 @@ func TestOIDCLoginFacts(t *testing.T) {
 		t.Error("a token for another client was accepted")
 	}
 }
+
+// slugMembers says who is in which team of the organization.
+type slugMembers map[string][]string
+
+func (m slugMembers) OrgMember(context.Context, string, string) (bool, error) { return true, nil }
+func (m slugMembers) TeamMember(_ context.Context, _, slug, login string) (bool, error) {
+	return slices.Contains(m[slug], login), nil
+}
+
+// A service's team is rechecked like the admin groups, so a person who left
+// the team loses its services within the hour, and one who joined gains them.
+func TestSessionRechecksOwningTeams(t *testing.T) {
+	t.Parallel()
+	s := NewSessions(SessionOptions{
+		Store: store.NewMemory(), Org: "showmino", Teams: []string{"showmino:platform"},
+		Members: slugMembers{"billing": {"ana"}, "frontend": {"ana"}},
+		OwningTeams: func(context.Context) ([]string, error) {
+			return []string{"billing", "frontend", "search"}, nil
+		},
+	})
+	got, ok, err := s.memberships(context.Background(), store.Session{Login: "ana", Groups: []string{"showmino:platform", "showmino:search", "showmino:unknown"}})
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	want := []string{"showmino:billing", "showmino:frontend", "showmino:unknown"}
+	if !slices.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
+}

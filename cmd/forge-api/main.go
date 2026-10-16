@@ -52,7 +52,8 @@ func run() error {
 		addr         = flag.String("addr", env("FORGE_API_ADDR", ":8080"), "listen address")
 		issuer       = flag.String("oidc-issuer", env("FORGE_OIDC_ISSUER", ""), "OIDC issuer URL, for example http://localhost:5556/dex")
 		clientID     = flag.String("oidc-client-id", env("FORGE_OIDC_CLIENT_ID", "forge-cli"), "OIDC client ID the CLI uses; tokens must carry it as audience")
-		writers      = flag.String("writer-groups", env("FORGE_WRITER_GROUPS", ""), "comma-separated groups allowed to change the catalog (empty = every authenticated user)")
+		admins       = flag.String("admin-groups", env("FORGE_ADMIN_GROUPS", ""), "comma-separated groups that may do everything on every service (empty = the writer groups); a service's owner team may work on that service")
+		writers      = flag.String("writer-groups", env("FORGE_WRITER_GROUPS", ""), "older name of --admin-groups, used when that is empty")
 		dbURL        = flag.String("database-url", "", "PostgreSQL URL for the service catalog, or FORGE_DATABASE_URL (empty = in memory, lost on restart)")
 		minClient    = flag.String("min-client-version", env("FORGE_MIN_CLIENT_VERSION", "0.1.0"), "oldest CLI version accepted")
 		webClientID  = flag.String("oidc-web-client-id", env("FORGE_OIDC_WEB_CLIENT_ID", ""), "OIDC client ID of the web dashboard; tokens issued to it are accepted too (empty: only the CLI's)")
@@ -144,14 +145,12 @@ func run() error {
 		oidc.SetWebClient(*webClientID)
 	}
 
-	var groups []string
-	for _, g := range strings.Split(*writers, ",") {
-		if g = strings.TrimSpace(g); g != "" {
-			groups = append(groups, g)
-		}
+	groups := splitList(*admins)
+	if len(groups) == 0 {
+		groups = splitList(*writers)
 	}
 	if len(groups) == 0 && !*insecureDev {
-		log.Warn("no --writer-groups: every authenticated user may change the catalog, create services and deploy")
+		log.Warn("no --admin-groups: every authenticated user is an admin, who may change every service")
 	}
 	app, err := githubApp(*appID, *appKey, *githubOrg)
 	if err != nil {
@@ -224,10 +223,10 @@ func run() error {
 	if app != nil {
 		for _, g := range groups {
 			if org, slug, ok := strings.Cut(g, ":"); !ok || slug == "" || !strings.EqualFold(org, *githubOrg) {
-				log.Warn("a writer group is not a team of the GitHub organization: a session keeps it as its login gave it", "group", g, "org", *githubOrg)
+				log.Warn("an admin group is not a team of the GitHub organization: a session keeps it as its login gave it", "group", g, "org", *githubOrg)
 			}
 		}
-		sessions = server.NewSessions(server.SessionOptions{Store: st, Members: members(app), Org: *githubOrg, Teams: groups, Log: log})
+		sessions = server.NewSessions(server.SessionOptions{Store: st, Members: members(app), Org: *githubOrg, Teams: groups, OwningTeams: catalog.OwnerTeams, Log: log})
 		go sessions.RunSweeper(ctx, time.Hour)
 	} else {
 		log.Info("sessions are off: they need the GitHub App to keep memberships current")
@@ -250,7 +249,7 @@ func run() error {
 		MinClientVersion: *minClient,
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID, WebClientID: *webClientID},
 		Authenticator:    authn,
-		Authorizer:       server.Authorizer{WriterGroups: groups},
+		Authorizer:       server.Authorizer{AdminGroups: groups, Org: *githubOrg},
 		Audit:            st,
 		Logger:           log,
 	})
@@ -303,4 +302,15 @@ func run() error {
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// splitList splits a comma-separated flag, dropping empty entries.
+func splitList(v string) []string {
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

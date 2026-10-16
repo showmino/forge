@@ -237,7 +237,7 @@ func TestPlanAccess(t *testing.T) {
 	}
 
 	_, err := f.client.PlanResources(ctx, as("reader", req("services/payments", "staging")))
-	wantCode(t, "a reader", err, connect.CodePermissionDenied, "services.write")
+	wantCode(t, "a reader", err, connect.CodePermissionDenied, "resource.plan")
 	_, err = f.client.PlanResources(ctx, connect.NewRequest(req("services/payments", "staging")))
 	wantCode(t, "no token", err, connect.CodeUnauthenticated, "")
 
@@ -970,7 +970,7 @@ func TestApplyRefusals(t *testing.T) {
 	b, _ := f.plan(t, "writer", "staging", database("6Gi", 0), false)
 
 	_, err = f.client.ApplyResourcePlan(ctx, as("reader", &forgev1.ApplyResourcePlanRequest{Name: a.GetName()}))
-	wantCode(t, "a reader", err, connect.CodePermissionDenied, "services.write")
+	wantCode(t, "a reader", err, connect.CodePermissionDenied, "resource.apply")
 
 	// forge.yaml changed since the plan.
 	_, err = f.startApply(&forgev1.ApplyResourcePlanRequest{Name: a.GetName(), CheckResources: true, Resources: database("7Gi", 0)})
@@ -1021,7 +1021,7 @@ func TestApplyRefusedForAReaderIsAudited(t *testing.T) {
 	f := newResourceFixture(t, nil)
 	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
 	_, err := f.client.ApplyResourcePlan(context.Background(), as("reader", &forgev1.ApplyResourcePlanRequest{Name: p.GetName()}))
-	wantCode(t, "a reader", err, connect.CodePermissionDenied, "services.write")
+	wantCode(t, "a reader", err, connect.CodePermissionDenied, "resource.apply")
 	var req *forgev1.AuditEvent
 	for _, e := range allEvents(t, f.store) {
 		if e.GetKind() == "request" && e.GetAction() == "resource.apply" {

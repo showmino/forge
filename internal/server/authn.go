@@ -16,8 +16,9 @@ import (
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 )
 
-// Permissions. Phase 1 has two; RBAC with roles and policy arrives with the
-// resources that need it.
+// Permissions. Every member reads; PermServicesWrite is the admin's, who may
+// do everything. What a member of a service's team may do is decided per
+// action by authorize (rbac.go), not by a permission.
 const (
 	PermServicesRead  = "services.read"
 	PermServicesWrite = "services.write"
@@ -74,14 +75,30 @@ type Authenticator interface {
 
 // Authorizer grants permissions to a principal.
 type Authorizer struct {
-	// WriterGroups may write the catalog. Empty means every authenticated caller may.
+	// AdminGroups may do everything on every service. Empty takes
+	// WriterGroups, their older name; both empty makes every authenticated
+	// caller an admin.
+	AdminGroups []string
+	// WriterGroups is the older name of AdminGroups.
 	WriterGroups []string
+	// Org is the GitHub organization whose teams own services: a service's
+	// owner_team T is the group "<Org>:T".
+	Org string
+}
+
+// Admins returns the groups that are admins.
+func (a Authorizer) Admins() []string {
+	if len(a.AdminGroups) > 0 {
+		return a.AdminGroups
+	}
+	return a.WriterGroups
 }
 
 // Grant fills p.Permissions.
 func (a Authorizer) Grant(p *Principal) {
 	p.Permissions = []string{PermServicesRead}
-	if len(a.WriterGroups) == 0 || slices.ContainsFunc(p.Groups, func(g string) bool { return slices.Contains(a.WriterGroups, g) }) {
+	admins := a.Admins()
+	if len(admins) == 0 || slices.ContainsFunc(p.Groups, func(g string) bool { return slices.Contains(admins, g) }) {
 		p.Permissions = append(p.Permissions, PermServicesWrite)
 	}
 }
@@ -124,6 +141,8 @@ var workloadProcedures = []string{
 type authInterceptor struct {
 	authn Authenticator
 	authz Authorizer
+	// teamOf looks up a service's owner team for authorize.
+	teamOf func(ctx context.Context, service string) (string, error)
 }
 
 func (i *authInterceptor) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
@@ -177,6 +196,7 @@ func (i *authInterceptor) authenticate(ctx context.Context, procedure, header st
 	} else {
 		i.authz.Grant(p)
 	}
+	ctx = context.WithValue(ctx, accessKey{}, &access{org: i.authz.Org, teamOf: i.teamOf})
 	return context.WithValue(ctx, principalKey{}, p), nil
 }
 

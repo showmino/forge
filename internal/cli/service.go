@@ -209,24 +209,50 @@ func newServiceGetCmd(f *Factory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			rows := [][]string{
+				{"name", s.GetName()},
+				{"display name", s.GetDisplayName()},
+				{"team", s.GetOwnerTeam()},
+				{"owners", strings.Join(s.GetOwners(), ", ")},
+				{"lifecycle", lifecycleString(s.GetLifecycle())},
+				{"repo", s.GetRepoUrl()},
+				{"dependencies", strings.Join(s.GetDependencies(), ", ")},
+				{"labels", formatLabels(s.GetLabels())},
+				{"updated", s.GetUpdateTime().AsTime().Local().Format("2006-01-02 15:04")},
+			}
+			if format == output.Table {
+				if can := f.allowedOn(cmd, s.GetName()); can != "" {
+					rows = append(rows, []string{"you can", can})
+				}
+			}
 			return output.Print(f.IO.Out, format, output.View{
 				Headers: []string{"field", "value"},
-				Rows: [][]string{
-					{"name", s.GetName()},
-					{"display name", s.GetDisplayName()},
-					{"team", s.GetOwnerTeam()},
-					{"owners", strings.Join(s.GetOwners(), ", ")},
-					{"lifecycle", lifecycleString(s.GetLifecycle())},
-					{"repo", s.GetRepoUrl()},
-					{"dependencies", strings.Join(s.GetDependencies(), ", ")},
-					{"labels", formatLabels(s.GetLabels())},
-					{"updated", s.GetUpdateTime().AsTime().Local().Format("2006-01-02 15:04")},
-				},
-				Names: []string{s.GetName()},
-				Data:  s,
+				Rows:    rows,
+				Names:   []string{s.GetName()},
+				Data:    s,
 			})
 		},
 	}
+}
+
+// allowedOn lists the actions the caller may do on the service, for the
+// table of 'service get'. It is empty when the API cannot say (an API older
+// than TestPermissions), so the row is left out rather than failing the get.
+func (f *Factory) allowedOn(cmd *cobra.Command, name string) string {
+	ctx, cancel := f.withTimeout(cmd.Context())
+	defer cancel()
+	c, err := f.Client(ctx, true)
+	if err != nil {
+		return ""
+	}
+	resp, err := c.Auth.TestPermissions(ctx, connect.NewRequest(&forgev1.TestPermissionsRequest{Service: name}))
+	if err != nil {
+		return ""
+	}
+	if len(resp.Msg.GetAllowed()) == 0 {
+		return "read only (" + resp.Msg.GetRole() + ")"
+	}
+	return strings.Join(resp.Msg.GetAllowed(), ", ") + " (" + resp.Msg.GetRole() + ")"
 }
 
 func (f *Factory) getService(cmd *cobra.Command, args []string) (*forgev1.Service, error) {

@@ -190,8 +190,9 @@ Both the CLI and the forge-api pod must reach Dex at the same issuer URL
 (`http://dex.<node-ip or dex-ip>.nip.io/dex`), which is why Dex is exposed
 outside the cluster rather than called by its Service name. On k3s you log in
 through GitHub: only members of `FORGE_DEX_GITHUB_ORG` (default the GitHub org)
-can log in, and only the teams in `FORGE_WRITER_GROUPS` (default
-`<org>:platform-engineering`) may register, create, preview or deploy. Create a
+can log in. The teams in `FORGE_WRITER_GROUPS` (default
+`<org>:platform-engineering`) are admins, who may do everything; forge-api
+reads them as `FORGE_ADMIN_GROUPS`, its newer name, when that is unset. Create a
 GitHub OAuth App owned by the org with the callback
 `http://dex.<dex-ip>.nip.io/dex/callback`, and put its `client_id` and
 `client_secret` in the Secret `dex-github`, or in a 1Password item named by
@@ -208,6 +209,17 @@ again.
 A service belongs to a team of the GitHub organization. `forge team list` (and
 the dashboard's Create form) read the teams from GitHub as the App, which needs
 the organization permission "Members: read" for it.
+
+Who may do what follows the team. Every member of the organization can read
+everything. The members of a service's owner team may update it, deploy,
+promote and roll it back, manage its previews and plan and apply its
+resources outside production, and create services for their own teams. Only
+an admin may delete a service, change its address, register an existing
+repo, create a service for another team, move a service to another team or
+apply resources in production. A refusal names the action and the team it
+needs. `forge auth can deploy.promote payments` prints yes or no (exit 0 or
+5), `forge auth status` shows your role and `forge service get` what you may
+do on that service.
 
 A service's docs are Markdown under `docs/` in its repo, with `docs/index.md`
 as the start page (Phase 7). forge-api reads them from the repo's default

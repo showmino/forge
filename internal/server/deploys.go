@@ -562,7 +562,7 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if err != nil {
 		return nil, err
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
+	if err := authorize(ctx, ActDeployRollback, servicePrefix+svc); err != nil {
 		return nil, err
 	}
 	recs, err := d.history(ctx, svc, env, 50)
@@ -654,7 +654,7 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if !ok || svc == "" {
 		return nil, invalidArg("service %q must be services/<name>", req.Msg.GetService())
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
+	if err := authorize(ctx, ActDeployPromote, servicePrefix+svc); err != nil {
 		return nil, err
 	}
 	src, _, err := d.current(ctx, svc, from)

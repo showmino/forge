@@ -31,7 +31,7 @@ func (d *Deploys) SetAddress(ctx context.Context, req *connect.Request[forgev1.S
 	if !ok || !manifest.ValidID(svc) {
 		return nil, invalidArg("service %q must be services/<name>", m.GetService())
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
+	if err := authorize(ctx, ActServiceAddress, servicePrefix+svc); err != nil {
 		return nil, err
 	}
 	host, domain := strings.TrimSpace(m.GetHost()), strings.TrimSpace(m.GetDomain())

@@ -4,7 +4,7 @@
 #   ${DEX_HOST}         host name of Dex, the same for you and for pods
 #   ${FORGE_API_IMAGE}  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
 #   The GitHub App settings (ID, org, template repo): see render.sh.
-#   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who may write.
+#   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who is an admin.
 #   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
 apiVersion: v1
 kind: Namespace
@@ -47,7 +47,7 @@ data:
         public: true #web
         redirectURIs: [${WEB_REDIRECTS_YAML}] #web
     # Only members of the org log in; groups are "<org>:<team-slug>", and
-    # forge-api's FORGE_WRITER_GROUPS picks the teams that may write. Dex
+    # forge-api's FORGE_WRITER_GROUPS picks the admin teams. Dex
     # expands $GITHUB_CLIENT_* from its environment (the Secret dex-github).
     connectors:
       - type: github

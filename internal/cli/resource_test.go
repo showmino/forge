@@ -257,7 +257,7 @@ func TestResourceAccessAndOff(t *testing.T) {
 
 	h.serveResources()
 	h.env["FORGE_TOKEN"] = readerToken
-	if r := h.fails(5, "resource", "plan", "--env", "staging"); !strings.Contains(r.err, "services.write") {
+	if r := h.fails(5, "resource", "plan", "--env", "staging"); !strings.Contains(r.err, "resource.plan") {
 		t.Errorf("a reader plans: %v", r)
 	}
 	h.ok("resource", "list")

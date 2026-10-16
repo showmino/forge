@@ -180,7 +180,7 @@ Run `make test lint` before every commit. Write the test first.
 | Golden tests for output | `internal/output/testdata/*.golden`, `internal/cli/testdata` |
 | CLI tests run the real command tree against an in-process API | `newHarness(t)` in `internal/cli/cli_test.go` (static tokens `t-writer`, `t-reader`) |
 | Protos in `proto/forge/v1`, AIP-style names (`services/{id}`), `request_id`, `validate_only`, etags | `make generate` |
-| Server permissions are strings checked per RPC | `require(ctx, PermX)` in `internal/server/authn.go` |
+| Who may do what: a write RPC calls `authorize(ctx, Act..., service)` (or `authorizeTeam`) with an action of the role table; reads use `require(ctx, PermServicesRead)` | `internal/server/rbac.go` (roles reader, team, admin; `actionRoles`) |
 | Every write RPC is in `auditActions`, every read in `auditReads` | `internal/server/audit.go`; `TestAuditCoversEveryProcedure` fails otherwise |
 | A resource run ends through `Resources.endRun`, which changes the plan once and appends the one outcome event | Operations started with `withoutOutcome(ctx)`; never append a resource outcome anywhere else |
 | Policy rules are `policy/*.rego`, package `forge.resources`, built into the binary | every rule has a passing and a failing case in `policy/policy_test.go` |

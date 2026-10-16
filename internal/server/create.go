@@ -102,10 +102,13 @@ func validateCreate(req *forgev1.CreateServiceRequest) error {
 // run checks the caller and the request, applies request_id idempotency and
 // runs the pipeline.
 func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) error {
-	if err := require(ctx, PermServicesWrite); err != nil {
-		return err
+	if _, ok := PrincipalFrom(ctx); !ok {
+		return require(ctx, PermServicesWrite)
 	}
 	if err := validateCreate(req); err != nil {
+		return err
+	}
+	if err := authorizeTeam(ctx, ActServiceCreate, req.GetOwnerTeam()); err != nil {
 		return err
 	}
 	if c.templates == nil {

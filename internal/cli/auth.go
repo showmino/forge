@@ -28,7 +28,7 @@ not been used for 90 days, you log out, or you leave the organization.
 
 Credentials are stored in the OS keychain (a 0600 file on headless Linux),
 keyed by API URL. In CI, set FORGE_TOKEN instead of logging in.`
-	cmd.AddCommand(newAuthLoginCmd(f), newAuthLogoutCmd(f), newAuthStatusCmd(f), newAuthTokenCmd(f), newAuthSessionCmd(f))
+	cmd.AddCommand(newAuthLoginCmd(f), newAuthLogoutCmd(f), newAuthStatusCmd(f), newAuthCanCmd(f), newAuthTokenCmd(f), newAuthSessionCmd(f))
 	return cmd
 }
 
@@ -196,11 +196,15 @@ func newAuthLogoutCmd(f *Factory) *cobra.Command {
 }
 
 type authStatus struct {
-	API         string    `json:"api"`
-	Subject     string    `json:"subject"`
-	Email       string    `json:"email,omitempty"`
-	Groups      []string  `json:"groups"`
-	Permissions []string  `json:"permissions"`
+	API         string   `json:"api"`
+	Subject     string   `json:"subject"`
+	Email       string   `json:"email,omitempty"`
+	Groups      []string `json:"groups"`
+	Permissions []string `json:"permissions"`
+	// Admin is true for a member of an admin group; Teams are the
+	// organization's teams the caller is in.
+	Admin       bool      `json:"admin"`
+	Teams       []string  `json:"teams"`
 	Credentials string    `json:"credentials"`
 	Expiry      time.Time `json:"expiry,omitzero"`
 	// Session is the Forge session in use, "sessions/<id>"; empty for a
@@ -237,6 +241,8 @@ func newAuthStatusCmd(f *Factory) *cobra.Command {
 				Email:       resp.Msg.GetEmail(),
 				Groups:      nonNil(resp.Msg.GetGroups()),
 				Permissions: nonNil(resp.Msg.GetPermissions()),
+				Admin:       resp.Msg.GetAdmin(),
+				Teams:       nonNil(resp.Msg.GetTeams()),
 				Credentials: f.CredentialStore().Name(),
 			}
 			if r.Token != "" {
@@ -250,6 +256,7 @@ func newAuthStatusCmd(f *Factory) *cobra.Command {
 				{"email", st.Email},
 				{"groups", strings.Join(st.Groups, ", ")},
 				{"permissions", strings.Join(st.Permissions, ", ")},
+				{"role", roleString(st.Admin, st.Teams)},
 				{"credentials", st.Credentials},
 			}
 			if ses := resp.Msg.GetSession(); ses != nil {
@@ -262,22 +269,109 @@ func newAuthStatusCmd(f *Factory) *cobra.Command {
 			if !st.Expiry.IsZero() {
 				expires = st.Expiry.Local().Format(time.RFC3339)
 			}
-			return output.Print(f.IO.Out, format, output.View{
-				Headers: []string{"field", "value"},
-				Rows: [][]string{
-					{"api", st.API},
-					{"subject", st.Subject},
-					{"email", st.Email},
-					{"groups", strings.Join(st.Groups, ", ")},
-					{"permissions", strings.Join(st.Permissions, ", ")},
-					{"credentials", st.Credentials},
-					{"token expires", expires},
-				},
-				Names: []string{st.Subject},
-				Data:  st,
-			})
+			rows = append(rows, []string{"token expires", expires})
+			return output.Print(f.IO.Out, format, output.View{Headers: []string{"field", "value"}, Rows: rows, Names: []string{st.Subject}, Data: st})
 		},
 	}
+}
+
+// roleString says what the caller is: an admin, a member of teams, or a
+// reader.
+func roleString(admin bool, teams []string) string {
+	switch {
+	case admin:
+		return "admin (everything, on every service)"
+	case len(teams) > 0:
+		return "team: " + strings.Join(teams, ", ")
+	default:
+		return "reader"
+	}
+}
+
+type authCan struct {
+	Action  string `json:"action"`
+	Service string `json:"service,omitempty"`
+	Team    string `json:"team,omitempty"`
+	Allowed bool   `json:"allowed"`
+	// Role is the caller's role toward the service: admin, team or reader.
+	Role string `json:"role"`
+}
+
+func newAuthCanCmd(f *Factory) *cobra.Command {
+	var team string
+	cmd := &cobra.Command{
+		Use:   "can <action> [service]",
+		Short: "Check whether you may do an action",
+		Long: `Ask the API whether you may do an action, on a service or (for
+service.create and service.register) on none. Prints yes or no and exits 0 or
+5, so scripts can check before they try.
+
+Members of a service's owner team may update it, deploy, promote and roll it
+back, manage its environments and plan and apply its resources outside
+production. Admins may do everything. The actions:
+
+  service.create, service.create.any_team, service.register, service.update,
+  service.update.team, service.delete, service.address, deploy.start,
+  deploy.promote, deploy.rollback, environment.create, environment.extend,
+  environment.destroy, operation.cancel, resource.plan, resource.apply,
+  resource.apply.production`,
+		Example: `  forge auth can deploy.promote payments
+  forge auth can service.create --team billing
+  forge auth can resource.apply.production payments -o json`,
+		Args:              cobra.RangeArgs(1, 2),
+		ValidArgsFunction: f.completeServices,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			can := authCan{Action: args[0], Team: team}
+			if len(args) == 2 {
+				if can.Service, err = f.serviceName(args[1:]); err != nil {
+					return err
+				}
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Auth.TestPermissions(ctx, connect.NewRequest(&forgev1.TestPermissionsRequest{
+				Service: can.Service, Actions: []string{can.Action}, OwnerTeam: team,
+			}))
+			if err != nil {
+				return err
+			}
+			can.Allowed = len(resp.Msg.GetAllowed()) == 1
+			can.Role = resp.Msg.GetRole()
+			answer := "no"
+			if can.Allowed {
+				answer = "yes"
+			}
+			// The table is the bare answer, for 'if forge auth can ...' in a shell.
+			if format == output.Table {
+				_, err = fmt.Fprintln(f.IO.Out, answer)
+			} else {
+				err = output.Print(f.IO.Out, format, output.View{Names: []string{answer}, Data: can})
+			}
+			if err != nil {
+				return err
+			}
+			if can.Allowed {
+				return nil
+			}
+			on := ""
+			if can.Service != "" {
+				on = " on " + can.Service
+			} else if team != "" {
+				on = " for the team " + team
+			}
+			return exitcode.New(exitcode.PermissionDenied, "you may not %s%s (your role: %s)", can.Action, on, can.Role)
+		},
+	}
+	cmd.Flags().StringVar(&team, "team", "", "for service.create: the team the new service would belong to")
+	return cmd
 }
 
 func newAuthTokenCmd(f *Factory) *cobra.Command {

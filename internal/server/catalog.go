@@ -144,6 +144,36 @@ func (c *Catalog) ids(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
+// teamOf returns the owner team of the service name ("services/<id>").
+func (c *Catalog) teamOf(ctx context.Context, name string) (string, error) {
+	s, err := c.get(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	return s.GetOwnerTeam(), nil
+}
+
+// OwnerTeams returns the distinct owner teams of the catalog's services, sorted.
+func (c *Catalog) OwnerTeams(ctx context.Context) ([]string, error) {
+	var out []string
+	after := ""
+	for {
+		svcs, err := c.store.List(ctx, store.ListQuery{After: after, Limit: 500})
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range svcs {
+			out = append(out, s.GetOwnerTeam())
+		}
+		if len(svcs) < 500 {
+			break
+		}
+		after = svcs[len(svcs)-1].GetName()
+	}
+	slices.Sort(out)
+	return slices.Compact(out), nil
+}
+
 // get returns the service registered under name: a NotFound error when
 // there is none.
 func (c *Catalog) get(ctx context.Context, name string) (*forgev1.Service, error) {
@@ -218,7 +248,7 @@ func (c *Catalog) GetService(ctx context.Context, req *connect.Request[forgev1.G
 }
 
 func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forgev1.RegisterServiceRequest]) (*connect.Response[forgev1.RegisterServiceResponse], error) {
-	if err := require(ctx, PermServicesWrite); err != nil {
+	if err := authorize(ctx, ActServiceRegister, ""); err != nil {
 		return nil, err
 	}
 	m := req.Msg
@@ -284,8 +314,8 @@ func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forg
 var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels"}
 
 func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev1.UpdateServiceRequest]) (*connect.Response[forgev1.UpdateServiceResponse], error) {
-	if err := require(ctx, PermServicesWrite); err != nil {
-		return nil, err
+	if _, ok := PrincipalFrom(ctx); !ok {
+		return nil, require(ctx, PermServicesWrite)
 	}
 	in := req.Msg.GetService()
 	if in == nil {
@@ -295,7 +325,23 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
+	if err := authorize(ctx, ActServiceUpdate, name); err != nil {
+		return nil, err
+	}
 	paths := req.Msg.GetUpdateMask().GetPaths()
+	// Moving a service to another team is an admin's: the team decides who
+	// may work on it.
+	if slices.Contains(paths, "owner_team") {
+		cur, err := c.get(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if in.GetOwnerTeam() != cur.GetOwnerTeam() {
+			if err := authorize(ctx, ActServiceUpdateTeam, name); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if len(paths) == 0 {
 		return nil, invalid("update_mask must name at least one field")
 	}
@@ -357,7 +403,7 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 }
 
 func (c *Catalog) DeleteService(ctx context.Context, req *connect.Request[forgev1.DeleteServiceRequest]) (*connect.Response[forgev1.DeleteServiceResponse], error) {
-	if err := require(ctx, PermServicesWrite); err != nil {
+	if err := authorize(ctx, ActServiceDelete, ""); err != nil {
 		return nil, err
 	}
 	name, err := parseName(req.Msg.GetName())

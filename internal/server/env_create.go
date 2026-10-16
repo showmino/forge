@@ -24,10 +24,10 @@ func (e *Environments) CreateEnvironment(ctx context.Context, req *connect.Reque
 	if err := e.ready(); err != nil {
 		return nil, err
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
+	m := req.Msg
+	if err := authorize(ctx, ActEnvironmentCreate, m.GetService()); err != nil {
 		return nil, err
 	}
-	m := req.Msg
 	p, err := e.plan(ctx, m)
 	if err != nil {
 		return nil, err
