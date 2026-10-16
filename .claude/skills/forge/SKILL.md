@@ -16,6 +16,9 @@ at them, so that there is one copy.
    check**, and for every rollout. Its scripts are in `docs/agents/scripts/`.
 4. `docs/index.md`: the approved design. Read the relevant section before
    designing anything.
+5. `showmino/techdocs`, `docs/forge/`: the user documentation. Every new or
+   changed feature gets its page there in the same piece of work (the rule is
+   in `AGENTS.md`, "Every feature is documented in techdocs").
 
 Do not add project knowledge here or to a private memory: put it in those
 files, in the same pull request as the change it describes.
