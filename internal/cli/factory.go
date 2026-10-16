@@ -119,7 +119,7 @@ func newFactory(d Deps) *Factory {
 		d.Version = version.Get().Version
 	}
 	if d.HTTPClient == nil {
-		d.HTTPClient = &http.Client{Timeout: 60 * time.Second}
+		d.HTTPClient = &http.Client{Timeout: 60 * time.Second, Transport: client.DetectChallenges(nil)}
 	}
 	return &Factory{Deps: d}
 }

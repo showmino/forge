@@ -271,6 +271,11 @@ service commands default to that service.
 Exit codes: 0 ok, 1 unexpected, 2 usage, 3 not found, 4 not authenticated,
 5 permission denied, 6 conflict, 7 operation failed, 8 timed out.
 
+When Cloudflare answers a request with a challenge for a browser
+(`cf-mitigated: challenge`, often from a company network or VPN), the CLI
+says so with the Ray ID and exits 1, not 5: Forge never saw the request. Find
+the Ray ID under Security > Events in Cloudflare to see which rule fired.
+
 ## Templates
 
 Templates live in [`showmino/forge-templates`](https://github.com/showmino/forge-templates):
