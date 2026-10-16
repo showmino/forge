@@ -127,7 +127,7 @@ browser.`,
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				return exitcode.New(exitcode.Unauthenticated, "%v", err)
+				return &exitcode.Error{Code: exitcode.Unauthenticated, Err: err}
 			}
 			f.startSession(ctx, c.Auth, creds)
 			// A new login replaces the one this machine had: end that

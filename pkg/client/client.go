@@ -70,7 +70,7 @@ func New(baseURL string, o Options) (*Client, error) {
 	}
 	hc := o.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Timeout: 60 * time.Second}
+		hc = &http.Client{Timeout: 60 * time.Second, Transport: DetectChallenges(nil)}
 	}
 	if o.MaxRetries == 0 {
 		o.MaxRetries = 3

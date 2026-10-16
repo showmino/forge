@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/showmino/forge/internal/exitcode"
+	"github.com/showmino/forge/pkg/client"
 )
 
 // Run executes the CLI with args (without the program name) and returns the
@@ -39,6 +40,10 @@ func Run(ctx context.Context, d Deps, args []string) int {
 
 // classify maps cobra's own usage errors to exit code 2.
 func classify(err error) *exitcode.Error {
+	// First, also inside an exit code of its own (login's 4), and not exit 5: Forge did not refuse anything, it never saw the request.
+	if ce := (*client.ChallengeError)(nil); errors.As(err, &ce) {
+		return &exitcode.Error{Code: exitcode.Unexpected, Err: ce, Hint: "the request stopped at Cloudflare, before Forge. Try another network, or ask an admin of the domain to let these requests through (Cloudflare: Security > Events, search the Ray ID)"}
+	}
 	var e *exitcode.Error
 	if errors.As(err, &e) {
 		return e
