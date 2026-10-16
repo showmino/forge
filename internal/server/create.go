@@ -273,7 +273,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	// field) is found now, before anything is created.
 	svc := serviceFromManifest(m)
 	svc.RepoUrl = repoURL
-	if _, err := c.catalog.RegisterService(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true})); err != nil {
+	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true})); err != nil {
 		return nil, err
 	}
 	done("render", fmt.Sprintf("%d files", len(files)))
@@ -324,7 +324,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	done("push", shortSHA(sha)+" (CI started)")
 
 	started("register")
-	resp, err := c.catalog.RegisterService(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}))
+	resp, err := c.catalog.register(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}))
 	if err != nil {
 		return fail("register", err)
 	}

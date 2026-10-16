@@ -283,12 +283,12 @@ func TestSessionMembership(t *testing.T) {
 	if st, err := f.status(token); err != nil || !canWrite(st) || calls() != 0 {
 		t.Fatalf("after 30 minutes: %v %v, %d calls", st, err, calls())
 	}
-	// Taken out of the writer team: the next check takes writing away, and
-	// keeps the groups forge-api cannot check.
+	// Taken out of the teams: the next check takes writing away, and the
+	// other team of the organization goes too (every team is asked again).
 	f.members.set(func(m *fakeMembers) { m.team["ana"] = false })
 	f.advance(31 * time.Minute)
 	st, err := f.status(token)
-	if err != nil || canWrite(st) || !slices.Equal(st.GetGroups(), []string{"showmino:other"}) {
+	if err != nil || canWrite(st) || len(st.GetGroups()) != 0 {
 		t.Fatalf("after leaving the team: %v %v", st, err)
 	}
 	// Put back: writing returns at the next check, not before.
@@ -550,16 +550,19 @@ func TestSessionRechecksOwningTeams(t *testing.T) {
 	t.Parallel()
 	s := NewSessions(SessionOptions{
 		Store: store.NewMemory(), Org: "showmino", Teams: []string{"showmino:platform"},
-		Members: slugMembers{"billing": {"ana"}, "frontend": {"ana"}},
+		Members: slugMembers{"billing": {"ana"}, "frontend": {"ana"}, "ops": {"ana"}},
 		OwningTeams: func(context.Context) ([]string, error) {
 			return []string{"billing", "frontend", "search"}, nil
 		},
 	})
-	got, ok, err := s.memberships(context.Background(), store.Session{Login: "ana", Groups: []string{"showmino:platform", "showmino:search", "showmino:unknown"}})
+	got, ok, err := s.memberships(context.Background(), store.Session{Login: "ana", Groups: []string{"other:x", "showmino:ops", "showmino:platform", "showmino:search", "showmino:unknown"}})
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	want := []string{"showmino:billing", "showmino:frontend", "showmino:unknown"}
+	// Every team of the organization is asked, also one that owns nothing
+	// (ops stays, unknown goes: a team may create services for itself);
+	// another organization's group stays as the login gave it.
+	want := []string{"other:x", "showmino:billing", "showmino:frontend", "showmino:ops"}
 	if !slices.Equal(got, want) {
 		t.Errorf("groups = %v, want %v", got, want)
 	}

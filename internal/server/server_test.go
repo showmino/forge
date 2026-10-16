@@ -234,6 +234,20 @@ func TestWriterGroupsGitHubTeams(t *testing.T) {
 	if _, err := client.DeleteService(ctx, as("member", &forgev1.DeleteServiceRequest{Name: "services/lab"})); connect.CodeOf(err) != connect.CodePermissionDenied {
 		t.Errorf("team member delete: %v", err)
 	}
+	// Pointing a service at another repo is registering that repo: an
+	// admin's. Naming the team or repo it already has is not a change.
+	if _, err := client.UpdateService(ctx, as("member", &forgev1.UpdateServiceRequest{
+		Service:    &forgev1.Service{Name: "services/lab", RepoUrl: "https://github.com/showmino/payments"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"repo_url"}},
+	})); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "service.register") {
+		t.Errorf("changing the repo: %v", err)
+	}
+	if _, err := client.UpdateService(ctx, as("member", &forgev1.UpdateServiceRequest{
+		Service:    &forgev1.Service{Name: "services/lab", OwnerTeam: "test-team", DisplayName: "Lab"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"owner_team", "repo_url", "display_name"}},
+	})); err != nil {
+		t.Errorf("unchanged team and repo: %v", err)
+	}
 }
 
 // oidcProvider is a minimal issuer that signs real RS256 ID tokens.

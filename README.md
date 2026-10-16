@@ -215,8 +215,8 @@ everything. The members of a service's owner team may update it, deploy,
 promote and roll it back, manage its previews and plan and apply its
 resources outside production, and create services for their own teams. Only
 an admin may delete a service, change its address, register an existing
-repo, create a service for another team, move a service to another team or
-apply resources in production. A refusal names the action and the team it
+repo or point a service at another repo, create a service for another team,
+move a service to another team or apply resources in production. A refusal names the action and the team it
 needs. `forge auth can deploy.promote payments` prints yes or no (exit 0 or
 5), `forge auth status` shows your role and `forge service get` what you may
 do on that service.
