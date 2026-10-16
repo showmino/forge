@@ -62,8 +62,11 @@ type SessionOptions struct {
 	Members Members
 	Org     string
 	// Teams are the groups ("<org>:<team slug>") to keep current: the ones
-	// that grant something, that is, the writer groups.
+	// that grant something, that is, the admin groups.
 	Teams []string
+	// OwningTeams, when set, returns the slugs of the teams that own a
+	// service; they grant work on it, so they are kept current too.
+	OwningTeams func(ctx context.Context) ([]string, error)
 	// CLIIdle is how long a CLI session lasts unused (default 90 days), and
 	// WebLifetime how long a web session lasts at most (default 7 days).
 	CLIIdle, WebLifetime time.Duration
@@ -271,7 +274,21 @@ func (s *Sessions) memberships(ctx context.Context, ses store.Session) ([]string
 		return nil, false, err
 	}
 	groups := slices.Clone(ses.Groups)
-	for _, g := range s.o.Teams {
+	// The admin groups, the teams that own a service, and every team of the
+	// organization the login gave: a team may create services for itself,
+	// so a team that owns nothing yet still grants something.
+	teams := append(slices.Clone(s.o.Teams), ses.Groups...)
+	if s.o.OwningTeams != nil {
+		owning, err := s.o.OwningTeams(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		for _, slug := range owning {
+			teams = append(teams, s.o.Org+":"+slug)
+		}
+	}
+	slices.Sort(teams)
+	for _, g := range slices.Compact(teams) {
 		org, slug, ok := strings.Cut(g, ":")
 		if !ok || !strings.EqualFold(org, s.o.Org) {
 			continue // not a team of this organization: nothing to ask

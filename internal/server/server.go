@@ -105,6 +105,9 @@ func New(o Options) (http.Handler, error) {
 		o.OIDC.Scopes = []string{"openid", "email", "profile", "groups", "offline_access"}
 	}
 
+	if o.Authorizer.Org == "" {
+		o.Authorizer.Org = o.GitHubOrg
+	}
 	aud := &auditor{store: o.Audit, log: o.Logger}
 	o.Operations.setAuditor(aud)
 	if o.Sessions != nil {
@@ -117,7 +120,7 @@ func New(o Options) (http.Handler, error) {
 	opts := connect.WithInterceptors(
 		&logInterceptor{log: o.Logger},
 		&auditInterceptor{a: aud},
-		&authInterceptor{authn: WithSessions(o.Sessions, o.Authenticator), authz: o.Authorizer},
+		&authInterceptor{authn: WithSessions(o.Sessions, o.Authenticator), authz: o.Authorizer, teamOf: o.Catalog.teamOf},
 	)
 	mux := http.NewServeMux()
 	create := &creator{
@@ -206,6 +209,8 @@ func (a *authService) GetStatus(ctx context.Context, _ *connect.Request[forgev1.
 		Email:       p.Email,
 		Groups:      slices.Clone(p.Groups),
 		Permissions: slices.Clone(p.Permissions),
+		Admin:       isAdmin(p),
+		Teams:       teamsOf(p, a.o.Authorizer.Org),
 	}
 	if p.Session != "" && a.o.Sessions != nil {
 		if all, err := a.o.Sessions.o.Store.ListSessions(ctx, p.Subject); err == nil {

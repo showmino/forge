@@ -83,14 +83,21 @@ func (s *operationService) WatchOperation(ctx context.Context, req *connect.Requ
 }
 
 func (s *operationService) CancelOperation(ctx context.Context, req *connect.Request[forgev1.CancelOperationRequest]) (*connect.Response[forgev1.CancelOperationResponse], error) {
-	if err := require(ctx, PermServicesWrite); err != nil {
-		return nil, err
+	if _, ok := PrincipalFrom(ctx); !ok {
+		return nil, require(ctx, PermServicesWrite)
 	}
 	name := req.Msg.GetName()
 	if err := validOpName(name); err != nil {
 		return nil, err
 	}
-	noteAuditService(ctx, s.ops.auditService(name))
+	svc := s.ops.auditService(name)
+	noteAuditService(ctx, svc)
+	// The person who started an operation may always cancel it.
+	if op, ok := s.ops.Get(name); !ok || op.GetCreator() != actorOf(ctx) {
+		if err := authorize(ctx, ActOperationCancel, svc); err != nil {
+			return nil, err
+		}
+	}
 	op, ok := s.ops.Cancel(name)
 	if !ok {
 		return nil, opNotFound(name)

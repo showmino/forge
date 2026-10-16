@@ -47,6 +47,9 @@ const (
 	// AuthServiceDeleteSessionProcedure is the fully-qualified name of the AuthService's DeleteSession
 	// RPC.
 	AuthServiceDeleteSessionProcedure = "/forge.v1.AuthService/DeleteSession"
+	// AuthServiceTestPermissionsProcedure is the fully-qualified name of the AuthService's
+	// TestPermissions RPC.
+	AuthServiceTestPermissionsProcedure = "/forge.v1.AuthService/TestPermissions"
 )
 
 // AuthServiceClient is a client for the forge.v1.AuthService service.
@@ -67,6 +70,10 @@ type AuthServiceClient interface {
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// DeleteSession ends one of the caller's own sessions at once.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
+	// TestPermissions returns which of the actions the caller may do, on a
+	// service or, without one, anywhere: for clients to hide or disable what
+	// the caller may not do. The server checks every call all the same.
+	TestPermissions(context.Context, *connect.Request[v1.TestPermissionsRequest]) (*connect.Response[v1.TestPermissionsResponse], error)
 }
 
 // NewAuthServiceClient constructs a client for the forge.v1.AuthService service. By default, it
@@ -113,16 +120,24 @@ func NewAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(authServiceMethods.ByName("DeleteSession")),
 			connect.WithClientOptions(opts...),
 		),
+		testPermissions: connect.NewClient[v1.TestPermissionsRequest, v1.TestPermissionsResponse](
+			httpClient,
+			baseURL+AuthServiceTestPermissionsProcedure,
+			connect.WithSchema(authServiceMethods.ByName("TestPermissions")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // authServiceClient implements AuthServiceClient.
 type authServiceClient struct {
-	getServerInfo *connect.Client[v1.GetServerInfoRequest, v1.GetServerInfoResponse]
-	getStatus     *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
-	createSession *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
-	listSessions  *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
-	deleteSession *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	getServerInfo   *connect.Client[v1.GetServerInfoRequest, v1.GetServerInfoResponse]
+	getStatus       *connect.Client[v1.GetStatusRequest, v1.GetStatusResponse]
+	createSession   *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	listSessions    *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	deleteSession   *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	testPermissions *connect.Client[v1.TestPermissionsRequest, v1.TestPermissionsResponse]
 }
 
 // GetServerInfo calls forge.v1.AuthService.GetServerInfo.
@@ -150,6 +165,11 @@ func (c *authServiceClient) DeleteSession(ctx context.Context, req *connect.Requ
 	return c.deleteSession.CallUnary(ctx, req)
 }
 
+// TestPermissions calls forge.v1.AuthService.TestPermissions.
+func (c *authServiceClient) TestPermissions(ctx context.Context, req *connect.Request[v1.TestPermissionsRequest]) (*connect.Response[v1.TestPermissionsResponse], error) {
+	return c.testPermissions.CallUnary(ctx, req)
+}
+
 // AuthServiceHandler is an implementation of the forge.v1.AuthService service.
 type AuthServiceHandler interface {
 	// GetServerInfo needs no credentials. The CLI calls it before login to discover
@@ -168,6 +188,10 @@ type AuthServiceHandler interface {
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// DeleteSession ends one of the caller's own sessions at once.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
+	// TestPermissions returns which of the actions the caller may do, on a
+	// service or, without one, anywhere: for clients to hide or disable what
+	// the caller may not do. The server checks every call all the same.
+	TestPermissions(context.Context, *connect.Request[v1.TestPermissionsRequest]) (*connect.Response[v1.TestPermissionsResponse], error)
 }
 
 // NewAuthServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -210,6 +234,13 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(authServiceMethods.ByName("DeleteSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	authServiceTestPermissionsHandler := connect.NewUnaryHandler(
+		AuthServiceTestPermissionsProcedure,
+		svc.TestPermissions,
+		connect.WithSchema(authServiceMethods.ByName("TestPermissions")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.AuthService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AuthServiceGetServerInfoProcedure:
@@ -222,6 +253,8 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 			authServiceListSessionsHandler.ServeHTTP(w, r)
 		case AuthServiceDeleteSessionProcedure:
 			authServiceDeleteSessionHandler.ServeHTTP(w, r)
+		case AuthServiceTestPermissionsProcedure:
+			authServiceTestPermissionsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -249,4 +282,8 @@ func (UnimplementedAuthServiceHandler) ListSessions(context.Context, *connect.Re
 
 func (UnimplementedAuthServiceHandler) DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.DeleteSession is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) TestPermissions(context.Context, *connect.Request[v1.TestPermissionsRequest]) (*connect.Response[v1.TestPermissionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.TestPermissions is not implemented"))
 }

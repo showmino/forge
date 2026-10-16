@@ -32,6 +32,31 @@ service AuthService {
 
   // DeleteSession ends one of the caller's own sessions at once.
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse);
+
+  // TestPermissions returns which of the actions the caller may do, on a
+  // service or, without one, anywhere: for clients to hide or disable what
+  // the caller may not do. The server checks every call all the same.
+  rpc TestPermissions(TestPermissionsRequest) returns (TestPermissionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message TestPermissionsRequest {
+  // "services/{service}", or empty for actions about no one service
+  // (service.create, service.register).
+  string service = 1;
+  // Actions such as "deploy.promote", as the audit log names them. Empty
+  // asks for every action.
+  repeated string actions = 2;
+  // For service.create: the team the new service would belong to.
+  string owner_team = 3;
+}
+
+message TestPermissionsResponse {
+  // The actions of the request the caller may do, in the request's order.
+  repeated string allowed = 1;
+  // The caller's role toward the service: "admin", "team" or "reader".
+  string role = 2;
 }
 
 // Session is a login Forge keeps for one client. Its token is shown once,
@@ -123,4 +148,10 @@ message GetStatusResponse {
   repeated string permissions = 4;
   // The session this call was made with; unset for a call with an ID token.
   Session session = 5;
+  // True for a member of an admin group, who may do everything on every
+  // service.
+  bool admin = 6;
+  // The slugs of the organization's teams the caller is in. A team's members
+  // work on the services it owns.
+  repeated string teams = 7;
 }

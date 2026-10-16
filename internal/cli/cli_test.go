@@ -58,6 +58,8 @@ type harness struct {
 const (
 	writerToken = "t-writer"
 	readerToken = "t-reader"
+	// teamToken is a member of the team billing, not an admin.
+	teamToken = "t-team"
 )
 
 func newHarness(t *testing.T) *harness {
@@ -66,6 +68,7 @@ func newHarness(t *testing.T) *harness {
 	h.startAPI(server.StaticAuthenticator{
 		writerToken: {Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}},
 		readerToken: {Subject: "bo", Email: "bo@example.com", Groups: []string{"dev"}},
+		teamToken:   {Subject: "cy", Email: "cy@example.com", Groups: []string{"showmino:billing"}},
 	})
 	h.env = map[string]string{
 		"FORGE_CONFIG":  filepath.Join(h.dir, "config.yaml"),

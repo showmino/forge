@@ -197,7 +197,7 @@ func TestWriterGroupsGitHubTeams(t *testing.T) {
 		return err
 	}
 	for _, token := range []string{"member", "nogroups"} {
-		if err := reg(token, "x-"+token); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "services.write") {
+		if err := reg(token, "x-"+token); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "service.register") {
 			t.Errorf("%s register: %v", token, err)
 		}
 		if _, err := client.ListServices(ctx, as(token, &forgev1.ListServicesRequest{})); err != nil {
@@ -206,6 +206,47 @@ func TestWriterGroupsGitHubTeams(t *testing.T) {
 	}
 	if err := reg("platform", "payments"); err != nil {
 		t.Errorf("platform-engineering register: %v", err)
+	}
+	// The interceptor gives handlers the catalog's teams: a member of the
+	// owner team updates the service, others may not.
+	if _, err := client.RegisterService(ctx, as("platform", &forgev1.RegisterServiceRequest{ServiceId: "lab", Service: &forgev1.Service{OwnerTeam: "test-team"}})); err != nil {
+		t.Fatal(err)
+	}
+	upd := func(token, svc string) error {
+		_, err := client.UpdateService(ctx, as(token, &forgev1.UpdateServiceRequest{
+			Service:    &forgev1.Service{Name: "services/" + svc, DisplayName: "x"},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name"}},
+		}))
+		return err
+	}
+	if err := upd("member", "lab"); err != nil {
+		t.Errorf("team member update: %v", err)
+	}
+	if err := upd("member", "payments"); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "showmino:billing") {
+		t.Errorf("other team's service: %v", err)
+	}
+	if _, err := client.UpdateService(ctx, as("member", &forgev1.UpdateServiceRequest{
+		Service:    &forgev1.Service{Name: "services/lab", OwnerTeam: "billing"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"owner_team"}},
+	})); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "service.update.team") {
+		t.Errorf("moving to another team: %v", err)
+	}
+	if _, err := client.DeleteService(ctx, as("member", &forgev1.DeleteServiceRequest{Name: "services/lab"})); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("team member delete: %v", err)
+	}
+	// Pointing a service at another repo is registering that repo: an
+	// admin's. Naming the team or repo it already has is not a change.
+	if _, err := client.UpdateService(ctx, as("member", &forgev1.UpdateServiceRequest{
+		Service:    &forgev1.Service{Name: "services/lab", RepoUrl: "https://github.com/showmino/payments"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"repo_url"}},
+	})); connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "service.register") {
+		t.Errorf("changing the repo: %v", err)
+	}
+	if _, err := client.UpdateService(ctx, as("member", &forgev1.UpdateServiceRequest{
+		Service:    &forgev1.Service{Name: "services/lab", OwnerTeam: "test-team", DisplayName: "Lab"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"owner_team", "repo_url", "display_name"}},
+	})); err != nil {
+		t.Errorf("unchanged team and repo: %v", err)
 	}
 }
 

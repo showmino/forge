@@ -102,10 +102,13 @@ func validateCreate(req *forgev1.CreateServiceRequest) error {
 // run checks the caller and the request, applies request_id idempotency and
 // runs the pipeline.
 func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) error {
-	if err := require(ctx, PermServicesWrite); err != nil {
-		return err
+	if _, ok := PrincipalFrom(ctx); !ok {
+		return require(ctx, PermServicesWrite)
 	}
 	if err := validateCreate(req); err != nil {
+		return err
+	}
+	if err := authorizeTeam(ctx, ActServiceCreate, req.GetOwnerTeam()); err != nil {
 		return err
 	}
 	if c.templates == nil {
@@ -270,7 +273,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	// field) is found now, before anything is created.
 	svc := serviceFromManifest(m)
 	svc.RepoUrl = repoURL
-	if _, err := c.catalog.RegisterService(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true})); err != nil {
+	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true})); err != nil {
 		return nil, err
 	}
 	done("render", fmt.Sprintf("%d files", len(files)))
@@ -321,7 +324,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	done("push", shortSHA(sha)+" (CI started)")
 
 	started("register")
-	resp, err := c.catalog.RegisterService(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}))
+	resp, err := c.catalog.register(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}))
 	if err != nil {
 		return fail("register", err)
 	}

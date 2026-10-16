@@ -184,7 +184,11 @@ func (r *Resources) ApplyResourcePlan(ctx context.Context, req *connect.Request[
 	noteAuditTarget(ctx, resourceNamePrefix+target)
 	noteAuditDetail(ctx, "plan", planName)
 	noteAuditDetail(ctx, "environment", rec.Plan.GetEnv())
-	if err := require(ctx, PermServicesWrite); err != nil {
+	apply := ActResourceApply
+	if rec.Plan.GetEnv() == "production" {
+		apply = ActResourceApplyProduction
+	}
+	if err := authorize(ctx, apply, rec.Plan.GetService()); err != nil {
 		return nil, err
 	}
 	if err := r.applicable(ctx, rec, m); err != nil {

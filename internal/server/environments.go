@@ -253,8 +253,8 @@ func (e *Environments) ExtendEnvironment(ctx context.Context, req *connect.Reque
 	if err := e.ready(); err != nil {
 		return nil, err
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
-		return nil, err
+	if _, ok := PrincipalFrom(ctx); !ok {
+		return nil, require(ctx, PermServicesWrite)
 	}
 	id, err := parseEnvName(req.Msg.GetName())
 	if err != nil {
@@ -272,6 +272,9 @@ func (e *Environments) ExtendEnvironment(ctx context.Context, req *connect.Reque
 		return nil, envErr(id, err)
 	}
 	noteAuditService(ctx, servicePrefix+ns.Labels[labelService])
+	if err := authorizePreview(ctx, ActEnvironmentExtend, e.envFromNamespace(ns)); err != nil {
+		return nil, err
+	}
 	if ns.Annotations[annState] == stateDestroying {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s is being destroyed", envNamePrefix, id))
 	}
@@ -288,8 +291,8 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 	if err := e.ready(); err != nil {
 		return nil, err
 	}
-	if err := require(ctx, PermServicesWrite); err != nil {
-		return nil, err
+	if _, ok := PrincipalFrom(ctx); !ok {
+		return nil, require(ctx, PermServicesWrite)
 	}
 	id, err := parseEnvName(req.Msg.GetName())
 	if err != nil {
@@ -310,6 +313,9 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 		return nil, envErr(id, err)
 	}
 	noteAuditService(ctx, env.GetService())
+	if err := authorizePreview(ctx, ActEnvironmentDestroy, env); err != nil {
+		return nil, err
+	}
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Environment: env}), nil
 	}
@@ -322,4 +328,13 @@ func (e *Environments) DestroyEnvironment(ctx context.Context, req *connect.Requ
 		return nil, envErr(id, errNoEnv)
 	}
 	return connect.NewResponse(&forgev1.DestroyEnvironmentResponse{Operation: op, Environment: env}), nil
+}
+
+// authorizePreview checks that the caller may do action on a preview: the
+// person who made it may, and so may the team of its service.
+func authorizePreview(ctx context.Context, action string, env *forgev1.Environment) error {
+	if _, ok := PrincipalFrom(ctx); ok && env.GetCreator() != "" && env.GetCreator() == actorOf(ctx) {
+		return nil
+	}
+	return authorize(ctx, action, env.GetService())
 }

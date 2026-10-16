@@ -21,9 +21,10 @@
 #   FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 #
 # Login is through GitHub (Dex's GitHub connector): only members of
-# FORGE_DEX_GITHUB_ORG (default FORGE_GITHUB_ORG) log in, and only the teams
-# in FORGE_WRITER_GROUPS (default <org>:platform-engineering; never empty) may
-# change anything. Dex reads the OAuth App's client_id and client_secret from
+# FORGE_DEX_GITHUB_ORG (default FORGE_GITHUB_ORG) log in. The teams in
+# FORGE_WRITER_GROUPS (default <org>:platform-engineering; never empty) are
+# forge-api's admins, who may change everything; the members of a service's
+# owner team may work on that service. Dex reads the OAuth App's client_id and client_secret from
 # the Secret dex-github, which the 1Password operator can create:
 #   FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github ... | kubectl apply -f -
 #

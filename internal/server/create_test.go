@@ -142,6 +142,7 @@ func newCreateEnv(t *testing.T, src TemplateSource, repos *fakeRepos) *createEnv
 		Authenticator: StaticAuthenticator{
 			"writer": {Subject: "ana", Groups: []string{"platform"}},
 			"reader": {Subject: "bo", Groups: []string{"dev"}},
+			"member": {Subject: "cy", Groups: []string{"showmino:billing"}},
 		},
 		Authorizer: Authorizer{WriterGroups: []string{"platform"}},
 		Catalog:    e.catalog,
@@ -204,7 +205,7 @@ func TestCreatePreflight(t *testing.T) {
 		msg   string
 	}{
 		{"anonymous", newCreateEnv(t, createRelease, newFakeRepos()), "nope", validRequest(), connect.CodeUnauthenticated, ""},
-		{"reader", newCreateEnv(t, createRelease, newFakeRepos()), "reader", validRequest(), connect.CodePermissionDenied, "services.write"},
+		{"reader", newCreateEnv(t, createRelease, newFakeRepos()), "reader", validRequest(), connect.CodePermissionDenied, "service.create"},
 		{"bad id", newCreateEnv(t, createRelease, newFakeRepos()), "writer", with(func(r *forgev1.CreateServiceRequest) { r.ServiceId = "Pay_ments" }), connect.CodeInvalidArgument, "service_id"},
 		{"bad template", newCreateEnv(t, createRelease, newFakeRepos()), "writer", with(func(r *forgev1.CreateServiceRequest) { r.Template = "templates/Bad" }), connect.CodeInvalidArgument, "template"},
 		{"no team", newCreateEnv(t, createRelease, newFakeRepos()), "writer", with(func(r *forgev1.CreateServiceRequest) { r.OwnerTeam = " " }), connect.CodeInvalidArgument, "owner_team"},
@@ -301,6 +302,28 @@ func TestCreateService(t *testing.T) {
 	}
 	if !registered(t, e.catalog, "services/payments") {
 		t.Error("service not registered")
+	}
+}
+
+// TestCreateByTeamMember runs the whole pipeline as a member of the owner
+// team, who is not an admin: the register step must not need an admin.
+func TestCreateByTeamMember(t *testing.T) {
+	t.Parallel()
+	e := newCreateEnv(t, createRelease, newFakeRepos())
+	msgs, err := e.create(context.Background(), "member", validRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, last := steps(msgs); last.GetService().GetName() != "services/payments" {
+		t.Errorf("last: %v", last)
+	}
+	other := validRequest()
+	other.ServiceId, other.OwnerTeam, other.RequestId = "web", "frontend", "req-2"
+	if _, err := e.create(context.Background(), "member", other); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("create for another team: %v", err)
+	}
+	if _, ok := e.repos.files("web"); ok {
+		t.Error("a refused create made a repo")
 	}
 }
 
