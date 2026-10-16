@@ -16,6 +16,7 @@ import (
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/policy"
 )
 
 // deployFixture is forge-api with deploys on fakes: service "payments"
@@ -63,7 +64,12 @@ func newDeployFixtureAuth(t *testing.T, noArgo bool, tweak func(*DeployOptions, 
 	})); err != nil {
 		t.Fatal(err)
 	}
+	rules, err := policy.New(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	o := DeployOptions{
+		Policy:  rules,
 		Cluster: f.cluster, GitHub: gh, Images: f.images, Repo: f.repo, Catalog: catalog, Operations: f.ops,
 		Org: "showmino", Domain: "10.150.1.222.nip.io",
 		ImagePoll: 5 * time.Millisecond, Poll: 5 * time.Millisecond,

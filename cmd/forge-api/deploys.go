@@ -12,6 +12,7 @@ import (
 	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/server"
 	"github.com/showmino/forge/internal/store"
+	"github.com/showmino/forge/policy"
 )
 
 // withCITokens makes forge-api accept GitHub Actions OIDC tokens next to
@@ -104,7 +105,14 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 			*list.to = append(*list.to, v)
 		}
 	}
+	// The promotion rules: compiled here, with no request to bound them.
+	rules, err := policy.New(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	log.Info("promotions are checked by policy", "policy_rules", rules.Fingerprint())
 	return server.NewDeploys(server.DeployOptions{
+		Policy:        rules,
 		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS, ArgoURL: argoURL,
 		SecretVaults: vaults, SecretDeniedItems: denied,
 		Cluster: cluster, GitHub: gh, Images: images,

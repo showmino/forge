@@ -319,6 +319,15 @@ version to the deploy repo, which Argo CD then rolls out; `forge deploy status`,
 `history`, `rollback` and `promote` follow and change it. forge-api serves them
 with `--deploys`.
 
+A promotion goes ahead only when staging is ready: Argo CD reports it Synced
+and Healthy, at its latest deploy. Otherwise `forge deploy promote` (and its
+`--dry-run`) is refused for everyone, admins too, with the reasons (exit 5):
+`staging is Degraded; it must be Healthy to be promoted`. Repair staging, or
+wait for the deploy to sync, and promote again. A rollback is never checked,
+so production can always be rolled back. The rules are `policy/deploys.rego`
+(package `forge.deploys`), built into forge-api like the resource rules; the
+audit log records `policy: passed` or `denied` on each promotion.
+
 From GitHub Actions, `forge deploy start --env staging` needs no secret: with
 `permissions: id-token: write`, the CLI requests the job's OIDC token
 (audience `forge`) and forge-api accepts it when `--deploys` is on. The token

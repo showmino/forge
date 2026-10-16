@@ -19,6 +19,7 @@ import (
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/store"
+	"github.com/showmino/forge/policy"
 )
 
 const (
@@ -55,6 +56,9 @@ type DeployOptions struct {
 	// Resources, when set, says which database a service has in an
 	// environment, so its pods get DATABASE_URL.
 	Resources store.ResourceStore
+	// Policy, when set, checks every promotion (package forge.deploys) after
+	// the caller is authorized. nil promotes without the check.
+	Policy *policy.Engine
 	// Org is the GitHub org services' repos must be in.
 	Org string
 	// Domain: hosts are <service>.<env>.<Domain>.
@@ -657,11 +661,14 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err := authorize(ctx, ActDeployPromote, servicePrefix+svc); err != nil {
 		return nil, err
 	}
-	src, _, err := d.current(ctx, svc, from)
+	src, srcCommit, err := d.current(ctx, svc, from)
 	if connect.CodeOf(err) == connect.CodeNotFound {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s has nothing in %s to promote", req.Msg.GetService(), from))
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := d.promotionAllowed(ctx, svc, from, to, src, srcCommit); err != nil {
 		return nil, err
 	}
 	bump, err := bumpOf(req.Msg.GetBump(), to)
