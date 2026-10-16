@@ -20,6 +20,7 @@ on the owner's k3s cluster.
 | `showmino/forge-templates` | The templates `forge create` scaffolds from (`go-grpc`, `nextjs`), versioned by repo-wide tags |
 | `showmino/forge-deploys` | The GitOps repo. Only forge-api writes to it; never edit it by hand |
 | `showmino/kubernetes` | The owner's cluster repo (Cloudflare tunnel, DNS records, Argo CD). Open a pull request there; the owner merges |
+| `showmino/techdocs` | The organization's documentation, itself a Forge service. The user documentation of Forge lives in its `docs/forge/` |
 
 ## Read first
 
@@ -99,6 +100,22 @@ a yes to the next one.
   anything on the path to production) gets **one independent review** before
   it merges: a second model or person reading the diff cold. Fix what it
   finds; say what you chose not to fix and why.
+
+### Every feature is documented in techdocs
+
+- Each new feature, and each change to what a feature does (a command, a
+  flag, a forge.yaml field, a dashboard page, an error people will meet), also
+  gets its user documentation in `showmino/techdocs`, under `docs/forge/`
+  (the owner's rule, 2026-10-16). It is part of the same work: open the
+  techdocs pull request alongside the forge, forge-web or forge-templates one,
+  not later.
+- Write it for the people who use Forge: what to do and the commands to type,
+  checked against the code. Update the page that covers the feature, and
+  `16-command-reference.md` when a command or flag changes (it is the output
+  of `forge <command> --help`). Run `forge docs lint` on the checkout.
+- A techdocs pull request follows the same merging rules as here. Merging it
+  deploys techdocs to staging; promoting it to production needs the owner's OK
+  like any other promotion.
 
 ### Secrets
 
@@ -226,6 +243,9 @@ Knowing this file is not the same as having access.
   `docs/agents/verifying.md` updates that file **in the same pull request**.
   After a rollout, `verifying.md` gets the new image, the new render command
   and what was checked.
+- A change to what users see also updates `docs/forge/` in
+  `showmino/techdocs` (see "Every feature is documented in techdocs" above).
+  `README.md` here stays the reference next to the code.
 - Do not copy these rules into a tool's own file or memory and edit them
   there. If a tool needs a file of its own, make it a pointer to this one.
 - If you find something here that is no longer true, fix it, or tell the
