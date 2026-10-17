@@ -3,6 +3,13 @@
 set -eu
 dir=$(dirname "$0")
 fail=0
+# FORGE_GITHUB_ORG is required by render.sh itself (Dex always needs an org);
+# default it here so every check below need not set it, same as showmino's
+# own live.env does. A check that exercises the org explicitly overrides it.
+export FORGE_GITHUB_ORG=${FORGE_GITHUB_ORG:-showmino}
+# FORGE_PREVIEW_PULL_SECRET is required whenever previews are on; default it
+# too, for the same reason.
+export FORGE_PREVIEW_PULL_SECRET=${FORGE_PREVIEW_PULL_SECRET:-mino-ghcr}
 check() { # check <description> <command...>
   desc=$1; shift
   if "$@"; then echo "ok   $desc"; else echo "FAIL $desc"; fail=1; fi
@@ -38,6 +45,13 @@ check "no App: no #app markers"       sh -c "! printf '%s' \"\$1\" | grep -q '#a
 check "App: id"                       sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_GITHUB_APP_ID, value: \"5239131\"'" _ "$with"
 check "App: key file"                 sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key'" _ "$with"
 check "App: org and template repo"    sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_GITHUB_ORG, value: showmino' && printf '%s' \"\$1\" | grep -q 'FORGE_TEMPLATES_REPO, value: showmino/forge-templates'" _ "$with"
+check "no FORGE_GITHUB_ORG: render.sh refuses" sh -c "! FORGE_GITHUB_ORG= FORGE_GITHUB_APP_ID=5239131 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
+check "no previews: no FORGE_PREVIEW_PULL_SECRET needed" sh -c "env -u FORGE_PREVIEW_PULL_SECRET sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
+check "previews, no FORGE_PREVIEW_PULL_SECRET: render.sh refuses" sh -c "! env -u FORGE_PREVIEW_PULL_SECRET FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
+check "App: deploy repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_DEPLOY_REPO, value: showmino/forge-deploys'" _ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
+check "App: cli repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_CLI_REPO, value: showmino/forge'" _ "$with"
+check "deploys.yaml has no literal showmino" sh -c "! FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 2>/dev/null | awk '/^# Deploys:/ {on=1} on' | grep -q showmino" _ "$dir/render.sh"
+check "deploys.yaml follows a different org" sh -c "printf '%s' \"\$1\" | grep -q 'someorg/forge-deploys' && printf '%s' \"\$1\" | grep -q 'someorg/forge'" _ "$(FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
 check "App: secret volume, read-only" sh -c "printf '%s' \"\$1\" | grep -q 'secretName: forge-github-app' && printf '%s' \"\$1\" | grep -q 'readOnly: true'" _ "$with"
 check "App: key readable by the API"  sh -c "printf '%s' \"\$1\" | grep -q 'fsGroup: 65532' && printf '%s' \"\$1\" | grep -q 'defaultMode: 0440'" _ "$with"
 check "App: no #app markers"          sh -c "! printf '%s' \"\$1\" | grep -q '#app'" _ "$with"

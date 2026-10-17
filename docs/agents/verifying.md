@@ -111,7 +111,7 @@ The Phase 3 exit gate (2026-10-09, 4m37s): `time (bin/forge create gate-<x> --te
 | Service got a random pool IP | Wrong MetalLB annotation, or an existing allocation: delete the Service and re-apply |
 | forge-api logs "templates are not configured" | Rendered without `FORGE_GITHUB_APP_ID` |
 | forge-api pod stuck in `ContainerCreating` (secret not found) | The 1Password item or its field is missing; check `kubectl -n forge describe onepassworditem forge-github-app` |
-| forge-api `ErrImagePull` after enabling previews | The `forge-api` ServiceAccount lacks the pull secret (`FORGE_PREVIEW_PULL_SECRET`, default `mino-ghcr`) |
+| forge-api `ErrImagePull` after enabling previews | The `forge-api` ServiceAccount lacks the pull secret (`FORGE_PREVIEW_PULL_SECRET`, required once previews are configured) |
 | An env stays in `image` with "registry: ..." | The pull secret's login is wrong, or lacks read on the org's packages |
 | An env is READY but its URL answers 404 | The HTTPRoute was not accepted: check `kubectl -n preview-<x> describe httproute` and the Gateway's `allowedRoutes` |
 | Every command warns "older than ... 0.1.0" | Go pseudo-version not treated as dev (fixed in `internal/version`) |

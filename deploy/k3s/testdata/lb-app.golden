@@ -136,6 +136,7 @@ spec:
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key}
             - {name: FORGE_GITHUB_ORG, value: showmino}
             - {name: FORGE_TEMPLATES_REPO, value: showmino/forge-templates}
+            - {name: FORGE_CLI_REPO, value: showmino/forge}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
           ports:

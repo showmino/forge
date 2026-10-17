@@ -144,10 +144,12 @@ spec:
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key} #app
             - {name: FORGE_GITHUB_ORG, value: ${FORGE_GITHUB_ORG}} #app
             - {name: FORGE_TEMPLATES_REPO, value: ${FORGE_TEMPLATES_REPO}} #app
+            - {name: FORGE_CLI_REPO, value: ${FORGE_REPO}} #app
             - {name: FORGE_PREVIEWS, value: "1"} #previews
             - {name: FORGE_PREVIEW_DOMAIN, value: preview.${PREVIEW_IP}.nip.io} #previews
             - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/${PULL_SECRET}} #previews
             - {name: FORGE_DEPLOYS, value: "1"} #deploys
+            - {name: FORGE_DEPLOY_REPO, value: ${FORGE_DEPLOY_REPO}} #deploys
             - {name: FORGE_ARGOCD_URL, value: "${FORGE_ARGOCD_URL}"} #argocd
             - {name: FORGE_SECRET_VAULTS, value: "${FORGE_SECRET_VAULTS}"} #vaults
             - {name: FORGE_SECRET_DENIED_ITEMS, value: "${FORGE_SECRET_DENIED_ITEMS}"} #vaults

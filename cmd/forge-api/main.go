@@ -63,19 +63,19 @@ func run() error {
 		printVersion = flag.Bool("version", false, "print the version and exit")
 
 		templatesDir  = flag.String("templates-dir", env("FORGE_TEMPLATES_DIR", ""), "serve templates from this local checkout as version 'dev' (development)")
-		templatesRepo = flag.String("templates-repo", env("FORGE_TEMPLATES_REPO", "showmino/forge-templates"), "GitHub repo (owner/name) whose semver tags are template releases")
+		templatesRepo = flag.String("templates-repo", env("FORGE_TEMPLATES_REPO", ""), "GitHub repo (owner/name) whose semver tags are template releases; required with the GitHub App unless --templates-dir is set")
 		appID         = flag.String("github-app-id", env("FORGE_GITHUB_APP_ID", ""), "GitHub App ID forge-api acts as")
 		appKey        = flag.String("github-app-key-file", env("FORGE_GITHUB_APP_KEY_FILE", ""), "file with the GitHub App's private key (PEM)")
-		githubOrg     = flag.String("github-org", env("FORGE_GITHUB_ORG", "showmino"), "GitHub org the App is installed on")
+		githubOrg     = flag.String("github-org", env("FORGE_GITHUB_ORG", ""), "GitHub org the App is installed on; required with the GitHub App")
 
 		previewsOn     = flag.Bool("previews", env("FORGE_PREVIEWS", "") == "1" || env("FORGE_PREVIEWS", "") == "true", "serve preview environments (needs the GitHub App and Kubernetes access)")
 		previewDomain  = flag.String("preview-domain", env("FORGE_PREVIEW_DOMAIN", ""), "preview hosts are <environment>.<domain>, for example preview.10.150.1.222.nip.io")
 		previewGateway = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
-		previewPull    = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", "forge/mino-ghcr"), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images")
+		previewPull    = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
 		previewMax     = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
 
 		deploysOn     = flag.Bool("deploys", env("FORGE_DEPLOYS", "") == "1" || env("FORGE_DEPLOYS", "") == "true", "serve deploys to staging and production through Argo CD (needs --previews)")
-		deployRepo    = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", "showmino/forge-deploys"), "GitOps repo (owner/name) Forge commits deploys to")
+		deployRepo    = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", ""), "GitOps repo (owner/name) Forge commits deploys to; required with --deploys")
 		deployDomain  = flag.String("deploy-domain", env("FORGE_DEPLOY_DOMAIN", ""), "deploy hosts are <service>.<env>.<domain> (default: the preview domain without 'preview.')")
 		publicDomains = flag.String("public-domains", env("FORGE_PUBLIC_DOMAINS", ""), "domains services get public addresses under, each with its DNS zone's name, the default first: example.com=example-com,other.io=other-io (empty: internal addresses only)")
 		publicTunnel  = flag.String("public-dns-tunnel", env("FORGE_PUBLIC_DNS_TUNNEL", "production"), "which of the platform's tunnels public DNS records point at")
@@ -91,7 +91,7 @@ func run() error {
 		runnerAPIURL = flag.String("runner-api-url", env("FORGE_RUNNER_API_URL", "http://forge-api-runner.forge.svc:8081"), "URL at which the runner Jobs reach --runner-addr")
 
 		cliDir  = flag.String("cli-dir", env("FORGE_CLI_DIR", ""), "directory of forge CLI builds served at /cli/forge-linux-<arch> for CI jobs")
-		cliRepo = flag.String("cli-repo", env("FORGE_CLI_REPO", "showmino/forge"), "GitHub repo (owner/name) whose releases 'forge upgrade' downloads through /cli/releases")
+		cliRepo = flag.String("cli-repo", env("FORGE_CLI_REPO", ""), "GitHub repo (owner/name) whose releases 'forge upgrade' downloads through /cli/releases (empty: that proxy is off)")
 	)
 	flag.Parse()
 	if *printVersion {

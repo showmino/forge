@@ -12,10 +12,10 @@ metadata:
   name: forge-services
   namespace: argocd
 spec:
-  description: Forge services, deployed by forge-api through showmino/forge-deploys
+  description: Forge services, deployed by forge-api through ${FORGE_DEPLOY_REPO}
   sourceRepos:
-    - https://github.com/showmino/forge.git
-    - https://github.com/showmino/forge-deploys.git
+    - https://github.com/${FORGE_REPO}.git
+    - https://github.com/${FORGE_DEPLOY_REPO}.git
   destinations:
     - {server: https://kubernetes.default.svc, namespace: "!docs-dev-staging"}
     - {server: https://kubernetes.default.svc, namespace: "*-staging"}
@@ -52,7 +52,7 @@ spec:
   goTemplateOptions: ["missingkey=error"]
   generators:
     - git:
-        repoURL: https://github.com/showmino/forge-deploys.git
+        repoURL: https://github.com/${FORGE_DEPLOY_REPO}.git
         revision: main
         directories:
           - path: services/*/staging
@@ -70,14 +70,14 @@ spec:
     spec:
       project: forge-services
       sources:
-        - repoURL: https://github.com/showmino/forge.git
+        - repoURL: https://github.com/${FORGE_REPO}.git
           targetRevision: ${DEPLOY_CHART_REVISION}
           path: deploy/argocd/chart
           helm:
             releaseName: '{{ index .path.segments 1 }}'
             valueFiles:
               - '$values/{{ .path.path }}/values.yaml'
-        - repoURL: https://github.com/showmino/forge-deploys.git
+        - repoURL: https://github.com/${FORGE_DEPLOY_REPO}.git
           targetRevision: main
           ref: values
       destination:
