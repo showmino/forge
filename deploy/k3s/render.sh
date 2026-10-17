@@ -110,13 +110,15 @@ case $image in
 esac
 
 app_id=${FORGE_GITHUB_APP_ID:-}
-org=${FORGE_GITHUB_ORG:-showmino}
-templates_repo=${FORGE_TEMPLATES_REPO:-showmino/forge-templates}
+org=${FORGE_GITHUB_ORG:?FORGE_GITHUB_ORG is required}
+templates_repo=${FORGE_TEMPLATES_REPO:-$org/forge-templates}
+forge_repo=${FORGE_REPO:-$org/forge}
+deploy_repo=${FORGE_DEPLOY_REPO:-$org/forge-deploys}
 case $app_id in
   *[!0-9]*) echo "invalid FORGE_GITHUB_APP_ID: $app_id" >&2; exit 2 ;;
 esac
-case $org$templates_repo in
-  *[!A-Za-z0-9./_-]*) echo "invalid FORGE_GITHUB_ORG or FORGE_TEMPLATES_REPO" >&2; exit 2 ;;
+case $org$templates_repo$forge_repo$deploy_repo in
+  *[!A-Za-z0-9./_-]*) echo "invalid FORGE_GITHUB_ORG, FORGE_TEMPLATES_REPO, FORGE_REPO or FORGE_DEPLOY_REPO" >&2; exit 2 ;;
 esac
 onepassword_item=${FORGE_ONEPASSWORD_ITEM:-}
 case $onepassword_item in
@@ -148,13 +150,17 @@ case $dex_onepassword_item in
   *[!A-Za-z0-9./_-]*) echo "invalid FORGE_DEX_ONEPASSWORD_ITEM: $dex_onepassword_item" >&2; exit 2 ;;
 esac
 preview_ip=${FORGE_PREVIEW_IP:-}
-pull_secret=${FORGE_PREVIEW_PULL_SECRET:-mino-ghcr}
 case $preview_ip in
   *[!0-9.]*) echo "invalid FORGE_PREVIEW_IP: $preview_ip" >&2; exit 2 ;;
 esac
-case $pull_secret in
-  ''|*[!a-z0-9.-]*) echo "invalid FORGE_PREVIEW_PULL_SECRET: $pull_secret" >&2; exit 2 ;;
-esac
+if [ -n "$preview_ip" ]; then
+  pull_secret=${FORGE_PREVIEW_PULL_SECRET:?FORGE_PREVIEW_PULL_SECRET is required when previews are configured}
+  case $pull_secret in
+    *[!a-z0-9.-]*) echo "invalid FORGE_PREVIEW_PULL_SECRET: $pull_secret" >&2; exit 2 ;;
+  esac
+else
+  pull_secret= # unvalidated without previews; keep it out of the sed
+fi
 if [ -n "$preview_ip" ] && [ -z "$app_id" ]; then
   echo "FORGE_PREVIEW_IP needs FORGE_GITHUB_APP_ID" >&2; exit 2
 fi
@@ -370,7 +376,7 @@ fi
     cat "$dir/resources.yaml.tmpl"
   fi
 } | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
-        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
+        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |
   PUBLIC_LISTENERS=$public_listeners awk '/#public-listeners$/ { printf "%s", ENVIRON["PUBLIC_LISTENERS"]; next } { print }'

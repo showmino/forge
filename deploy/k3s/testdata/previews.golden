@@ -137,6 +137,7 @@ spec:
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key}
             - {name: FORGE_GITHUB_ORG, value: showmino}
             - {name: FORGE_TEMPLATES_REPO, value: showmino/forge-templates}
+            - {name: FORGE_CLI_REPO, value: showmino/forge}
             - {name: FORGE_PREVIEWS, value: "1"}
             - {name: FORGE_PREVIEW_DOMAIN, value: preview.10.150.1.222.nip.io}
             - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/mino-ghcr}

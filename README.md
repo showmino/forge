@@ -123,7 +123,7 @@ On a single-node k3s with the bundled Traefik ingress, import a local image:
 ```sh
 make image
 docker save forge-api:dev | sudo k3s ctr images import -
-deploy/k3s/render.sh <node-ip>.nip.io | kubectl apply -f -
+FORGE_GITHUB_ORG=<org> deploy/k3s/render.sh <node-ip>.nip.io | kubectl apply -f -
 
 forge context set k3s --api http://forge.<node-ip>.nip.io --use
 forge auth login
@@ -135,7 +135,7 @@ to a registry and give Dex and forge-api their own LoadBalancer IPs (MetalLB):
 ```sh
 docker build -t ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD) .
 docker push ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD)
-FORGE_API_IMAGE=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD) \
+FORGE_API_IMAGE=ghcr.io/showmino/forge-api:$(git rev-parse --short HEAD) FORGE_GITHUB_ORG=<org> \
   deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 # private image: copy a dockerconfigjson pull secret into 'forge', then
 kubectl -n forge patch serviceaccount default -p '{"imagePullSecrets":[{"name":"<secret>"}]}'
@@ -151,31 +151,34 @@ in the Secret `forge-github-app` (key `github_app_private_key`), or let the
 
 ```sh
 kubectl -n forge create secret generic forge-github-app --from-file=github_app_private_key=<key.pem>
-FORGE_GITHUB_APP_ID=<app-id> FORGE_API_IMAGE=<image> deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+FORGE_GITHUB_ORG=<org> FORGE_GITHUB_APP_ID=<app-id> FORGE_API_IMAGE=<image> deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 # or, with the 1Password operator instead of the manual Secret:
-#   FORGE_ONEPASSWORD_ITEM=vaults/<vault>/items/<item> FORGE_GITHUB_APP_ID=<app-id> ...
+#   FORGE_ONEPASSWORD_ITEM=vaults/<vault>/items/<item> FORGE_GITHUB_ORG=<org> FORGE_GITHUB_APP_ID=<app-id> ...
 ```
 
-`FORGE_GITHUB_ORG` (default `showmino`) and `FORGE_TEMPLATES_REPO` (default
-`showmino/forge-templates`) pick the org for new repos and the templates repo.
+`FORGE_GITHUB_ORG` is required by every render (Dex's GitHub connector needs
+it regardless of the App). `FORGE_TEMPLATES_REPO`, `FORGE_REPO` and
+`FORGE_DEPLOY_REPO` default to `<org>/forge-templates`, `<org>/forge` and
+`<org>/forge-deploys`; set them to point at different repos.
 
 Preview environments (`forge env`) need the App too, plus a free LoadBalancer IP
 for their Gateway (Gateway API with Istio's `istio` class) and a dockerconfigjson
 pull secret in namespace `forge` that can read the services' images:
 
 ```sh
-FORGE_PREVIEW_IP=<gateway-ip> FORGE_PREVIEW_PULL_SECRET=<secret> FORGE_GITHUB_APP_ID=<app-id> ... \
+FORGE_GITHUB_ORG=<org> FORGE_PREVIEW_IP=<gateway-ip> FORGE_PREVIEW_PULL_SECRET=<secret> FORGE_GITHUB_APP_ID=<app-id> ... \
   deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 ```
 
 Previews are then reached at `http://<env>.preview.<gateway-ip>.nip.io`.
 
-Deploys (`forge deploy`) need previews, the GitOps repo `showmino/forge-deploys`
-(private, with an initial commit), and a commit on origin/main that Argo CD
-takes the chart from (an unpushed commit makes every Application fail):
+Deploys (`forge deploy`) need previews, the GitOps repo (`FORGE_DEPLOY_REPO`,
+default `<org>/forge-deploys`; private, with an initial commit), and a commit
+on origin/main that Argo CD takes the chart from (an unpushed commit makes
+every Application fail):
 
 ```sh
-FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=<gateway-ip> ... \
+FORGE_GITHUB_ORG=<org> FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=<gateway-ip> ... \
   deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 ```
 
