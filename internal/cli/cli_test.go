@@ -91,6 +91,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Version:       version,
 		CLIReleases:   h.cliReleases,
 		CLIRepo:       "showmino/forge",
+		GitHubOrg:     "showmino",
 		OIDC:          server.OIDC{Issuer: h.issuer, ClientID: "forge-cli"},
 		Authenticator: authn,
 		Authorizer:    server.Authorizer{WriterGroups: []string{"platform"}},

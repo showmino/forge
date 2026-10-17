@@ -182,6 +182,7 @@ func TestWriterGroupsGitHubTeams(t *testing.T) {
 			"nogroups": {Subject: "cy"},
 		},
 		Authorizer: Authorizer{WriterGroups: []string{"showmino:platform-engineering"}},
+		GitHubOrg:  "showmino",
 	})
 	if err != nil {
 		t.Fatal(err)

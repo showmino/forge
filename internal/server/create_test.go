@@ -215,6 +215,7 @@ func newCreateEnvWith(t *testing.T, src TemplateSource, repos *fakeRepos, deploy
 		Authorizer: Authorizer{WriterGroups: []string{"platform"}},
 		Catalog:    e.catalog,
 		Templates:  src,
+		GitHubOrg:  "showmino",
 	}
 	if repos != nil {
 		opts.Repos = repos
@@ -646,6 +647,7 @@ func TestAuditFailedCreateIsNotOK(t *testing.T) {
 		Templates:     createRelease,
 		Repos:         repos,
 		Audit:         audit,
+		GitHubOrg:     "showmino",
 	})
 	if err != nil {
 		t.Fatal(err)

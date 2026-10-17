@@ -50,7 +50,8 @@ type Options struct {
 	// Repos creates the repos of new services; nil answers FAILED_PRECONDITION
 	// to CreateService unless validate_only.
 	Repos RepoHost
-	// GitHubOrg is the org new repos are created in (default "showmino").
+	// GitHubOrg is the org new repos are created in; empty when no
+	// GitHub-App-backed feature is configured.
 	GitHubOrg string
 	// Operations holds long-running work; nil creates an empty store.
 	Operations *Operations
@@ -82,9 +83,6 @@ func New(o Options) (http.Handler, error) {
 	}
 	if o.Catalog == nil {
 		o.Catalog = NewCatalog(nil)
-	}
-	if o.GitHubOrg == "" {
-		o.GitHubOrg = "showmino"
 	}
 	if o.Operations == nil {
 		o.Operations = NewOperations(nil)
