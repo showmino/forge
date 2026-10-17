@@ -144,10 +144,12 @@ spec:
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key}
             - {name: FORGE_GITHUB_ORG, value: showmino}
             - {name: FORGE_TEMPLATES_REPO, value: showmino/forge-templates}
+            - {name: FORGE_CLI_REPO, value: showmino/forge}
             - {name: FORGE_PREVIEWS, value: "1"}
             - {name: FORGE_PREVIEW_DOMAIN, value: preview.10.150.1.222.nip.io}
             - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/mino-ghcr}
             - {name: FORGE_DEPLOYS, value: "1"}
+            - {name: FORGE_DEPLOY_REPO, value: showmino/forge-deploys}
             - {name: FORGE_ARGOCD_URL, value: "https://argocd.showmino.com"}
             - {name: FORGE_SECRET_VAULTS, value: "Kube"}
             - {name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,forge-dex-github,ghcr-secret,arc-runners,argocd-repo-kubernetes,cert-manager,Cloudflare,crossplane-cloudflare,crossplane-github-provider-creds,grafana-admin-credentials,renovate"}
