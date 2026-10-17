@@ -38,6 +38,9 @@ func TestGitHubApp(t *testing.T) {
 	if app, err := githubApp("", "", "showmino"); app != nil || err != nil {
 		t.Errorf("no App configured: %v %v", app, err)
 	}
+	if app, err := githubApp("", "", ""); app != nil || err != nil {
+		t.Errorf("no App configured and no org either (pure local dev): %v %v", app, err)
+	}
 	for name, args := range map[string][3]string{
 		"id only":     {"5239131", "", "showmino"},
 		"key only":    {"", keyFile, "showmino"},

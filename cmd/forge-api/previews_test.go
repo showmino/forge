@@ -45,6 +45,7 @@ func TestPreviews(t *testing.T) {
 		"no domain":     {func() previewFlags { f := ok; f.domain = ""; return f }(), app, "--preview-domain"},
 		"bad gateway":   {func() previewFlags { f := ok; f.gateway = "x"; return f }(), app, "namespace/name"},
 		"bad pull":      {func() previewFlags { f := ok; f.pullSecret = "x"; return f }(), app, "namespace/name"},
+		"no pull":       {func() previewFlags { f := ok; f.pullSecret = ""; return f }(), app, "namespace/name"},
 		"bad max":       {func() previewFlags { f := ok; f.max = 0; return f }(), app, "--preview-max"},
 		"bad image t/o": {func() previewFlags { f := ok; f.imageTimeout = "soon"; return f }(), app, "FORGE_PREVIEW_IMAGE_TIMEOUT"},
 		"bad ready t/o": {func() previewFlags { f := ok; f.readyTimeout = "-1m"; return f }(), app, "FORGE_PREVIEW_READY_TIMEOUT"},

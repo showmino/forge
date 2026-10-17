@@ -1,21 +1,25 @@
 #!/usr/bin/env sh
 # Render the k3s manifests.
 #
+# FORGE_GITHUB_ORG is required by every render (Dex's GitHub connector needs
+# it regardless of the App).
+#
 # Stock k3s, behind the bundled Traefik ingress (dex.<domain>, forge.<domain>):
-#   deploy/k3s/render.sh 192.168.1.50.nip.io | kubectl apply -f -
+#   FORGE_GITHUB_ORG=<org> deploy/k3s/render.sh 192.168.1.50.nip.io | kubectl apply -f -
 #
 # No Traefik: Dex and forge-api on their own LoadBalancer IPs, such as from MetalLB
 # (dex.<dex-ip>.nip.io, forge.<api-ip>.nip.io):
-#   deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
+#   FORGE_GITHUB_ORG=<org> deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
 #
 # FORGE_API_IMAGE picks the image (default forge-api:dev):
-#   FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.1.0 deploy/k3s/render.sh forge.lan | kubectl apply -f -
+#   FORGE_GITHUB_ORG=<org> FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.1.0 deploy/k3s/render.sh forge.lan | kubectl apply -f -
 #
 # With the Forge GitHub App (templates and 'forge create'), create the Secret
-# first, then render with the App's ID (FORGE_GITHUB_ORG defaults to showmino,
-# FORGE_TEMPLATES_REPO to showmino/forge-templates):
+# first, then render with the App's ID (FORGE_TEMPLATES_REPO, FORGE_REPO and
+# FORGE_DEPLOY_REPO default to <org>/forge-templates, <org>/forge and
+# <org>/forge-deploys):
 #   kubectl -n forge create secret generic forge-github-app --from-file=github_app_private_key=<key.pem>
-#   FORGE_GITHUB_APP_ID=5239131 FORGE_API_IMAGE=... deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
+#   FORGE_GITHUB_ORG=<org> FORGE_GITHUB_APP_ID=5239131 FORGE_API_IMAGE=... deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 # or let the 1Password operator create that Secret from an item with a
 # github_app_private_key field:
 #   FORGE_ONEPASSWORD_ITEM=vaults/Kube/items/forge-github-app FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
@@ -29,7 +33,8 @@
 #   FORGE_DEX_ONEPASSWORD_ITEM=vaults/Kube/items/forge-dex-github ... | kubectl apply -f -
 #
 # Preview environments (forge env) need the App too, plus the IP of their
-# Gateway and the pull secret in namespace forge (default mino-ghcr); lines in
+# Gateway and FORGE_PREVIEW_PULL_SECRET, the pull secret in namespace forge
+# (required once previews are configured, no default); lines in
 # forge.yaml.tmpl with a trailing "previews" marker exist only then:
 #   FORGE_PREVIEW_IP=10.150.1.222 FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 #

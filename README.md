@@ -289,8 +289,8 @@ tags.
 `forge template list` and `forge template get <name>[@version]` show the
 templates of a release (the newest by default). forge-api reads them from
 GitHub as the Forge GitHub App (`--github-app-id`, `--github-app-key-file`,
-`--github-org`), or from a local checkout with `--templates-dir` (served as
-version `dev`).
+`--github-org`, `--templates-repo`), or from a local checkout with
+`--templates-dir` (served as version `dev`).
 `forge create <name> --template <template> --team <team>` asks forge-api to
 render the template, create the private repo `github.com/<org>/<name>` as the
 Forge GitHub App, give the owner team `maintain` on it, push the first commit (which starts its CI) and register the
