@@ -254,6 +254,10 @@ message ListDomainsResponse {
   // The platform's public domains, the default first. Empty when services
   // get internal addresses only.
   repeated PublicDomain domains = 1;
+  // The domain of the internal addresses, which are
+  // http://<service>.<environment>.<internal_domain>: where a service without
+  // a public address is reached, and where a public one is reached inside.
+  string internal_domain = 2;
 }
 
 // PublicDomain is a domain services can be reached under from the internet.
