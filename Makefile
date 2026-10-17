@@ -24,6 +24,8 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/options.yaml | diff -u deploy/argocd/chart/testdata/options.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
 	  -f deploy/argocd/chart/testdata/options-staging.yaml | diff -u deploy/argocd/chart/testdata/options-staging.golden -
+	$(HELM) template payments deploy/argocd/chart --namespace payments-production \
+	  -f deploy/argocd/chart/testdata/secret-backend-none.yaml | diff -u deploy/argocd/chart/testdata/secret-backend-none.golden -
 
 lint: ## Lint Go code and protos
 	golangci-lint run ./...

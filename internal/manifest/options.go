@@ -176,7 +176,7 @@ func (r *Run) validateOptions() error {
 	names := map[string]bool{}
 	for i, s := range r.Secrets {
 		where := fmt.Sprintf("run.secrets[%d]", i)
-		// The Secret is <name>-1password: no name CloudNativePG or Forge gives
+		// The Secret is <name>-secret: no name CloudNativePG or Forge gives
 		// a Secret ends that way, so it can never be one of theirs.
 		if !ValidID(s.Name) || len(s.Name) > 40 || names[s.Name] {
 			return fmt.Errorf("%s.name %q must be a lowercase DNS label of at most 40 characters, used once", where, s.Name)

@@ -73,10 +73,10 @@ spec:
             - {name: LOG_LEVEL, value: "info"}
             - name: STRIPE_HOOK
               valueFrom:
-                secretKeyRef: {name: stripe-1password, key: "webhook-secret"}
+                secretKeyRef: {name: stripe-secret, key: "webhook-secret"}
             - name: STRIPE_KEY
               valueFrom:
-                secretKeyRef: {name: stripe-1password, key: "credential"}
+                secretKeyRef: {name: stripe-secret, key: "credential"}
           resources:
             limits:
               cpu: 500m
@@ -145,10 +145,10 @@ spec:
                 - {name: LOG_LEVEL, value: "info"}
                 - name: STRIPE_HOOK
                   valueFrom:
-                    secretKeyRef: {name: stripe-1password, key: "webhook-secret"}
+                    secretKeyRef: {name: stripe-secret, key: "webhook-secret"}
                 - name: STRIPE_KEY
                   valueFrom:
-                    secretKeyRef: {name: stripe-1password, key: "credential"}
+                    secretKeyRef: {name: stripe-secret, key: "credential"}
               resources:
                 limits:
                   cpu: 500m
@@ -182,6 +182,6 @@ spec:
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata:
-  name: stripe-1password
+  name: stripe-secret
 spec:
   itemPath: "vaults/Apps/items/stripe"
