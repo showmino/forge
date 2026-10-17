@@ -347,7 +347,8 @@ func ResolvesInDNS(ctx context.Context, host string) (bool, error) {
 	return len(addrs) > 0, err
 }
 
-// ListDomains returns the public domains, the default first.
+// ListDomains returns the public domains, the default first, and the domain
+// of the internal addresses.
 func (d *Deploys) ListDomains(ctx context.Context, _ *connect.Request[forgev1.ListDomainsRequest]) (*connect.Response[forgev1.ListDomainsResponse], error) {
 	if err := d.ready(); err != nil {
 		return nil, err
@@ -355,7 +356,7 @@ func (d *Deploys) ListDomains(ctx context.Context, _ *connect.Request[forgev1.Li
 	if err := require(ctx, PermServicesRead); err != nil {
 		return nil, err
 	}
-	out := &forgev1.ListDomainsResponse{}
+	out := &forgev1.ListDomainsResponse{InternalDomain: d.o.Domain}
 	for i, p := range d.o.PublicDomains {
 		out.Domains = append(out.Domains, &forgev1.PublicDomain{Name: p.Name, IsDefault: i == 0})
 	}

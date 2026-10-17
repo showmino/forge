@@ -49,7 +49,7 @@ func newDomainListCmd(f *Factory) *cobra.Command {
 			v := output.View{Headers: []string{"domain", "default"}, Data: resp.Msg}
 			if len(ds) == 0 {
 				// protojson omits empty lists; keep '.domains[]' working in jq.
-				v.Data = map[string]any{"domains": []any{}}
+				v.Data = map[string]any{"domains": []any{}, "internalDomain": resp.Msg.GetInternalDomain()}
 			}
 			for _, d := range ds {
 				def := ""
