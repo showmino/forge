@@ -63,7 +63,7 @@ func TestDeploySecretVaults(t *testing.T) {
 			o.SecretVaults = vaults
 		})
 		_, err := f.start(t, "staging")
-		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), `the vault "Kube" is not one services may read`) {
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), `the group "Kube" is not one services may read`) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -133,7 +133,7 @@ func TestSecretDeniedItems(t *testing.T) {
 	for item, want := range map[string]string{
 		"forge-github-app":           "holds the platform's own credentials",
 		"Forge-GitHub-App":           "holds the platform's own credentials",
-		"abcdefghijklmnopqrstuvwxyz": "not its 1Password ID",
+		"abcdefghijklmnopqrstuvwxyz": "not an opaque ID",
 		"showmino-api":               "",
 	} {
 		manifest := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n" +

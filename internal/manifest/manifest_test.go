@@ -235,7 +235,7 @@ func TestSecretGroupAndItemName(t *testing.T) {
 		item, wantGroup, wantItem string
 	}{
 		{"vaults/Kube/items/forge-db-app", "Kube", "forge-db-app"}, // legacy 1Password shape, unchanged
-		{"kube/forge-test-secret", "kube", "forge-test-secret"},   // new generic shape
+		{"kube/forge-test-secret", "kube", "forge-test-secret"},    // new generic shape
 	}
 	for _, c := range cases {
 		s := Secret{Item: c.item}
@@ -257,7 +257,7 @@ func TestValidateOptionsSecretShapes(t *testing.T) {
 		{"db", "vaults/Kube/items/forge-db-app", true}, // legacy, still valid
 		{"db", "kube/forge-test-secret", true},         // generic, newly valid
 		{"db", "justaname", false},                     // neither shape
-		{"db", "Kube/forge-db-app", true},               // two segments: a valid generic reference (group Kube, item forge-db-app)
+		{"db", "Kube/forge-db-app", true},              // two segments: a valid generic reference (group Kube, item forge-db-app)
 	}
 	for _, c := range cases {
 		r := &Run{Secrets: []Secret{{Name: c.name, Item: c.item, Env: map[string]string{"X": "field"}}}}

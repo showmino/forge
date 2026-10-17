@@ -99,8 +99,8 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 			if v = strings.TrimSpace(v); v == "" {
 				continue
 			}
-			if !manifest.ValidVault(v) {
-				return nil, fmt.Errorf("%s: %q must be a 1Password name (letters, digits, '.', '_', '-')", list.flag, v)
+			if !manifest.ValidGroup(v) {
+				return nil, fmt.Errorf("%s: %q must be a secret group name (letters, digits, '.', '_', '-')", list.flag, v)
 			}
 			*list.to = append(*list.to, v)
 		}
