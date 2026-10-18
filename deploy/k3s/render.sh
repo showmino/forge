@@ -14,7 +14,9 @@
 # No Traefik, no MetalLB (a cloud provider's own LoadBalancer, or `minikube
 # tunnel`): Dex and forge-api each get a plain LoadBalancer Service with no
 # requested IP, and you point hostnames you already control at whatever
-# address the cluster assigns:
+# address the cluster assigns. Those hostnames must resolve from inside the
+# cluster too, the same requirement the nip.io modes already have: forge-api
+# discovers Dex's OIDC issuer at startup and fails to start if it can't:
 #   FORGE_GITHUB_ORG=<org> deploy/k3s/render.sh --cloud-lb dex.example.com forge.example.com | kubectl apply -f -
 #
 # FORGE_API_IMAGE picks the image (default forge-api:dev):
