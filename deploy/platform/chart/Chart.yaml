@@ -1,0 +1,16 @@
+apiVersion: v2
+# Stands up a whole Forge instance (Dex, forge-api, previews/deploys) for a
+# GitHub org and Kubernetes cluster of your own. Not the chart a Forge
+# service is deployed with (deploy/argocd/chart) -- this is the platform
+# itself. See docs/forge/17-running-your-own-forge.md in showmino/techdocs
+# for the full walkthrough; this chart covers the MVP of that page (core
+# login, previews, deploys) and does not yet cover public domains, the
+# resources/runner feature, or a secrets backend other than 1Password's
+# default. deploy/k3s/render.sh remains how showmino's own production is
+# rendered; this chart does not replace it.
+name: forge-platform
+description: Run your own Forge instance for a GitHub org and Kubernetes cluster
+type: application
+version: 0.1.0
+sources:
+  - https://github.com/showmino/forge

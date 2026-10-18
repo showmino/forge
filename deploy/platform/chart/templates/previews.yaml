@@ -1,0 +1,120 @@
+{{- if .Values.previews.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: forge-api
+  namespace: forge
+imagePullSecrets:
+  - name: {{ .Values.previews.pullSecret | required "previews.pullSecret is required when previews.enabled" }}
+---
+# Exactly the calls internal/server/env_cluster.go makes. Kubernetes RBAC
+# cannot limit them to Forge's own namespaces; forge-api enforces that itself
+# (owned() in env_cluster.go).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: forge-api-previews
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, create, patch, delete]
+  - apiGroups: [""]
+    resources: [secrets, services, resourcequotas, limitranges]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, create]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: forge-api-previews
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: forge-api-previews
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+---
+# forge-api reads the pull secret to copy it into previews and to check images.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-pull-secret
+  namespace: forge
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ .Values.previews.pullSecret }}]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-pull-secret
+  namespace: forge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-pull-secret
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+---
+# LAN/"lb" mode only: MetalLB gives the Gateway's own Service the requested
+# IP via the infrastructure annotation below. "cloudLB" mode leaves the
+# annotation out and the cluster's own load balancer assigns one; point
+# previews.gatewayDomain at it afterward.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: forge-previews
+  namespace: forge
+spec:
+  gatewayClassName: {{ .Values.previews.gatewayClass | default "istio" | quote }}
+  {{- if eq .Values.exposure.mode "lb" }}
+  infrastructure:
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: {{ .Values.previews.gatewayIP | required "previews.gatewayIP is required when previews.enabled and exposure.mode is \"lb\"" }}
+  {{- end }}
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: {{ printf "*.preview.%s" (include "forge.previewBase" .) | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+    {{- if .Values.deploys.enabled }}
+    - name: staging
+      protocol: HTTP
+      port: 80
+      hostname: {{ printf "*.staging.%s" (include "forge.previewBase" .) | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+              forge.dev/deploy-env: staging
+    - name: production
+      protocol: HTTP
+      port: 80
+      hostname: {{ printf "*.production.%s" (include "forge.previewBase" .) | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+              forge.dev/deploy-env: production
+    {{- end }}
+{{- end }}
