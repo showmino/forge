@@ -39,7 +39,7 @@ spec:
             - {name: FORGE_WRITER_GROUPS, value: {{ include "forge.writerGroups" . | quote }}}
             - name: FORGE_DATABASE_URL
               valueFrom:
-                secretKeyRef: {name: forge-db-app, key: uri}
+                secretKeyRef: {name: {{ .Values.database.secretName | default "forge-db-app" }}, key: uri}
             - {name: FORGE_LOG_FORMAT, value: json}
             - {name: FORGE_GITHUB_APP_ID, value: {{ .Values.githubAppID | required "githubAppID is required" | quote }}}
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key}

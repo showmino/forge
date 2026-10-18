@@ -1,7 +1,9 @@
+{{- if .Values.database.managed }}
 # Forge's database: the service catalog (forge-api) and Dex's logins.
-# CloudNativePG creates the Secret forge-db-app (keys uri, password, ...)
-# for the owner forge. No backups yet: the catalog can be re-registered from
-# each repo's forge.yaml, and Dex's data is only sessions.
+# CloudNativePG creates the Secret named database.secretName (keys uri,
+# password, ...) for the owner forge. No backups yet: the catalog can be
+# re-registered from each repo's forge.yaml, and Dex's data is only
+# sessions.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -18,7 +20,7 @@ spec:
   bootstrap:
     initdb:
       database: forge
-      owner: forge
+      owner: {{ .Values.database.user | default "forge" | quote }}
   resources:
     requests: {cpu: 50m, memory: 256Mi}
     limits: {memory: 512Mi}
@@ -29,7 +31,8 @@ metadata:
   name: forge-db-dex
   namespace: forge
 spec:
-  name: dex
-  owner: forge
+  name: {{ .Values.database.dexDatabase | default "dex" | quote }}
+  owner: {{ .Values.database.user | default "forge" | quote }}
   cluster:
     name: forge-db
+{{- end }}

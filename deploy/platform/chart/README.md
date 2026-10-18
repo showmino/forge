@@ -16,6 +16,12 @@ backend other than 1Password's default -- those remain
 `deploy/k3s/render.sh`-only for now, which also remains how showmino's own
 production is rendered; this chart does not replace it.
 
+The database is optional: `database.managed: false` skips the
+CloudNativePG `Cluster`/`Database` this chart creates by default, and lets
+you bring your own Postgres-compatible database instead -- create the
+Secret named by `database.secretName` yourself first (keys `uri` and
+`password`); see `values.yaml` for the exact shape.
+
 ```sh
 helm install my-forge . \
   --set githubOrg=my-org \
