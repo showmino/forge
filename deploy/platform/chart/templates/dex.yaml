@@ -1,0 +1,99 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: forge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+  namespace: forge
+data:
+  config.yaml: |
+    issuer: {{ include "forge.dexURL" . }}/dex
+    storage:
+      type: postgres
+      config:
+        host: forge-db-rw.forge.svc
+        port: 5432
+        database: dex
+        user: forge
+        password: $DEX_DB_PASSWORD # from the Secret forge-db-app
+        ssl:
+          mode: require
+    web:
+      http: 0.0.0.0:5556
+      {{- if .Values.webOrigins }}
+      allowedOrigins: [{{ include "forge.webOriginsJSON" . }}]
+      {{- end }}
+    oauth2:
+      grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
+      skipApprovalScreen: true
+    expiry:
+      idTokens: 1h
+    staticClients:
+      - id: forge-cli
+        name: Forge CLI
+        public: true
+        redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
+      {{- if .Values.webOrigins }}
+      - id: forge-web
+        name: Forge dashboard
+        public: true
+        redirectURIs: [{{ include "forge.webRedirectsJSON" . }}]
+      {{- end }}
+    # Only members of the org log in; groups are "<org>:<team-slug>", and
+    # forge-api's writerGroups picks the admin teams. Dex expands
+    # $GITHUB_CLIENT_* from its environment (the Secret dex-github, created
+    # by hand -- see docs/forge/17-running-your-own-forge.md).
+    connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $GITHUB_CLIENT_ID
+          clientSecret: $GITHUB_CLIENT_SECRET
+          redirectURI: {{ include "forge.dexURL" . }}/dex/callback
+          orgs:
+            - name: {{ include "forge.dexGithubOrg" . }}
+          teamNameField: slug
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: forge
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: dex}
+  template:
+    metadata:
+      labels: {app: dex}
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.41.1
+          args: [dex, serve, /etc/dex/config.yaml]
+          env:
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef: {name: dex-github, key: client_id}
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: dex-github, key: client_secret}
+            - name: DEX_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: forge-db-app, key: password}
+          ports:
+            - {name: http, containerPort: 5556}
+          readinessProbe:
+            httpGet: {path: /dex/healthz, port: http}
+          volumeMounts:
+            - {name: config, mountPath: /etc/dex}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - name: config
+          configMap: {name: dex-config}

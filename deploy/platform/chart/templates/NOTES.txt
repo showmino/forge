@@ -1,0 +1,35 @@
+Forge is deploying. Check:
+
+  kubectl -n forge get pods
+  curl {{ include "forge.dexURL" . }}/dex/.well-known/openid-configuration
+  curl http://{{ include "forge.apiHost" . }}/healthz
+
+If the pods aren't starting, the two Secrets this chart expects to already
+exist are the usual cause:
+
+  kubectl -n forge get secret forge-github-app dex-github
+
+(github_app_private_key on the first, client_id/client_secret on the
+second.) See docs/forge/17-running-your-own-forge.md in showmino/techdocs
+for how to create them from your GitHub App.
+
+Make sure the GitHub App's callback URL is exactly:
+
+  {{ include "forge.dexURL" . }}/dex/callback
+
+{{- if .Values.deploys.enabled }}
+
+deploys.enabled is on: your Argo CD instance also needs a pull credential
+for oci://ghcr.io/{{ include "forge.chartRepo" . }} before any service can
+actually deploy -- Argo CD falls back to an anonymous pull and fails with a
+plain 401 if this is missing or wrong, not a clear error. The same page
+above has the exact Secret shape and the three independent ways to get it
+wrong.
+{{- end }}
+{{- if .Values.webOrigins }}
+
+webOrigins is set: after any later change to this release, Dex only reads
+its config at start -- restart it:
+
+  kubectl -n forge rollout restart deploy/dex
+{{- end }}

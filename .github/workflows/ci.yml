@@ -51,6 +51,8 @@ jobs:
       - run: go test -race -count=1 ./...
       - name: Deploy chart golden
         run: make chart-test
+      - name: Platform chart lint
+        run: make platform-chart-lint
       - uses: azure/setup-helm@v4
         with:
           version: v3.21.4

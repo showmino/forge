@@ -1,0 +1,38 @@
+{{/*
+exposure.mode "lb": MetalLB-style, a requested IP (0.13+ honours the
+annotation; other implementations may ignore it -- check
+'kubectl -n forge get svc').
+exposure.mode "cloudLB": a plain LoadBalancer Service with no requested IP;
+point exposure.dexHost/apiHost at whatever address gets assigned,
+after the fact (a cloud provider's own load balancer, or `minikube tunnel`
+for a local proof).
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: forge
+  {{- if eq .Values.exposure.mode "lb" }}
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: {{ .Values.exposure.dexIP | required "exposure.dexIP is required when exposure.mode is \"lb\"" }}
+  {{- end }}
+spec:
+  type: LoadBalancer
+  selector: {app: dex}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-api
+  namespace: forge
+  {{- if eq .Values.exposure.mode "lb" }}
+  annotations:
+    metallb.universe.tf/loadBalancerIPs: {{ .Values.exposure.apiIP | required "exposure.apiIP is required when exposure.mode is \"lb\"" }}
+  {{- end }}
+spec:
+  type: LoadBalancer
+  selector: {app: forge-api}
+  ports:
+    - {name: http, port: 80, targetPort: http}

@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := build
 BIN := bin
 
-.PHONY: build test lint chart-test generate update-golden tools dex db api api-dev image runner-image clean
+.PHONY: build test lint chart-test platform-chart-lint generate update-golden tools dex db api api-dev image runner-image clean
 
 build: ## Build forge and forge-api into ./bin
 	CGO_ENABLED=0 go build -trimpath -o $(BIN)/ ./cmd/...
@@ -26,6 +26,18 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/options-staging.yaml | diff -u deploy/argocd/chart/testdata/options-staging.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-production \
 	  -f deploy/argocd/chart/testdata/secret-backend-none.yaml | diff -u deploy/argocd/chart/testdata/secret-backend-none.golden -
+
+platform-chart-lint: ## Lint deploy/platform/chart and check it renders in both exposure modes
+	$(HELM) lint deploy/platform/chart
+	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
+	  --set exposure.dexHost=dex.example.com --set exposure.apiHost=forge.example.com \
+	  --set previews.enabled=true --set previews.pullSecret=x --set previews.gatewayDomain=p.example.com \
+	  --set deploys.enabled=true --set deploys.chartRevision=0.1.0 --set webOrigins='{https://forge.example.com}' \
+	  > /dev/null
+	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
+	  --set exposure.mode=lb --set exposure.dexIP=10.0.0.1 --set exposure.apiIP=10.0.0.2 \
+	  --set previews.enabled=true --set previews.pullSecret=x --set previews.gatewayIP=10.0.0.3 \
+	  > /dev/null
 
 lint: ## Lint Go code and protos
 	golangci-lint run ./...

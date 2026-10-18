@@ -1,0 +1,103 @@
+# See docs/forge/17-running-your-own-forge.md (showmino/techdocs) for the
+# full walkthrough this chart's values map onto, including the GitHub App
+# setup, the two Secrets this chart expects to already exist
+# (forge-github-app, dex-github), and the Argo CD OCI chart-pull credential
+# needed before deploys.enabled works.
+
+# Your GitHub organization. Required: Dex's connector only lets this org's
+# members log in, and the repo names below default from it.
+githubOrg: ""
+
+# Your GitHub App's numeric ID. Required: forge create, previews and deploys
+# all need it. Create the App first (see the doc above), and create the
+# Secret forge-github-app (key github_app_private_key, the App's .pem)
+# yourself -- this chart does not create it.
+githubAppID: ""
+
+# Which org's members may log in, if different from githubOrg.
+dexGithubOrg: ""
+
+# The GitHub teams whose members are admins (comma separated). Defaults to
+# "<dexGithubOrg>:platform-engineering". Never leave this empty: every login
+# would be able to deploy to production.
+writerGroups: ""
+
+image: "forge-api:dev"
+
+# How Dex and forge-api are reached.
+exposure:
+  # "cloudLB": each gets a plain LoadBalancer Service with no requested IP;
+  # point dexHost/apiHost at whatever address your cluster's load balancer
+  # assigns, after the fact. The normal choice for a cloud cluster (AKS,
+  # GKE, EKS).
+  # "lb": MetalLB-style, a specific IP you request up front (dexIP/apiIP);
+  # dexHost/apiHost are then derived as dex.<dexIP>.nip.io and
+  # forge.<apiIP>.nip.io and don't need to be set.
+  mode: cloudLB
+  dexHost: ""
+  apiHost: ""
+  dexIP: ""
+  apiIP: ""
+
+# If something in front of Dex terminates TLS (a cloud load balancer with a
+# certificate, an ingress, a tunnel), set this to Dex's public HTTPS
+# address. It must exactly match the GitHub App's callback URL
+# (<loginURL>/dex/callback). Left empty, Dex's issuer is plain
+# http://<exposure.dexHost> -- fine for a first proof, not for a dashboard
+# served over HTTPS.
+loginURL: ""
+
+# Repos this org uses. Each defaults to "<githubOrg>/forge-<name>" (chartRepo
+# additionally lower-cased, which GHCR requires).
+templatesRepo: ""
+forgeRepo: ""
+deployRepo: ""
+chartRepo: ""
+
+database:
+  # Unset uses the cluster's own default StorageClass.
+  storageClass: ""
+
+# The dashboard's address(es), comma-free list form here (one entry per
+# origin). Adds Dex's forge-web OAuth client and forge-api's CORS list. Each
+# must be a bare scheme+host, no path, e.g. "https://forge.example.com".
+# Leave empty to skip the dashboard entirely.
+webOrigins: []
+
+# Argo CD's own web address, just for linking a deployment to its
+# Application in deploy output. Optional.
+argocdURL: ""
+
+# run.secrets: which 1Password vaults a service may read from, and which
+# items in them no service may (the platform's own credentials). Only
+# meaningful with the default secrets backend.
+secretVaults: ""
+secretDeniedItems: ""
+secretBackend: onepassword
+
+previews:
+  enabled: false
+  # A dockerconfigjson Secret already in namespace "forge" (e.g. a registry
+  # pull secret you created by hand) that pods pulling private images need.
+  pullSecret: ""
+  # "lb" mode: a MetalLB-style IP for the previews/deploys Gateway.
+  gatewayIP: ""
+  # "cloudLB" mode: a domain you control; previews are reached under
+  # *.preview.<gatewayDomain>, staging/production under
+  # *.staging.<gatewayDomain> / *.production.<gatewayDomain>. You generally
+  # won't know this until after the Gateway's own LoadBalancer Service gets
+  # an address -- apply once, check that address, then upgrade with the
+  # right value.
+  gatewayDomain: ""
+  # The name of an existing GatewayClass (Istio, Envoy Gateway, or any other
+  # conformant Gateway API implementation). This chart does not install one.
+  gatewayClass: istio
+
+deploys:
+  enabled: false
+  # The published chart's version (not a commit SHA), e.g. "0.21.0" -- a
+  # vX.Y.Z tag push publishes deploy/argocd/chart to
+  # oci://ghcr.io/<chartRepo>. Required when deploys.enabled is true.
+  # Changing this re-renders every deployed service; see the warning in the
+  # techdocs page about the fleet-wide effect of a chart-revision bump.
+  chartRevision: ""

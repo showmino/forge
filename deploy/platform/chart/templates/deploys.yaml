@@ -1,0 +1,151 @@
+{{- if .Values.deploys.enabled }}
+{{- if not .Values.previews.enabled }}
+{{- fail "deploys.enabled needs previews.enabled" }}
+{{- end }}
+{{- $chartRev := .Values.deploys.chartRevision | required "deploys.chartRevision is required when deploys.enabled (a published chart version, e.g. 0.21.0, not a commit SHA)" }}
+# Deploys: Forge's Argo CD objects and forge-api's read access to them.
+# Applications are named <service>-<env> and deploy into the namespace of
+# that name; forge-api refuses a namespace that exists and isn't Forge's.
+# Existing namespaces named like *-staging or *-production that are not
+# Forge's must be listed below as "!<name>" deny destinations.
+#
+# The double-brace expressions you'll see below (name, releaseName,
+# valueFiles, namespace, the forge.dev/* labels) are Argo CD ApplicationSet's
+# own Go templates, evaluated by the applicationset controller per generated
+# Application, not by Helm -- this chart emits them as literal text on
+# purpose.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: forge-services
+  namespace: argocd
+spec:
+  description: {{ printf "Forge services, deployed by forge-api through %s" (include "forge.deployRepo" .) | quote }}
+  sourceRepos:
+    # An OCI Helm source's allow-list entry: the exact string Argo CD
+    # normalizes and glob-matches against the Application source's repoURL
+    # below (verify this against your own Argo CD version -- production's
+    # was checked against v3.5.3; IsSourcePermitted matched it literally
+    # there).
+    - {{ printf "oci://ghcr.io/%s" (include "forge.chartRepo" .) | quote }}
+    - {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: "*-staging"}
+    - {server: https://kubernetes.default.svc, namespace: "*-production"}
+  clusterResourceWhitelist:
+    - {group: "", kind: Namespace}
+  namespaceResourceWhitelist:
+    - {group: apps, kind: Deployment}
+    - {group: "", kind: Service}
+    - {group: gateway.networking.k8s.io, kind: HTTPRoute}
+    - {group: "", kind: ResourceQuota}
+    - {group: "", kind: LimitRange}
+    # run.secrets, run.jobs and run.autoscaling (forge.yaml). A secrets
+    # backend other than the default (secretBackend) adds its own operator's
+    # kind here by hand -- this list is static, not conditional on the value.
+    - {group: onepassword.com, kind: OnePasswordItem}
+    - {group: batch, kind: CronJob}
+    - {group: keda.sh, kind: ScaledObject}
+    # Not deployed by the chart: Argo CD leaves out of an application's tree
+    # every kind its project does not allow, so without these the UI shows a
+    # Deployment (or CronJob, or ScaledObject) with nothing under it.
+    - {group: apps, kind: ReplicaSet}
+    - {group: "", kind: Pod}
+    - {group: batch, kind: Job}
+    - {group: autoscaling, kind: HorizontalPodAutoscaler}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: forge-services
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+        revision: main
+        directories:
+          - path: services/*/staging
+          - path: services/*/production
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{`{{ index .path.segments 1 }}`}}-{{`{{ .path.basename }}`}}'
+      labels:
+        app.kubernetes.io/managed-by: forge
+      # Deleting a services/<service>/<env> directory removes its workload too.
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: forge-services
+      sources:
+        - repoURL: {{ printf "oci://ghcr.io/%s" (include "forge.chartRepo" .) | quote }}
+          targetRevision: {{ $chartRev | quote }}
+          # Required for an OCI Helm source: with none of path/chart/ref set,
+          # Argo CD rejects the spec outright (InvalidSpecError) rather than
+          # defaulting it, so every generated Application would go straight
+          # to ComparisonError. "." is the chart itself, per Argo CD's own
+          # OCI docs.
+          path: .
+          helm:
+            releaseName: '{{`{{ index .path.segments 1 }}`}}'
+            valueFiles:
+              - '$values/{{`{{ .path.path }}`}}/values.yaml'
+            parameters:
+              - {name: secretBackend, value: {{ .Values.secretBackend | default "onepassword" | quote }}}
+        - repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{`{{ index .path.segments 1 }}`}}-{{`{{ .path.basename }}`}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
+        syncOptions:
+          - CreateNamespace=true
+          # Keep the replica count KEDA set on an autoscaled Deployment.
+          - RespectIgnoreDifferences=true
+        managedNamespaceMetadata:
+          labels:
+            app.kubernetes.io/managed-by: forge
+            forge.dev/service: '{{`{{ index .path.segments 1 }}`}}'
+            forge.dev/deploy-env: '{{`{{ .path.basename }}`}}'
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jqPathExpressions:
+            - 'select(.metadata.annotations["forge.dev/autoscaled"] == "true") | .spec.replicas'
+---
+# forge-api reads Applications to report sync and health.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-applications
+  namespace: argocd
+rules:
+  - apiGroups: [argoproj.io]
+    resources: [applications]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-applications
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-applications
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+{{- end }}
