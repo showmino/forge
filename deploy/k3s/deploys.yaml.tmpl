@@ -80,6 +80,8 @@ spec:
             releaseName: '{{ index .path.segments 1 }}'
             valueFiles:
               - '$values/{{ .path.path }}/values.yaml'
+            parameters:                                                    #secretbackend
+              - {name: secretBackend, value: "${FORGE_SECRET_BACKEND}"}    #secretbackend
         - repoURL: https://github.com/${FORGE_DEPLOY_REPO}.git
           targetRevision: main
           ref: values

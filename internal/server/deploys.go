@@ -84,6 +84,12 @@ type DeployOptions struct {
 	// SecretDeniedItems are items in those groups no service may read: the
 	// platform's own credentials. Compared without regard to case.
 	SecretDeniedItems []string
+	// SecretBackend is which operator populates a run.secrets entry's
+	// Kubernetes Secret (matches the chart's secretBackend value); "" and
+	// "onepassword" mean the same thing, the default. Only then is the
+	// generic <group>/<item> item shape refused, since the 1Password
+	// Connect operator understands only vaults/<vault>/items/<item>.
+	SecretBackend string
 	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
 	ImageTimeout, SyncTimeout, NamespaceTimeout time.Duration
 	// Defaults: 10s, 2s.
@@ -248,6 +254,10 @@ func (v *deployValues) forEnv(env string) {
 // allows: any other group may hold the platform's own secrets.
 func (d *Deploys) secretsAllowed(v deployValues) error {
 	for _, s := range v.Secrets {
+		if (d.o.SecretBackend == "" || d.o.SecretBackend == "onepassword") && !s.Legacy() {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"run.secrets %s: item %q must be vaults/<vault>/items/<item>; this Forge API's secret backend is 1Password", s.Name, s.Item))
+		}
 		if !slices.Contains(d.o.SecretVaults, s.Group()) {
 			allowed := "none: this Forge API takes no secrets"
 			if len(d.o.SecretVaults) > 0 {

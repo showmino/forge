@@ -103,6 +103,15 @@ func (s Secret) ItemName() string {
 	}
 }
 
+// Legacy reports whether s.Item is in the original 1Password
+// vaults/<vault>/items/<item> shape, as opposed to the generic
+// <group>/<item> shape. Meaningful only once validateOptions has already
+// confirmed s.Item matches one of the two accepted shapes.
+func (s Secret) Legacy() bool {
+	parts := strings.Split(s.Item, "/")
+	return len(parts) == 4 && parts[0] == "vaults" && parts[2] == "items"
+}
+
 // Job is a cron job: the service's image running Command on Schedule.
 type Job struct {
 	Name     string   `yaml:"name" json:"name"`

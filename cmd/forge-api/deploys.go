@@ -37,6 +37,9 @@ type deployFlags struct {
 	secretVaults string
 	// secretDenied is --secret-denied-items, items in them services may not.
 	secretDenied string
+	// secretBackend is --secret-backend, which operator populates a
+	// run.secrets entry's Secret.
+	secretBackend string
 	// resources says which database a service has, for DATABASE_URL.
 	resources store.ResourceStore
 }
@@ -114,7 +117,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	return server.NewDeploys(server.DeployOptions{
 		Policy:        rules,
 		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS, ArgoURL: argoURL,
-		SecretVaults: vaults, SecretDeniedItems: denied,
+		SecretVaults: vaults, SecretDeniedItems: denied, SecretBackend: f.secretBackend,
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
 		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,
