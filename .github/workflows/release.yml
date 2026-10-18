@@ -7,7 +7,7 @@ on:
 permissions:
   contents: write   # create the GitHub release
   id-token: write   # cosign keyless signing
-  packages: write   # push the forge-api image to ghcr.io
+  packages: write   # push the forge-api image and the deploy chart to ghcr.io
 
 jobs:
   release:
@@ -37,10 +37,21 @@ jobs:
           # A fine-grained token with contents:write on showmino/homebrew-tap.
           # Without it the release is made and the Homebrew cask is skipped.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+  # A separate job so a failure here (or a retry) never touches goreleaser's
+  # own release, which cannot simply be re-run once it has already published.
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
+        with:
+          version: v3.21.4
       - name: Push the deploy chart
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=${GITHUB_REF_NAME#v}
-          helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+          echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
           helm package deploy/argocd/chart --version "$version" --app-version "$version" -d /tmp
-          helm push "/tmp/forge-chart-$version.tgz" "oci://ghcr.io/${{ github.repository_owner }}"
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push "/tmp/forge-chart-$version.tgz" "oci://ghcr.io/$owner"
