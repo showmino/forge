@@ -77,12 +77,19 @@ type DeployOptions struct {
 	// ArgoURL is Argo CD's web address, e.g. https://argocd.example.com;
 	// "" leaves Deployment.argo_url empty.
 	ArgoURL string
-	// SecretVaults are the 1Password vaults run.secrets may read; empty
-	// refuses every secret.
+	// SecretVaults are the secret groups a service's run.secrets may read
+	// (1Password vaults, or another backend's groups); empty refuses every
+	// secret.
 	SecretVaults []string
-	// SecretDeniedItems are items in those vaults no service may read: the
+	// SecretDeniedItems are items in those groups no service may read: the
 	// platform's own credentials. Compared without regard to case.
 	SecretDeniedItems []string
+	// SecretBackend is which operator populates a run.secrets entry's
+	// Kubernetes Secret (matches the chart's secretBackend value); "" and
+	// "onepassword" mean the same thing, the default. Only then is the
+	// generic <group>/<item> item shape refused, since the 1Password
+	// Connect operator understands only vaults/<vault>/items/<item>.
+	SecretBackend string
 	// Defaults: 10m, 10m, 5m (a first deploy waits for Argo CD to poll git).
 	ImageTimeout, SyncTimeout, NamespaceTimeout time.Duration
 	// Defaults: 10s, 2s.
@@ -243,23 +250,27 @@ func (v *deployValues) forEnv(env string) {
 	}
 }
 
-// secretsAllowed refuses a 1Password item outside the vaults the platform
-// allows: any other vault may hold the platform's own secrets.
+// secretsAllowed refuses a secret item outside the groups the platform
+// allows: any other group may hold the platform's own secrets.
 func (d *Deploys) secretsAllowed(v deployValues) error {
 	for _, s := range v.Secrets {
-		if !slices.Contains(d.o.SecretVaults, s.Vault()) {
-			allowed := "none: this Forge API takes no 1Password secrets"
+		if (d.o.SecretBackend == "" || d.o.SecretBackend == "onepassword") && !s.Legacy() {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"run.secrets %s: item %q must be vaults/<vault>/items/<item>; this Forge API's secret backend is 1Password", s.Name, s.Item))
+		}
+		if !slices.Contains(d.o.SecretVaults, s.Group()) {
+			allowed := "none: this Forge API takes no secrets"
 			if len(d.o.SecretVaults) > 0 {
 				allowed = strings.Join(d.o.SecretVaults, ", ")
 			}
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
-				"run.secrets %s: the vault %q is not one services may read (allowed: %s)", s.Name, s.Vault(), allowed))
+				"run.secrets %s: the group %q is not one services may read (allowed: %s)", s.Name, s.Group(), allowed))
 		}
 		item := s.ItemName()
 		// An item named by its ID would get past the deny list, which has names.
 		if onePasswordID.MatchString(item) {
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
-				"run.secrets %s: name the item %q by its title, not its 1Password ID", s.Name, item))
+				"run.secrets %s: name the item %q by its title, not an opaque ID", s.Name, item))
 		}
 		if slices.ContainsFunc(d.o.SecretDeniedItems, func(denied string) bool { return strings.EqualFold(denied, item) }) {
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(

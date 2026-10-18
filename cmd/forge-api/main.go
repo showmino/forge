@@ -80,8 +80,9 @@ func run() error {
 		publicDomains = flag.String("public-domains", env("FORGE_PUBLIC_DOMAINS", ""), "domains services get public addresses under, each with its DNS zone's name, the default first: example.com=example-com,other.io=other-io (empty: internal addresses only)")
 		publicTunnel  = flag.String("public-dns-tunnel", env("FORGE_PUBLIC_DNS_TUNNEL", "production"), "which of the platform's tunnels public DNS records point at")
 		argoURL       = flag.String("argocd-url", env("FORGE_ARGOCD_URL", ""), "Argo CD's web address, e.g. https://argocd.example.com: deployments link to their Application there (empty: no link)")
-		secretVaults  = flag.String("secret-vaults", env("FORGE_SECRET_VAULTS", ""), "1Password vaults a service's run.secrets may read, comma separated (empty: none); never a vault with the platform's own secrets")
-		secretDenied  = flag.String("secret-denied-items", env("FORGE_SECRET_DENIED_ITEMS", ""), "items in those vaults no service may read, comma separated: the platform's own credentials")
+		secretVaults  = flag.String("secret-vaults", env("FORGE_SECRET_VAULTS", ""), "secret groups a service's run.secrets may read, comma separated (empty: none); never a group with the platform's own secrets")
+		secretDenied  = flag.String("secret-denied-items", env("FORGE_SECRET_DENIED_ITEMS", ""), "items in those groups no service may read, comma separated: the platform's own credentials")
+		secretBackend = flag.String("secret-backend", env("FORGE_SECRET_BACKEND", "onepassword"), "which operator populates a run.secrets entry's Secret (must match the chart's secretBackend value); \"onepassword\" accepts only vaults/<vault>/items/<item> items")
 
 		resourcesOn  = flag.Bool("resources", env("FORGE_RESOURCES", "") == "1" || env("FORGE_RESOURCES", "") == "true", "serve resources (forge resource): databases made by OpenTofu runs in Kubernetes Jobs (needs --deploys and --runner-image)")
 		runnerImage  = flag.String("runner-image", env("FORGE_RUNNER_IMAGE", ""), "image of the resource runner Job")
@@ -192,7 +193,7 @@ func run() error {
 	}
 	deps, err := deploys(deployFlags{
 		on: *deploysOn, repo: *deployRepo, domain: *deployDomain, syncTimeout: env("FORGE_DEPLOY_SYNC_TIMEOUT", "10m"),
-		publicDomains: *publicDomains, publicTunnel: *publicTunnel, argoURL: *argoURL, secretVaults: *secretVaults, secretDenied: *secretDenied,
+		publicDomains: *publicDomains, publicTunnel: *publicTunnel, argoURL: *argoURL, secretVaults: *secretVaults, secretDenied: *secretDenied, secretBackend: *secretBackend,
 		namespaceTimeout: env("FORGE_DEPLOY_NAMESPACE_TIMEOUT", "5m"), resources: st,
 	}, app, *previewDomain, cluster, images, catalog, ops, *githubOrg, log)
 	if err != nil {

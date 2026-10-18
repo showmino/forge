@@ -63,8 +63,57 @@ func TestDeploySecretVaults(t *testing.T) {
 			o.SecretVaults = vaults
 		})
 		_, err := f.start(t, "staging")
-		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), `the vault "Kube" is not one services may read`) {
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), `the group "Kube" is not one services may read`) {
 			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// On the default (1Password) backend, a generic <group>/<item> reference is
+// refused up front, not passed to an operator that cannot understand it.
+func TestSecretBackendOnePasswordRefusesGenericShape(t *testing.T) {
+	t.Parallel()
+	generic := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n" +
+		"  secrets: [{name: app, item: kube/forge-test-secret, env: {TEST_VALUE: value}}]\n"
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		o.GitHub.(*envtest.GitHub).Files[envSHA+":forge.yaml"] = []byte(generic)
+		o.SecretVaults = []string{"kube"}
+	})
+	_, err := f.start(t, "staging")
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "vaults/<vault>/items/<item>") {
+		t.Errorf("%v", err)
+	}
+}
+
+// With a different secret backend, the generic shape is accepted and the
+// same allow/deny governance that protects the legacy shape still applies.
+func TestSecretBackendOtherAllowsGenericShapeGovernance(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		item    string
+		vaults  []string
+		denied  []string
+		wantErr string
+	}{
+		"allowed":           {"kube/forge-test-secret", []string{"kube"}, nil, ""},
+		"group not allowed": {"apps/forge-test-secret", []string{"kube"}, nil, "not one services may read"},
+		"denied item":       {"kube/forge-github-app", []string{"kube"}, []string{"forge-github-app"}, "holds the platform's own credentials"},
+		"opaque id":         {"kube/abcdefghijklmnopqrstuvwxyz", []string{"kube"}, nil, "not an opaque ID"},
+		"case sensitive":    {"Kube/forge-test-secret", []string{"kube"}, nil, "not one services may read"},
+	} {
+		manifest := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n" +
+			"  secrets: [{name: s, item: " + tc.item + ", env: {TEST_VALUE: value}}]\n"
+		f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+			o.GitHub.(*envtest.GitHub).Files[envSHA+":forge.yaml"] = []byte(manifest)
+			o.SecretBackend = "external"
+			o.SecretVaults, o.SecretDeniedItems = tc.vaults, tc.denied
+		})
+		_, err := f.start(t, "staging")
+		switch {
+		case tc.wantErr == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case tc.wantErr != "" && (connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), tc.wantErr)):
+			t.Errorf("%s: %v, want %q", name, err, tc.wantErr)
 		}
 	}
 }
@@ -133,7 +182,7 @@ func TestSecretDeniedItems(t *testing.T) {
 	for item, want := range map[string]string{
 		"forge-github-app":           "holds the platform's own credentials",
 		"Forge-GitHub-App":           "holds the platform's own credentials",
-		"abcdefghijklmnopqrstuvwxyz": "not its 1Password ID",
+		"abcdefghijklmnopqrstuvwxyz": "not an opaque ID",
 		"showmino-api":               "",
 	} {
 		manifest := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n" +

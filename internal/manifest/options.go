@@ -59,7 +59,8 @@ type Quantities struct {
 	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`
 }
 
-// Secret is a 1Password item synced into the namespace; Env maps an
+// Secret is synced into the namespace by whichever backend the running
+// Forge instance configures (1Password by default); Env maps an
 // environment variable to a field of the item.
 type Secret struct {
 	Name string            `yaml:"name" json:"name"`
@@ -67,22 +68,48 @@ type Secret struct {
 	Env  map[string]string `yaml:"env" json:"env"`
 }
 
-// Vault is the vault of the item path vaults/<vault>/items/<item>.
-func (s Secret) Vault() string {
+// Group is the governed group of the item: the 1Password vault for a
+// vaults/<vault>/items/<item> reference, or the first segment of a plain
+// <group>/<item> reference for another secret backend.
+func (s Secret) Group() string {
 	parts := strings.Split(s.Item, "/")
-	if len(parts) != 4 {
+	switch len(parts) {
+	case 4:
+		if parts[0] != "vaults" || parts[2] != "items" {
+			return ""
+		}
+		return parts[1]
+	case 2:
+		return parts[0]
+	default:
 		return ""
 	}
-	return parts[1]
 }
 
-// ItemName is the item of the item path vaults/<vault>/items/<item>.
+// ItemName is the item name of s.Item, in either the legacy
+// vaults/<vault>/items/<item> shape or the generic <group>/<item> shape.
 func (s Secret) ItemName() string {
 	parts := strings.Split(s.Item, "/")
-	if len(parts) != 4 {
+	switch len(parts) {
+	case 4:
+		if parts[0] != "vaults" || parts[2] != "items" {
+			return ""
+		}
+		return parts[3]
+	case 2:
+		return parts[1]
+	default:
 		return ""
 	}
-	return parts[3]
+}
+
+// Legacy reports whether s.Item is in the original 1Password
+// vaults/<vault>/items/<item> shape, as opposed to the generic
+// <group>/<item> shape. Meaningful only once validateOptions has already
+// confirmed s.Item matches one of the two accepted shapes.
+func (s Secret) Legacy() bool {
+	parts := strings.Split(s.Item, "/")
+	return len(parts) == 4 && parts[0] == "vaults" && parts[2] == "items"
 }
 
 // Job is a cron job: the service's image running Command on Schedule.
@@ -99,7 +126,7 @@ type Autoscaling struct {
 
 var (
 	envName    = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
-	itemPath   = regexp.MustCompile(`^vaults/[A-Za-z0-9._-]+/items/[A-Za-z0-9._-]+$`)
+	itemPath   = regexp.MustCompile(`^(vaults/[A-Za-z0-9._-]+/items/[A-Za-z0-9._-]+|[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$`)
 	fieldName  = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 	cronField  = regexp.MustCompile(`^[0-9A-Za-z*/,?-]+$`)
 	vaultName  = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -108,8 +135,8 @@ var (
 	reservedEnv = []string{"PORT", "DATABASE_URL"}
 )
 
-// ValidVault reports whether s is a 1Password vault name run.secrets can use.
-func ValidVault(s string) bool { return vaultName.MatchString(s) }
+// ValidGroup reports whether s is a secret group name run.secrets can use.
+func ValidGroup(s string) bool { return vaultName.MatchString(s) }
 
 // ProductionReplicas is run.replicas, or 1. Staging always runs one.
 func (m *Manifest) ProductionReplicas() int {
@@ -158,14 +185,14 @@ func (r *Run) validateOptions() error {
 	names := map[string]bool{}
 	for i, s := range r.Secrets {
 		where := fmt.Sprintf("run.secrets[%d]", i)
-		// The Secret is <name>-1password: no name CloudNativePG or Forge gives
+		// The Secret is <name>-secret: no name CloudNativePG or Forge gives
 		// a Secret ends that way, so it can never be one of theirs.
 		if !ValidID(s.Name) || len(s.Name) > 40 || names[s.Name] {
 			return fmt.Errorf("%s.name %q must be a lowercase DNS label of at most 40 characters, used once", where, s.Name)
 		}
 		names[s.Name] = true
 		if !itemPath.MatchString(s.Item) {
-			return fmt.Errorf("%s.item %q must be vaults/<vault>/items/<item> (letters, digits, '.', '_', '-')", where, s.Item)
+			return fmt.Errorf("%s.item %q must be vaults/<vault>/items/<item> (1Password) or <group>/<item> (letters, digits, '.', '_', '-')", where, s.Item)
 		}
 		if len(s.Env) == 0 {
 			return fmt.Errorf("%s.env must name at least one variable and the item's field it gets", where)

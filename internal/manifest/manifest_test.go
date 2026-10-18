@@ -165,7 +165,7 @@ func TestRunOptions(t *testing.T) {
 	}
 	r := m.Run
 	if r.Replicas != 3 || r.Resources.Limits.Memory != "256Mi" || r.Env["LOG_LEVEL"] != "info" ||
-		len(r.Secrets) != 1 || r.Secrets[0].Vault() != "Apps" || r.Secrets[0].Env["STRIPE_KEY"] != "credential" ||
+		len(r.Secrets) != 1 || r.Secrets[0].Group() != "Apps" || r.Secrets[0].Env["STRIPE_KEY"] != "credential" ||
 		len(r.Jobs) != 2 || r.Jobs[0].Command[1] != "scripts/cleanup.js" || r.Autoscaling.Max != 6 {
 		t.Errorf("parsed: %+v", r)
 	}
@@ -187,7 +187,7 @@ func TestRunOptions(t *testing.T) {
 		"env PORT":             "run:\n  env: {PORT: \"1\"}\n",
 		"env DATABASE_URL":     "run:\n  env: {DATABASE_URL: x}\n",
 		"secret name":          "run:\n  secrets: [{name: Stripe, item: vaults/A/items/b, env: {K: v}}]\n",
-		"secret item":          "run:\n  secrets: [{name: s, item: A/b, env: {K: v}}]\n",
+		"secret item":          "run:\n  secrets: [{name: s, item: a/b/c, env: {K: v}}]\n",
 		"secret item spaces":   "run:\n  secrets: [{name: s, item: vaults/My Vault/items/b, env: {K: v}}]\n",
 		"secret no env":        "run:\n  secrets: [{name: s, item: vaults/A/items/b}]\n",
 		"secret field":         "run:\n  secrets: [{name: s, item: vaults/A/items/b, env: {K: \"a/b\"}}]\n",
@@ -226,6 +226,45 @@ func TestRunOptions(t *testing.T) {
 	// A limit without a request makes the request the limit, as Kubernetes does.
 	if _, err := Parse([]byte(base + "run:\n  resources: {limits: {memory: 1Gi}}\n")); err != nil {
 		t.Errorf("limit only: %v", err)
+	}
+}
+
+func TestSecretGroupAndItemName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		item, wantGroup, wantItem string
+	}{
+		{"vaults/Kube/items/forge-db-app", "Kube", "forge-db-app"}, // legacy 1Password shape, unchanged
+		{"kube/forge-test-secret", "kube", "forge-test-secret"},    // new generic shape
+	}
+	for _, c := range cases {
+		s := Secret{Item: c.item}
+		if got := s.Group(); got != c.wantGroup {
+			t.Errorf("Group() of %q = %q, want %q", c.item, got, c.wantGroup)
+		}
+		if got := s.ItemName(); got != c.wantItem {
+			t.Errorf("ItemName() of %q = %q, want %q", c.item, got, c.wantItem)
+		}
+	}
+}
+
+func TestValidateOptionsSecretShapes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, item string
+		ok         bool
+	}{
+		{"db", "vaults/Kube/items/forge-db-app", true}, // legacy, still valid
+		{"db", "kube/forge-test-secret", true},         // generic, newly valid
+		{"db", "justaname", false},                     // neither shape
+		{"db", "Kube/forge-db-app", true},              // two segments: a valid generic reference (group Kube, item forge-db-app)
+	}
+	for _, c := range cases {
+		r := &Run{Secrets: []Secret{{Name: c.name, Item: c.item, Env: map[string]string{"X": "field"}}}}
+		err := r.validateOptions()
+		if (err == nil) != c.ok {
+			t.Errorf("validateOptions() item %q: err = %v, want ok=%v", c.item, err, c.ok)
+		}
 	}
 }
 

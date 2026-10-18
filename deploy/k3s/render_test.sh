@@ -243,6 +243,22 @@ check "options: the project allows their kinds"   options_kinds
 for bad in 'My Vault' 'Apps,' ',Apps' 'Apps|x' 'a/b'; do
   check "vaults: \"$bad\" refused" sh -c "! FORGE_SECRET_VAULTS='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 done
+
+# The secret backend: off (default onepassword, nothing rendered) unless
+# FORGE_SECRET_BACKEND names a different one, in which case forge-api and the
+# chart's own helm parameter both get it, so they cannot drift apart.
+secretbackend_render() { FORGE_SECRET_BACKEND=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
+secretbackend_on() {
+  out=$(secretbackend_render external) &&
+    printf '%s\n' "$out" | grep -qF '{name: FORGE_SECRET_BACKEND, value: "external"}' &&
+    printf '%s\n' "$out" | grep -qF '{name: secretBackend, value: "external"}' &&
+    ! printf '%s\n' "$out" | grep -q '#secretbackend'
+}
+secretbackend_off() { ! printf '%s\n' "$dep_head" | grep -q -e FORGE_SECRET_BACKEND -e '{name: secretBackend' -e '#secretbackend'; }
+check "secret backend: forge-api and the chart both get it" secretbackend_on
+check "secret backend: nothing rendered without it"         secretbackend_off
+check "secret backend: needs deploys" sh -c "! FORGE_SECRET_BACKEND=external FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "secret backend: a bad value refused" sh -c "! FORGE_SECRET_BACKEND='my backend' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "public: a chart revision without DNS records refused" sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=18b12326d3df2c1a11b9f664f378b579eb472aaf FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 # What forge-api (ParsePublicDomains) refuses, the render refuses too.
 for bad in example.com example.com= =example-com Example.com=example-com example.com=example.com localhost=local \

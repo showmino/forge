@@ -485,7 +485,10 @@ spec:
     - {group: gateway.networking.k8s.io, kind: HTTPRoute}
     - {group: "", kind: ResourceQuota}
     - {group: "", kind: LimitRange}
-    # run.secrets, run.jobs and run.autoscaling (forge.yaml).
+    # run.secrets, run.jobs and run.autoscaling (forge.yaml). A fork whose
+    # chart's secretBackend is something other than onepassword adds its own
+    # backend's kind here by hand: this list is a static file in the
+    # operator's own fork, not something render.sh generates conditionally.
     - {group: onepassword.com, kind: OnePasswordItem}
     - {group: batch, kind: CronJob}
     - {group: keda.sh, kind: ScaledObject}

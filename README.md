@@ -355,7 +355,7 @@ run:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
   env: {LOG_LEVEL: info}      # plain environment variables
-  secrets:                    # 1Password items, as environment variables
+  secrets:                    # secret items, as environment variables
     - name: stripe
       item: vaults/Apps/items/stripe
       env: {STRIPE_KEY: credential}   # variable: field of the item
@@ -372,11 +372,15 @@ changes them in `forge.yaml`, keeping its comments. forge-api checks them again 
 that may run at once in an environment must fit the namespace's quota
 (requests 2 CPU / 2Gi, limits 4 CPU / 4Gi, 15 pods): the replicas or the
 autoscaling maximum, one more pod while a rollout replaces them, one per cron
-job, and the database's instances. A secret must come from a vault forge-api
-allows (`--secret-vaults`, none by default), may not be one of the items
-forge-api denies (`--secret-denied-items`, the platform's own credentials),
-and must be named by its title, not its 1Password ID; it becomes the Secret
-`<name>-1password`. A change applies at
+job, and the database's instances. `item` is `vaults/<vault>/items/<item>` by
+default (1Password, `--secret-backend`'s default); a Forge instance
+configured with a different `--secret-backend` also accepts the generic
+`<group>/<item>` form, and something other than the 1Password Connect
+operator is then expected to populate the Secret. Either way a secret must
+come from a group forge-api allows (`--secret-vaults`, none by default), may
+not be one of the items forge-api denies (`--secret-denied-items`, the
+platform's own credentials), and must be named by its title, not an opaque
+ID; it becomes the Secret `<name>-secret`. A change applies at
 the next deploy (staging) or promote (production). A forge-api older than
 these fields refuses a `forge.yaml` that has them.
 

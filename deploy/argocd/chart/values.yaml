@@ -15,8 +15,14 @@ dns: null
 resources: null
 # run.env: plain environment variables, NAME: value.
 vars: {}
-# 1Password items: [{name: stripe, item: vaults/Apps/items/stripe, env: {STRIPE_KEY: credential}}]
+# 1Password items (or, with another secretBackend, that backend's own
+# shape): [{name: stripe, item: vaults/Apps/items/stripe, env: {STRIPE_KEY: credential}}]
 secrets: []
+# Which operator turns a run.secrets entry into a Kubernetes Secret.
+# "onepassword": the 1Password Connect operator (the default). Anything
+# else: nothing renders here; something else must create a Secret named
+# <name>-secret with the fields run.secrets[].env maps.
+secretBackend: onepassword
 # Cron jobs: [{name: cleanup, schedule: "0 3 * * *", command: [node, cleanup.js]}]
 jobs: []
 # Production only: {min: 2, max: 6}; KEDA then sets the replica count.
