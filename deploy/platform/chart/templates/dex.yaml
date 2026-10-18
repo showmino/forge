@@ -14,11 +14,11 @@ data:
     storage:
       type: postgres
       config:
-        host: forge-db-rw.forge.svc
-        port: 5432
-        database: dex
-        user: forge
-        password: $DEX_DB_PASSWORD # from the Secret forge-db-app
+        host: {{ .Values.database.host | default "forge-db-rw.forge.svc" | quote }}
+        port: {{ .Values.database.port | default 5432 }}
+        database: {{ .Values.database.dexDatabase | default "dex" | quote }}
+        user: {{ .Values.database.user | default "forge" | quote }}
+        password: $DEX_DB_PASSWORD # from the Secret {{ .Values.database.secretName | default "forge-db-app" }}
         ssl:
           mode: require
     web:
@@ -84,7 +84,7 @@ spec:
                 secretKeyRef: {name: dex-github, key: client_secret}
             - name: DEX_DB_PASSWORD
               valueFrom:
-                secretKeyRef: {name: forge-db-app, key: password}
+                secretKeyRef: {name: {{ .Values.database.secretName | default "forge-db-app" }}, key: password}
           ports:
             - {name: http, containerPort: 5556}
           readinessProbe:

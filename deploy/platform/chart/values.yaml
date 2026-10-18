@@ -55,8 +55,26 @@ deployRepo: ""
 chartRepo: ""
 
 database:
-  # Unset uses the cluster's own default StorageClass.
+  # true (default): this chart creates the database itself, via
+  # CloudNativePG, and the Secret below (keys uri, password, ...).
+  # false: bring your own Postgres-compatible database. Create the Secret
+  # named by secretName yourself first, with two keys: "uri" (forge-api's
+  # full connection string, e.g. postgres://forge:<password>@<host>/forge)
+  # and "password" (just the password, which Dex's config needs as a
+  # separate field). host/port/user/dexDatabase below are only used to tell
+  # Dex how to reach it; forge-api only ever reads the Secret's "uri".
+  managed: true
+  # Unset uses the cluster's own default StorageClass. Only meaningful when
+  # managed is true.
   storageClass: ""
+  secretName: forge-db-app
+  host: forge-db-rw.forge.svc
+  port: 5432
+  user: forge
+  # A second database on the same server, for Dex's own sessions --
+  # separate from forge-api's "forge" database. Create it yourself if
+  # managed is false and it doesn't already exist.
+  dexDatabase: dex
 
 # The dashboard's address(es), comma-free list form here (one entry per
 # origin). Adds Dex's forge-web OAuth client and forge-api's CORS list. Each

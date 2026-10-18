@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, kube-runners]
     permissions:
       contents: read
       # render-live.sh's dns.yaml-presence guard pulls the published chart
@@ -64,7 +64,7 @@ jobs:
         run: sh deploy/k3s/render-live.sh --check
 
   lint:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, kube-runners]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -77,7 +77,7 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   proto:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, kube-runners]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,7 +102,7 @@ jobs:
           git diff --exit-code -- gen/ || (echo "::error::run 'make generate' and commit gen/" && exit 1)
 
   runner-image:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, kube-runners]
     steps:
       - uses: actions/checkout@v4
       # The build fetches the provider into the image's mirror and runs
@@ -110,7 +110,7 @@ jobs:
       - run: docker build -f deploy/runner/Dockerfile -t forge-runner:ci .
 
   goreleaser-check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, kube-runners]
     steps:
       - uses: actions/checkout@v4
       - uses: goreleaser/goreleaser-action@v6

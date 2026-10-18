@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, kube-runners]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,7 +40,7 @@ jobs:
   # A separate job so a failure here (or a retry) never touches goreleaser's
   # own release, which cannot simply be re-run once it has already published.
   chart:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, kube-runners]
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
