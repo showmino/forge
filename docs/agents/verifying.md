@@ -303,7 +303,25 @@ application/dns-json`): a resolver that was asked before the record existed, as 
 does, may say NXDOMAIN for a while. A first production deploy showed one `ErrImagePull` before the pull secret
 was in the new namespace, and recovered by itself.
 
-Live on k3s since 2026-10-17: forge-api `v0.20.0` (`ListDomains` also returns the internal domain, which the dashboard's create page shows in internal addresses, forge#102; `live.env` changed only in its image). Checked: the diff before was the image and the usual `tracking-id` noise (Dex's generation moved, its pod did not restart), `render-live.sh --check` passes, server dry run, the rollout finished, no errors in the log, and `forge domain list -o json` (built from main) returns `internalDomain: 10.150.1.222.nip.io`. Not checked: the new create page in a browser against production (it needs the owner's login). Rollback file: the v0.19.0 render.
+Live on k3s since 2026-10-18: forge-api `v0.21.0`, bringing Phase 8 M1's and M2's Go code live (`live.env`
+changed only in its image; neither milestone changes default behavior, so this was a plain image bump). The same
+day, separately, also applied: M1's `FORGE_CLI_REPO`/`FORGE_DEPLOY_REPO` env vars on forge-api (left unapplied
+since M1 merged 2026-10-17) and M4's chart source — the `forge-services` AppProject and ApplicationSet now source
+from `oci://ghcr.io/showmino/forge-chart` at `0.21.0` instead of a pinned git commit, plus the Argo CD pull
+credential this needs (above). Checked: `kubectl diff` before each apply showed exactly the intended change (and
+the usual `tracking-id` noise); after, every object `kubectl diff`s clean; `forge-api`'s rollout finished with no
+errors in the log; every real service the `forge-services` ApplicationSet generates (`forge-web-production`,
+`techdocs-production`, `showmino-production`, and the rest) picked up the new chart revision via `selfHeal` and
+is Synced and Healthy — none of them currently use `run.secrets`, so M2's Secret rename (`<name>-1password` to
+`<name>-secret`) had nothing to rename and nothing broke; a throwaway Application confirmed the chart source
+itself pulls and renders. Phase 8 M3's render.sh capabilities (`--cloud-lb`, `FORGE_INGRESS_CLASS`,
+`FORGE_DB_STORAGE_CLASS`, `FORGE_GATEWAY_CLASS`/`FORGE_GATEWAY_DOMAIN`) exist in this image and in `main` but
+`live.env` uses none of them — every default preserves today's exact behavior, so there is nothing to apply for
+M3 until something opts into one of its new modes. Not checked: the dashboard and CLI against the new forge-api
+build in a browser/session (it needs the owner's login). Rollback file: the v0.20.0 render, chart revision back
+to the pinned git commit.
+
+Before it, since 2026-10-17: forge-api `v0.20.0` (`ListDomains` also returns the internal domain, which the dashboard's create page shows in internal addresses, forge#102; `live.env` changed only in its image). Checked: the diff before was the image and the usual `tracking-id` noise (Dex's generation moved, its pod did not restart), `render-live.sh --check` passes, server dry run, the rollout finished, no errors in the log, and `forge domain list -o json` (built from main) returns `internalDomain: 10.150.1.222.nip.io`. Not checked: the new create page in a browser against production (it needs the owner's login). Rollback file: the v0.19.0 render.
 
 Before that, forge-api `v0.19.0` (choosing a public domain at create: `forge domain list`, `forge create --domain`, forge#99) with `forgegate.io=forgegate-io` added to `FORGE_PUBLIC_DOMAINS`. Checked: the diff before was the image, the domains env line and the Gateway's two new listeners `public-forgegate-io` and `public-forgegate-io-root` (a proper render; `render-live.sh --check` passes), server dry run, the new pod 1/1, the log lists the three domains with no warnings or errors, all eight Gateway listeners are Programmed, `forge domain list` (CLI v0.19.0) shows showmino.com (default), deogratias.cloud and forgegate.io, forge.showmino.com and the login's discovery answer 200. Not checked: a real service on forgegate.io (creating one needs the owner's OK; covered by `TestCreateDomain`), and the dashboard's Domain list in a browser. forgegate.io has the tunnel route `*.forgegate.io` but no apex route, so `--host @` there does not work yet. Rollback file: the v0.18.0 render.
 
@@ -369,11 +387,24 @@ Any render with `FORGE_DEPLOYS=1` and `FORGE_PUBLIC_DOMAINS` set (`render.sh`, `
 `render-live.sh --check` that runs on the owner's machine for a `live.env`-only rollout PR, which CI does not run
 at all) needs `helm` on `PATH` and reads the published chart to confirm it has `templates/dns.yaml` — which, with
 the package private, means `helm registry login ghcr.io` with read access must already be set up on whichever
-machine runs it. **Argo CD itself also needs a pull credential for the private package** (a repository Secret of
-type `oci` for `oci://ghcr.io/showmino`, or the repo-creds equivalent) before any Application sourced from the
-chart can sync — the existing `argocd-repo-kubernetes` credential is for `github.com`, not `ghcr.io`, and does not
-cover this. Set this up, and confirm with a single throwaway Application, before relying on the chart source in
-production; `kubectl diff` alone cannot show whether Argo CD can actually pull it.
+machine runs it.
+
+Argo CD's own pull credential for the private package is set up and confirmed working (2026-10-18): the 1Password
+item `vaults/Kube/items/argocd-repo-forge-chart`, synced by the `OnePasswordItem` `argocd-repo-forge-chart` in
+`showmino/kubernetes` (`infrastructure/argocd/1password-secret.yaml`) into an Argo CD `repository`-type Secret.
+Three non-obvious things it must get exactly right — each found the hard way, because getting any one wrong makes
+Argo CD silently fall back to an anonymous pull (a plain 401) rather than reporting a credential problem:
+- `type: oci`, not `helm` — `helm` is Argo CD's *other* OCI convention (a chart repository browsed through a
+  separate `chart:` field on the Application source), and its own connectivity check rejects any URL with a path
+  in it, which this one has.
+- `url: oci://ghcr.io/showmino/forge-chart` — the full chart path, **with** the `oci://` scheme. Argo CD matches
+  a stored credential to an Application's `repoURL` with `git.SameURL()`, which does no OCI-specific scheme
+  stripping, so a scheme-less `url` never matches a `repoURL` that has `oci://`.
+- `enableOCI: true` — the bare word, no surrounding quotes (a quoted `"true"` fails Argo CD's `strconv.ParseBool`).
+
+Confirmed with a throwaway Application (`oci://ghcr.io/showmino/forge-chart`, manual sync, deleted after): the
+pull and chart render succeeded (it needed more Helm values than that Application supplied to render all the way
+through, which is expected and unrelated to the credential).
 
 Sessions (live since forge-api `v0.2.0`): `GetServerInfo` answers `sessions: true` (forge-api has the GitHub App). After
 `bin/forge auth login`, `bin/forge auth status` shows a `session` row and `bin/forge auth session list` the sessions of
