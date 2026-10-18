@@ -17,7 +17,7 @@ metadata:
   name: dex
   namespace: forge
 spec:
-  ingressClassName: traefik
+  ingressClassName: ${INGRESS_CLASS}
   rules:
     - host: ${DEX_HOST}
       http:
@@ -46,7 +46,7 @@ metadata:
   name: forge-api
   namespace: forge
 spec:
-  ingressClassName: traefik
+  ingressClassName: ${INGRESS_CLASS}
   rules:
     - host: ${API_HOST}
       http:
