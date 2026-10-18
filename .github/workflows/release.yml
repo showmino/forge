@@ -37,3 +37,10 @@ jobs:
           # A fine-grained token with contents:write on showmino/homebrew-tap.
           # Without it the release is made and the Homebrew cask is skipped.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+      - uses: azure/setup-helm@v4
+      - name: Push the deploy chart
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+          helm package deploy/argocd/chart --version "$version" --app-version "$version" -d /tmp
+          helm push "/tmp/forge-chart-$version.tgz" oci://ghcr.io/showmino

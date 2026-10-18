@@ -1,5 +1,8 @@
 apiVersion: v2
-name: forge-service
+# Published to oci://ghcr.io/showmino/forge-chart on every vX.Y.Z release tag
+# (.github/workflows/release.yml); version is overridden at package time by
+# that workflow, not edited here.
+name: forge-chart
 description: A Forge service in one deploy environment (staging or production).
 type: application
 version: 0.1.0

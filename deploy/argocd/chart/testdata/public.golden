@@ -1,5 +1,5 @@
 ---
-# Source: forge-service/templates/limits.yaml
+# Source: forge-chart/templates/limits.yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -13,7 +13,7 @@ spec:
     limits.memory: 4Gi
     pods: "15"
 ---
-# Source: forge-service/templates/limits.yaml
+# Source: forge-chart/templates/limits.yaml
 apiVersion: v1
 kind: LimitRange
 metadata:
@@ -24,7 +24,7 @@ spec:
       defaultRequest: {cpu: 50m, memory: 64Mi}
       default: {cpu: 500m, memory: 512Mi}
 ---
-# Source: forge-service/templates/service.yaml
+# Source: forge-chart/templates/service.yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -34,7 +34,7 @@ spec:
   ports:
     - {name: http, port: 80, targetPort: 9090}
 ---
-# Source: forge-service/templates/deployment.yaml
+# Source: forge-chart/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -79,7 +79,7 @@ spec:
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
 ---
-# Source: forge-service/templates/dns.yaml
+# Source: forge-chart/templates/dns.yaml
 # The public address's DNS record: the platform's CloudflareRecordsApplication
 # makes a proxied CNAME <name>.<the zone's domain> to the cluster's Cloudflare
 # tunnel (a Crossplane Record underneath). It goes when the service goes. The
@@ -95,7 +95,7 @@ spec:
   dnsZones:
     zones: "showmino-com"
 ---
-# Source: forge-service/templates/httproute.yaml
+# Source: forge-chart/templates/httproute.yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
