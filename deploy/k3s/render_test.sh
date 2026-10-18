@@ -48,6 +48,15 @@ check "App: org and template repo"    sh -c "printf '%s' \"\$1\" | grep -q 'FORG
 check "no FORGE_GITHUB_ORG: render.sh refuses" sh -c "! FORGE_GITHUB_ORG= FORGE_GITHUB_APP_ID=5239131 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
 check "no previews: no FORGE_PREVIEW_PULL_SECRET needed" sh -c "env -u FORGE_PREVIEW_PULL_SECRET sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
 check "previews, no FORGE_PREVIEW_PULL_SECRET: render.sh refuses" sh -c "! env -u FORGE_PREVIEW_PULL_SECRET FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
+
+# --cloud-lb: a MetalLB-free LoadBalancer exposure mode (a cloud provider or
+# minikube tunnel assigns the address; the operator points its own hostnames
+# at it afterward).
+cloudlb=$(sh "$dir/render.sh" --cloud-lb dex.example.test api.example.test)
+check "cloud-lb: no metallb annotation" sh -c "! printf '%s' \"\$1\" | grep -q 'metallb.universe.tf'" _ "$cloudlb"
+check "cloud-lb: plain LoadBalancer Services" sh -c "printf '%s' \"\$1\" | grep -q 'type: LoadBalancer' && printf '%s' \"\$1\" | grep -qF 'host: dex.example.test'" _ "$cloudlb"
+check "cloud-lb: rejects an IP where a hostname is expected" sh -c "! sh \"\$1\" --cloud-lb 10.0.0.1 api.example.test >/dev/null 2>&1" _ "$dir/render.sh"
+check "cloud-lb: exact render pinned" sh -c "sh \"\$1\" --cloud-lb dex.example.test api.example.test | cmp -s - \"$dir/testdata/cloudlb.golden\"" _ "$dir/render.sh"
 check "App: deploy repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_DEPLOY_REPO, value: showmino/forge-deploys'" _ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
 check "App: cli repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_CLI_REPO, value: showmino/forge'" _ "$with"
 check "deploys.yaml has no literal showmino" sh -c "! FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 2>/dev/null | awk '/^# Deploys:/ {on=1} on' | grep -q showmino" _ "$dir/render.sh"

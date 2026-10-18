@@ -11,6 +11,12 @@
 # (dex.<dex-ip>.nip.io, forge.<api-ip>.nip.io):
 #   FORGE_GITHUB_ORG=<org> deploy/k3s/render.sh --lb 10.150.1.220 10.150.1.221 | kubectl apply -f -
 #
+# No Traefik, no MetalLB (a cloud provider's own LoadBalancer, or `minikube
+# tunnel`): Dex and forge-api each get a plain LoadBalancer Service with no
+# requested IP, and you point hostnames you already control at whatever
+# address the cluster assigns:
+#   FORGE_GITHUB_ORG=<org> deploy/k3s/render.sh --cloud-lb dex.example.com forge.example.com | kubectl apply -f -
+#
 # FORGE_API_IMAGE picks the image (default forge-api:dev):
 #   FORGE_GITHUB_ORG=<org> FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.1.0 deploy/k3s/render.sh forge.lan | kubectl apply -f -
 #
@@ -84,6 +90,7 @@ set -eu
 usage() {
   echo "usage: $0 <domain>                 (for example 192.168.1.50.nip.io)" >&2
   echo "       $0 --lb <dex-ip> <api-ip>   (for example --lb 10.150.1.220 10.150.1.221)" >&2
+  echo "       $0 --cloud-lb <dex-host> <api-host>   (for example --cloud-lb dex.example.com forge.example.com)" >&2
   exit 2
 }
 
@@ -102,6 +109,18 @@ case ${1:-} in
     done
     dex_host=dex.$dex_ip.nip.io api_host=forge.$api_ip.nip.io
     exposure=$dir/loadbalancer.yaml.tmpl
+    ;;
+  --cloud-lb)
+    [ $# -eq 3 ] || usage
+    dex_host=$2 api_host=$3
+    for h in "$dex_host" "$api_host"; do
+      case $h in
+        *[!A-Za-z0-9.-]*) echo "invalid hostname: $h" >&2; exit 2 ;;
+        *[!0-9.]*) ;;
+        *) echo "invalid hostname: $h (looks like an IP; --cloud-lb takes hostnames, not addresses)" >&2; exit 2 ;;
+      esac
+    done
+    exposure=$dir/cloud-lb.yaml.tmpl
     ;;
   ''|-*) usage ;;
   *)

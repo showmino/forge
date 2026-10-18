@@ -1,0 +1,29 @@
+# Clusters without Traefik, and without MetalLB: Dex and forge-api each on a
+# plain LoadBalancer Service, addressed by whatever the cluster's own
+# LoadBalancer implementation assigns (a cloud provider, or `minikube
+# tunnel` for a local proof) rather than a requested IP. ${DEX_HOST} and
+# ${API_HOST} are hostnames you already control and will point at that
+# assigned address afterward, not derived from an IP:
+#   host: ${DEX_HOST}  e.g. dex.example.com
+#   host: ${API_HOST}  e.g. forge.example.com
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: forge
+spec:
+  type: LoadBalancer
+  selector: {app: dex}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-api
+  namespace: forge
+spec:
+  type: LoadBalancer
+  selector: {app: forge-api}
+  ports:
+    - {name: http, port: 80, targetPort: http}
