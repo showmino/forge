@@ -78,15 +78,15 @@ metadata:
   name: forge-previews
   namespace: forge
 spec:
-  gatewayClassName: istio
-  infrastructure:
-    annotations:
-      metallb.universe.tf/loadBalancerIPs: ${PREVIEW_IP}
+  gatewayClassName: ${GATEWAY_CLASS}
+  infrastructure: #previewip
+    annotations: #previewip
+      metallb.universe.tf/loadBalancerIPs: ${PREVIEW_IP} #previewip
   listeners:
     - name: http
       protocol: HTTP
       port: 80
-      hostname: "*.preview.${PREVIEW_IP}.nip.io"
+      hostname: "*.preview.${PREVIEW_BASE}"
       allowedRoutes:
         namespaces:
           from: Selector
@@ -96,7 +96,7 @@ spec:
     - name: staging #deploys
       protocol: HTTP #deploys
       port: 80 #deploys
-      hostname: "*.staging.${PREVIEW_IP}.nip.io" #deploys
+      hostname: "*.staging.${PREVIEW_BASE}" #deploys
       allowedRoutes: #deploys
         namespaces: #deploys
           from: Selector #deploys
@@ -107,7 +107,7 @@ spec:
     - name: production #deploys
       protocol: HTTP #deploys
       port: 80 #deploys
-      hostname: "*.production.${PREVIEW_IP}.nip.io" #deploys
+      hostname: "*.production.${PREVIEW_BASE}" #deploys
       allowedRoutes: #deploys
         namespaces: #deploys
           from: Selector #deploys

@@ -67,6 +67,16 @@ check "ingress class is overridable" sh -c "FORGE_INGRESS_CLASS=nginx sh \"\$1\"
 # StorageClass), settable for a cluster that needs one named explicitly.
 check "no storage class by default" sh -c "! sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q storageClass" _ "$dir/render.sh"
 check "storage class is settable" sh -c "FORGE_DB_STORAGE_CLASS=longhorn-retain sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q 'storageClass: longhorn-retain'" _ "$dir/render.sh"
+
+# The previews/deploys Gateway: its class is overridable, and a domain can
+# replace FORGE_PREVIEW_IP's MetalLB-derived nip.io hostname entirely.
+gwclass=$(FORGE_GITHUB_APP_ID=5239131 FORGE_GATEWAY_CLASS=envoy-gateway FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+check "gateway class is overridable" sh -c "printf '%s' \"\$1\" | grep -q 'gatewayClassName: envoy-gateway'" _ "$gwclass"
+gwdomain=$(FORGE_GITHUB_APP_ID=5239131 FORGE_GATEWAY_DOMAIN=minikube.test sh "$dir/render.sh" --cloud-lb dex.example.test api.example.test)
+check "gateway domain: no metallb annotation" sh -c "! printf '%s' \"\$1\" | grep -q 'metallb.universe.tf'" _ "$gwdomain"
+check "gateway domain: preview hostname" sh -c "printf '%s' \"\$1\" | grep -qF 'hostname: \"*.preview.minikube.test\"'" _ "$gwdomain"
+check "gateway domain: forge-api's own FORGE_PREVIEW_DOMAIN" sh -c "printf '%s' \"\$1\" | grep -qF 'FORGE_PREVIEW_DOMAIN, value: preview.minikube.test'" _ "$gwdomain"
+check "FORGE_PREVIEW_IP and FORGE_GATEWAY_DOMAIN together are refused" sh -c "! FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 FORGE_GATEWAY_DOMAIN=minikube.test sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
 check "App: deploy repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_DEPLOY_REPO, value: showmino/forge-deploys'" _ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
 check "App: cli repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_CLI_REPO, value: showmino/forge'" _ "$with"
 check "deploys.yaml has no literal showmino" sh -c "! FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 2>/dev/null | awk '/^# Deploys:/ {on=1} on' | grep -q showmino" _ "$dir/render.sh"

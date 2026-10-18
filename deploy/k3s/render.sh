@@ -43,6 +43,13 @@
 # (required once previews are configured, no default); lines in
 # forge.yaml.tmpl with a trailing "previews" marker exist only then:
 #   FORGE_PREVIEW_IP=10.150.1.222 FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
+# FORGE_GATEWAY_DOMAIN replaces FORGE_PREVIEW_IP with a domain you already
+# control (mutually exclusive with it): the cluster's own LoadBalancer
+# implementation assigns the address, with no MetalLB annotation, and
+# previews/staging/production are reached under *.preview.<domain> etc.
+# instead of *.preview.<ip>.nip.io. FORGE_GATEWAY_CLASS (default istio)
+# names the Gateway API implementation's class either way:
+#   FORGE_GATEWAY_DOMAIN=minikube.test FORGE_GATEWAY_CLASS=envoy-gateway FORGE_GITHUB_APP_ID=5239131 ... | kubectl apply -f -
 #
 # The web dashboard (Phase 6) needs its addresses, comma-separated, each a
 # scheme and a host; lines with a trailing "web" marker exist only then:
@@ -197,7 +204,30 @@ preview_ip=${FORGE_PREVIEW_IP:-}
 case $preview_ip in
   *[!0-9.]*) echo "invalid FORGE_PREVIEW_IP: $preview_ip" >&2; exit 2 ;;
 esac
+gateway_class=${FORGE_GATEWAY_CLASS:-istio}
+case $gateway_class in
+  *[!A-Za-z0-9.-]*) echo "invalid FORGE_GATEWAY_CLASS: $gateway_class" >&2; exit 2 ;;
+esac
+gateway_domain=${FORGE_GATEWAY_DOMAIN:-}
+case $gateway_domain in
+  *[!A-Za-z0-9.-]*) echo "invalid FORGE_GATEWAY_DOMAIN: $gateway_domain" >&2; exit 2 ;;
+esac
+if [ -n "$preview_ip" ] && [ -n "$gateway_domain" ]; then
+  echo "set only one of FORGE_PREVIEW_IP and FORGE_GATEWAY_DOMAIN" >&2; exit 2
+fi
+# previews_on is true in either address mode; preview_ip itself still gates
+# the MetalLB-specific annotation and the nip.io IP-derived hostname.
+previews_on=
+[ -n "$preview_ip" ] && previews_on=1
+[ -n "$gateway_domain" ] && previews_on=1
 if [ -n "$preview_ip" ]; then
+  preview_base=$preview_ip.nip.io
+elif [ -n "$gateway_domain" ]; then
+  preview_base=$gateway_domain
+else
+  preview_base= # unvalidated without previews; keep it out of the sed
+fi
+if [ -n "$previews_on" ]; then
   pull_secret=${FORGE_PREVIEW_PULL_SECRET:?FORGE_PREVIEW_PULL_SECRET is required when previews are configured}
   case $pull_secret in
     *[!a-z0-9.-]*) echo "invalid FORGE_PREVIEW_PULL_SECRET: $pull_secret" >&2; exit 2 ;;
@@ -205,13 +235,18 @@ if [ -n "$preview_ip" ]; then
 else
   pull_secret= # unvalidated without previews; keep it out of the sed
 fi
-if [ -n "$preview_ip" ] && [ -z "$app_id" ]; then
-  echo "FORGE_PREVIEW_IP needs FORGE_GITHUB_APP_ID" >&2; exit 2
+if [ -n "$previews_on" ] && [ -z "$app_id" ]; then
+  echo "previews need FORGE_GITHUB_APP_ID" >&2; exit 2
 fi
-if [ -n "$preview_ip" ]; then
+if [ -n "$previews_on" ]; then
   previews='s/ *#previews$//' # keep the preview lines, drop their marker
 else
   previews='/#previews$/d' # no previews: drop the preview lines
+fi
+if [ -n "$preview_ip" ]; then
+  previewip_marks='s/ *#previewip$//' # IP mode: keep the MetalLB annotation
+else
+  previewip_marks='/#previewip$/d' # domain mode, or no previews: drop it
 fi
 deploys=${FORGE_DEPLOYS:-}
 chart_rev=${FORGE_DEPLOY_CHART_REVISION:-}
@@ -220,7 +255,7 @@ case $deploys in
   *) echo "invalid FORGE_DEPLOYS: $deploys (use 1)" >&2; exit 2 ;;
 esac
 if [ -n "$deploys" ]; then
-  [ -n "$preview_ip" ] || { echo "FORGE_DEPLOYS needs FORGE_PREVIEW_IP" >&2; exit 2; }
+  [ -n "$previews_on" ] || { echo "FORGE_DEPLOYS needs previews (FORGE_PREVIEW_IP or FORGE_GATEWAY_DOMAIN)" >&2; exit 2; }
   case $chart_rev in
     *[!0-9a-f]*|'') echo "FORGE_DEPLOYS needs FORGE_DEPLOY_CHART_REVISION, a 40-character commit SHA" >&2; exit 2 ;;
   esac
@@ -421,7 +456,7 @@ fi
     echo "---"
     cat "$dir/dex-onepassword.yaml.tmpl"
   fi
-  if [ -n "$preview_ip" ]; then
+  if [ -n "$previews_on" ]; then
     echo "---"
     cat "$dir/previews.yaml.tmpl"
   fi
@@ -433,7 +468,7 @@ fi
     echo "---"
     cat "$dir/resources.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+} | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |
