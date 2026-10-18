@@ -583,7 +583,10 @@ CI runs tests with `-race`, golangci-lint, govulncheck, `buf lint`,
 `buf breaking` against the base branch, a check that `gen/` is current, and
 `goreleaser check`. Tagging `v*` releases binaries for Linux, macOS and Windows
 (amd64, arm64) to GitHub Releases and a Homebrew tap, with checksums, cosign
-signatures and SBOMs, plus a `ghcr.io/showmino/forge-api` image.
+signatures and SBOMs, plus a `ghcr.io/showmino/forge-api` image and, from a
+separate job, `deploy/argocd/chart` packaged and pushed as a Helm/OCI
+artifact to `ghcr.io/showmino/forge-chart` at the same version (no leading
+`v`).
 
 Releases need a `HOMEBREW_TAP_GITHUB_TOKEN` secret with write access to
 `showmino/homebrew-tap`.

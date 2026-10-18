@@ -126,7 +126,7 @@ audit log live and its resources built but switched off on the cluster; phase
   - A staging deploy never makes the release of a final version, and `bump` is refused outside production.
   - Versions are cut under one lock per repo.
   - Known limit: the tag list is read in full on every deploy and refuses a repo with more than 5000 tags (`github.ErrTooManyTags`) rather than work from a partial list; prune old `-rc` tags or change the lookup before a service gets there.
-  - Forge itself is released by pushing a `vX.Y.Z` tag to `showmino/forge` (`release.yml`, goreleaser: CLI binaries and `ghcr.io/showmino/forge-api:vX.Y.Z`).
+  - Forge itself is released by pushing a `vX.Y.Z` tag to `showmino/forge` (`release.yml`: goreleaser's CLI binaries and `ghcr.io/showmino/forge-api:vX.Y.Z`, plus a separate job publishing `deploy/argocd/chart` to `ghcr.io/showmino/forge-chart` at the same version).
 - **Deleting a service (2026-10-11):** `DeleteService` takes down what the service runs before it leaves the catalog (`internal/server/service_teardown.go`, wired with `catalog.EnableTeardown`): previews are destroyed, then production and staging are removed (the values file leaves forge-deploys, Argo CD removes the application and its workloads, forge-api deletes the namespace if it is Forge's), and the catalog entry goes last.
   - With anything to take down it is an operation of kind `delete_service` on `services/<svc>`; a service that runs nothing is removed at once.
   - While it runs the service is marked as being deleted (`Catalog.refuseDeleting`): no deploy, preview or resource run can start for it, and its deploy targets are locked.

@@ -347,15 +347,23 @@ there only the first part can be checked by script (GetServerInfo, the preflight
 The dashboard's repo is `showmino/forge-web` (on the owner's machine it is checked out next to this one, `../forge-web`).
 After an API change, run `sh scripts/sync-proto.sh ../forge` in that repo: the script lives there.
 
-Releasing Forge itself: push a `vX.Y.Z` tag on `main` of `showmino/forge`. `release.yml` (goreleaser) publishes the
-GitHub release with the CLI for Linux, macOS and Windows (checksums signed with cosign, SBOMs) and
-`ghcr.io/showmino/forge-api:vX.Y.Z` (also `latest`), which is the image to roll out. The Homebrew cask is skipped
-until there is a `showmino/homebrew-tap` and the secret `HOMEBREW_TAP_GITHUB_TOKEN`. Release builds of the CLI link
-`version.APIURL=https://forge-api.showmino.com` as the lowest-precedence API (`forge doctor` shows it as
-`(built-in)`); change it in `.goreleaser.yaml` if the API's address changes. The image package must let the
-repo's workflows write: package settings, "Manage Actions access", `forge` with role Write (set on 2026-10-11; the
-first run failed with `permission_denied: write_package` without it). A run that failed before publishing can be
-re-run on the same tag.
+Releasing Forge itself: push a `vX.Y.Z` tag on `main` of `showmino/forge`. `release.yml` has two jobs on that tag.
+The `release` job (goreleaser) publishes the GitHub release with the CLI for Linux, macOS and Windows (checksums
+signed with cosign, SBOMs) and `ghcr.io/showmino/forge-api:vX.Y.Z` (also `latest`), which is the image to roll out.
+The Homebrew cask is skipped until there is a `showmino/homebrew-tap` and the secret `HOMEBREW_TAP_GITHUB_TOKEN`.
+Release builds of the CLI link `version.APIURL=https://forge-api.showmino.com` as the lowest-precedence API
+(`forge doctor` shows it as `(built-in)`); change it in `.goreleaser.yaml` if the API's address changes. The image
+package must let the repo's workflows write: package settings, "Manage Actions access", `forge` with role Write
+(set on 2026-10-11; the first run failed with `permission_denied: write_package` without it). A run that failed
+before publishing can be re-run on the same tag.
+
+The separate `chart` job packages `deploy/argocd/chart` with Helm (version and appVersion set to the tag, no
+leading `v`) and pushes it to `oci://ghcr.io/showmino/forge-chart`. It is a separate job precisely so it can be
+re-run on its own without re-running goreleaser (which cannot simply be re-run once it has already published).
+The package is private (owner decision, 2026-10-18): `helm show chart`/`helm pull` against it need
+`helm registry login ghcr.io` first, with a token that can read it. It needs the same "Manage Actions access:
+`forge` with role Write" as the image package; check this after the first tag that publishes it, the same way it
+was checked for the image package on 2026-10-11.
 
 Sessions (live since forge-api `v0.2.0`): `GetServerInfo` answers `sessions: true` (forge-api has the GitHub App). After
 `bin/forge auth login`, `bin/forge auth status` shows a `session` row and `bin/forge auth session list` the sessions of

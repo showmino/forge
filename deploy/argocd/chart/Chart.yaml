@@ -1,5 +1,13 @@
 apiVersion: v2
-name: forge-service
+# Published to oci://ghcr.io/<repo owner>/forge-chart on every vX.Y.Z release
+# tag (.github/workflows/release.yml); version is overridden at package time
+# by that workflow, not edited here.
+name: forge-chart
 description: A Forge service in one deploy environment (staging or production).
 type: application
 version: 0.1.0
+# Lets GHCR link the published package to this repo (so GITHUB_TOKEN keeps
+# read access even while the package is private); a fork's own release
+# publishes under its own repo and should change this to match.
+sources:
+  - https://github.com/showmino/forge
