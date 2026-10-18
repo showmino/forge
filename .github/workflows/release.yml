@@ -43,4 +43,4 @@ jobs:
           version=${GITHUB_REF_NAME#v}
           helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
           helm package deploy/argocd/chart --version "$version" --app-version "$version" -d /tmp
-          helm push "/tmp/forge-chart-$version.tgz" oci://ghcr.io/showmino
+          helm push "/tmp/forge-chart-$version.tgz" "oci://ghcr.io/${{ github.repository_owner }}"
