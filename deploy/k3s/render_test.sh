@@ -62,6 +62,11 @@ check "cloud-lb: exact render pinned" sh -c "sh \"\$1\" --cloud-lb dex.example.t
 # overridable for a cluster whose ingress controller uses another class.
 check "ingress class defaults to traefik" sh -c "sh \"\$1\" example.test | grep -q 'ingressClassName: traefik'" _ "$dir/render.sh"
 check "ingress class is overridable" sh -c "FORGE_INGRESS_CLASS=nginx sh \"\$1\" example.test | grep -q 'ingressClassName: nginx'" _ "$dir/render.sh"
+
+# CloudNativePG's storage class: unset by default (the cluster's own default
+# StorageClass), settable for a cluster that needs one named explicitly.
+check "no storage class by default" sh -c "! sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q storageClass" _ "$dir/render.sh"
+check "storage class is settable" sh -c "FORGE_DB_STORAGE_CLASS=longhorn-retain sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q 'storageClass: longhorn-retain'" _ "$dir/render.sh"
 check "App: deploy repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_DEPLOY_REPO, value: showmino/forge-deploys'" _ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
 check "App: cli repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_CLI_REPO, value: showmino/forge'" _ "$with"
 check "deploys.yaml has no literal showmino" sh -c "! FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 2>/dev/null | awk '/^# Deploys:/ {on=1} on' | grep -q showmino" _ "$dir/render.sh"
@@ -85,7 +90,7 @@ check "empty writer groups refused"     sh -c "! FORGE_WRITER_GROUPS= sh \"$dir/
 check "bad writer groups refused"       sh -c "! FORGE_WRITER_GROUPS='a;rm' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "comma-only writer groups refused" sh -c "! FORGE_WRITER_GROUPS=, sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "trailing-comma writer groups refused" sh -c "! FORGE_WRITER_GROUPS='showmino:a,' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "database: CNPG cluster forge-db" sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Cluster' && printf '%s' \"\$1\" | grep -qF 'name: forge-db' && printf '%s' \"\$1\" | grep -qF 'instances: 2' && printf '%s' \"\$1\" | grep -qF 'imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie' && printf '%s' \"\$1\" | grep -qF 'storageClass: longhorn-retain'" _ "$with"
+check "database: CNPG cluster forge-db" sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Cluster' && printf '%s' \"\$1\" | grep -qF 'name: forge-db' && printf '%s' \"\$1\" | grep -qF 'instances: 2' && printf '%s' \"\$1\" | grep -qF 'imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie'" _ "$with"
 check "database: dex database"          sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Database' && printf '%s' \"\$1\" | grep -qF 'name: forge-db-dex' && printf '%s' \"\$1\" | grep -qF 'name: dex'" _ "$with"
 check "database: rendered without an App too" sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Cluster'" _ "$without"
 check "Dex: storage in Postgres"        sh -c "printf '%s' \"\$1\" | grep -qF 'type: postgres' && printf '%s' \"\$1\" | grep -qF 'host: forge-db-rw.forge.svc' && printf '%s' \"\$1\" | grep -qF 'password: \$DEX_DB_PASSWORD' && printf '%s' \"\$1\" | grep -qF 'secretKeyRef: {name: forge-db-app, key: password}'" _ "$with"

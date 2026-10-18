@@ -12,7 +12,7 @@ spec:
   imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
   storage:
     size: 5Gi
-    storageClass: longhorn-retain # the volumes outlive an accidental delete
+    storageClass: ${DB_STORAGE_CLASS} # the volumes outlive an accidental delete #dbstorage
   bootstrap:
     initdb:
       database: forge
