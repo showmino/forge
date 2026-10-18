@@ -48,6 +48,35 @@ check "App: org and template repo"    sh -c "printf '%s' \"\$1\" | grep -q 'FORG
 check "no FORGE_GITHUB_ORG: render.sh refuses" sh -c "! FORGE_GITHUB_ORG= FORGE_GITHUB_APP_ID=5239131 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
 check "no previews: no FORGE_PREVIEW_PULL_SECRET needed" sh -c "env -u FORGE_PREVIEW_PULL_SECRET sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
 check "previews, no FORGE_PREVIEW_PULL_SECRET: render.sh refuses" sh -c "! env -u FORGE_PREVIEW_PULL_SECRET FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
+
+# --cloud-lb: a MetalLB-free LoadBalancer exposure mode (a cloud provider or
+# minikube tunnel assigns the address; the operator points its own hostnames
+# at it afterward).
+cloudlb=$(sh "$dir/render.sh" --cloud-lb dex.example.test api.example.test)
+check "cloud-lb: no metallb annotation" sh -c "! printf '%s' \"\$1\" | grep -q 'metallb.universe.tf'" _ "$cloudlb"
+check "cloud-lb: plain LoadBalancer Services" sh -c "printf '%s' \"\$1\" | grep -q 'type: LoadBalancer' && printf '%s' \"\$1\" | grep -qF 'host: dex.example.test'" _ "$cloudlb"
+check "cloud-lb: rejects an IP where a hostname is expected" sh -c "! sh \"\$1\" --cloud-lb 10.0.0.1 api.example.test >/dev/null 2>&1" _ "$dir/render.sh"
+check "cloud-lb: exact render pinned" sh -c "sh \"\$1\" --cloud-lb dex.example.test api.example.test | cmp -s - \"$dir/testdata/cloudlb.golden\"" _ "$dir/render.sh"
+
+# The bare-domain (Traefik) mode's Ingress class: traefik by default,
+# overridable for a cluster whose ingress controller uses another class.
+check "ingress class defaults to traefik" sh -c "sh \"\$1\" example.test | grep -q 'ingressClassName: traefik'" _ "$dir/render.sh"
+check "ingress class is overridable" sh -c "FORGE_INGRESS_CLASS=nginx sh \"\$1\" example.test | grep -q 'ingressClassName: nginx'" _ "$dir/render.sh"
+
+# CloudNativePG's storage class: unset by default (the cluster's own default
+# StorageClass), settable for a cluster that needs one named explicitly.
+check "no storage class by default" sh -c "! sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q storageClass" _ "$dir/render.sh"
+check "storage class is settable" sh -c "FORGE_DB_STORAGE_CLASS=longhorn-retain sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q 'storageClass: longhorn-retain'" _ "$dir/render.sh"
+
+# The previews/deploys Gateway: its class is overridable, and a domain can
+# replace FORGE_PREVIEW_IP's MetalLB-derived nip.io hostname entirely.
+gwclass=$(FORGE_GITHUB_APP_ID=5239131 FORGE_GATEWAY_CLASS=envoy-gateway FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+check "gateway class is overridable" sh -c "printf '%s' \"\$1\" | grep -q 'gatewayClassName: envoy-gateway'" _ "$gwclass"
+gwdomain=$(FORGE_GITHUB_APP_ID=5239131 FORGE_GATEWAY_DOMAIN=minikube.test sh "$dir/render.sh" --cloud-lb dex.example.test api.example.test)
+check "gateway domain: no metallb annotation" sh -c "! printf '%s' \"\$1\" | grep -q 'metallb.universe.tf'" _ "$gwdomain"
+check "gateway domain: preview hostname" sh -c "printf '%s' \"\$1\" | grep -qF 'hostname: \"*.preview.minikube.test\"'" _ "$gwdomain"
+check "gateway domain: forge-api's own FORGE_PREVIEW_DOMAIN" sh -c "printf '%s' \"\$1\" | grep -qF 'FORGE_PREVIEW_DOMAIN, value: preview.minikube.test'" _ "$gwdomain"
+check "FORGE_PREVIEW_IP and FORGE_GATEWAY_DOMAIN together are refused" sh -c "! FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 FORGE_GATEWAY_DOMAIN=minikube.test sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
 check "App: deploy repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_DEPLOY_REPO, value: showmino/forge-deploys'" _ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
 check "App: cli repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_CLI_REPO, value: showmino/forge'" _ "$with"
 check "deploys.yaml has no literal showmino" sh -c "! FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 2>/dev/null | awk '/^# Deploys:/ {on=1} on' | grep -q showmino" _ "$dir/render.sh"
@@ -71,7 +100,7 @@ check "empty writer groups refused"     sh -c "! FORGE_WRITER_GROUPS= sh \"$dir/
 check "bad writer groups refused"       sh -c "! FORGE_WRITER_GROUPS='a;rm' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "comma-only writer groups refused" sh -c "! FORGE_WRITER_GROUPS=, sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "trailing-comma writer groups refused" sh -c "! FORGE_WRITER_GROUPS='showmino:a,' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "database: CNPG cluster forge-db" sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Cluster' && printf '%s' \"\$1\" | grep -qF 'name: forge-db' && printf '%s' \"\$1\" | grep -qF 'instances: 2' && printf '%s' \"\$1\" | grep -qF 'imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie' && printf '%s' \"\$1\" | grep -qF 'storageClass: longhorn-retain'" _ "$with"
+check "database: CNPG cluster forge-db" sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Cluster' && printf '%s' \"\$1\" | grep -qF 'name: forge-db' && printf '%s' \"\$1\" | grep -qF 'instances: 2' && printf '%s' \"\$1\" | grep -qF 'imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie'" _ "$with"
 check "database: dex database"          sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Database' && printf '%s' \"\$1\" | grep -qF 'name: forge-db-dex' && printf '%s' \"\$1\" | grep -qF 'name: dex'" _ "$with"
 check "database: rendered without an App too" sh -c "printf '%s' \"\$1\" | grep -qF 'kind: Cluster'" _ "$without"
 check "Dex: storage in Postgres"        sh -c "printf '%s' \"\$1\" | grep -qF 'type: postgres' && printf '%s' \"\$1\" | grep -qF 'host: forge-db-rw.forge.svc' && printf '%s' \"\$1\" | grep -qF 'password: \$DEX_DB_PASSWORD' && printf '%s' \"\$1\" | grep -qF 'secretKeyRef: {name: forge-db-app, key: password}'" _ "$with"

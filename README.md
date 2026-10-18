@@ -129,6 +129,9 @@ forge context set k3s --api http://forge.<node-ip>.nip.io --use
 forge auth login
 ```
 
+`FORGE_INGRESS_CLASS` (default `traefik`) picks a different `IngressClass`
+for a cluster whose ingress controller isn't Traefik.
+
 On a cluster without Traefik, or when you are not on the node, push the image
 to a registry and give Dex and forge-api their own LoadBalancer IPs (MetalLB):
 
@@ -143,6 +146,18 @@ kubectl -n forge rollout restart deploy/forge-api
 
 forge context set k3s --api http://forge.<api-ip>.nip.io --use
 forge auth login
+```
+
+Without MetalLB (a cloud provider's own LoadBalancer implementation, or
+`minikube tunnel`), use `--cloud-lb <dex-host> <api-host>` instead of `--lb`:
+hostnames you already control, not an IP MetalLB would annotate. Point them
+at whatever address the cluster assigns afterward — and make sure they
+resolve from inside the cluster too (the same requirement the nip.io modes
+already have, below): forge-api's pod discovers Dex's OIDC issuer at
+startup and fails to start if it can't resolve the Dex hostname.
+
+```sh
+FORGE_GITHUB_ORG=<org> deploy/k3s/render.sh --cloud-lb dex.example.com forge.example.com | kubectl apply -f -
 ```
 
 For templates and `forge create`, run forge-api as a GitHub App. Put the App's key
@@ -162,7 +177,8 @@ it regardless of the App). `FORGE_TEMPLATES_REPO`, `FORGE_REPO` and
 `<org>/forge-deploys`; set them to point at different repos.
 
 Preview environments (`forge env`) need the App too, plus a free LoadBalancer IP
-for their Gateway (Gateway API with Istio's `istio` class) and a dockerconfigjson
+for their Gateway (Gateway API with Istio's `istio` class, `FORGE_GATEWAY_CLASS`
+to use a different implementation) and a dockerconfigjson
 pull secret in namespace `forge` that can read the services' images:
 
 ```sh
@@ -171,6 +187,13 @@ FORGE_GITHUB_ORG=<org> FORGE_PREVIEW_IP=<gateway-ip> FORGE_PREVIEW_PULL_SECRET=<
 ```
 
 Previews are then reached at `http://<env>.preview.<gateway-ip>.nip.io`.
+
+Without MetalLB, `FORGE_GATEWAY_DOMAIN` replaces `FORGE_PREVIEW_IP` (set only
+one of the two): the cluster's own LoadBalancer implementation assigns the
+Gateway's address, with no requested-IP annotation, and previews are reached
+at `http://<env>.preview.<domain>` instead — point that hostname (and
+`staging.`/`production.` once deploys are on) at the assigned address
+yourself, the same way `--cloud-lb`'s hostnames are.
 
 Deploys (`forge deploy`) need previews, the GitOps repo (`FORGE_DEPLOY_REPO`,
 default `<org>/forge-deploys`; private, with an initial commit), and a commit
@@ -200,8 +223,11 @@ GitHub OAuth App owned by the org with the callback
 `http://dex.<dex-ip>.nip.io/dex/callback`, and put its `client_id` and
 `client_secret` in the Secret `dex-github`, or in a 1Password item named by
 `FORGE_DEX_ONEPASSWORD_ITEM`. The render also creates the CloudNativePG cluster
-`forge-db` (2 instances, `longhorn-retain`), which holds the service catalog
-and Dex's logins; it needs the CloudNativePG operator. There are no backups yet.
+`forge-db` (2 instances), which holds the service catalog
+and Dex's logins; it needs the CloudNativePG operator. `FORGE_DB_STORAGE_CLASS`
+names its StorageClass explicitly (showmino uses `longhorn-retain`, so its
+volumes outlive an accidental delete); left unset, the cluster's own default
+StorageClass is used. There are no backups yet.
 
 `forge service delete <name>` (and Delete in the dashboard) removes a service
 and everything it runs: its previews, its staging and production deployments

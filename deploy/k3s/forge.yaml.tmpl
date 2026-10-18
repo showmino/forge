@@ -146,7 +146,7 @@ spec:
             - {name: FORGE_TEMPLATES_REPO, value: ${FORGE_TEMPLATES_REPO}} #app
             - {name: FORGE_CLI_REPO, value: ${FORGE_REPO}} #app
             - {name: FORGE_PREVIEWS, value: "1"} #previews
-            - {name: FORGE_PREVIEW_DOMAIN, value: preview.${PREVIEW_IP}.nip.io} #previews
+            - {name: FORGE_PREVIEW_DOMAIN, value: preview.${PREVIEW_BASE}} #previews
             - {name: FORGE_PREVIEW_PULL_SECRET, value: forge/${PULL_SECRET}} #previews
             - {name: FORGE_DEPLOYS, value: "1"} #deploys
             - {name: FORGE_DEPLOY_REPO, value: ${FORGE_DEPLOY_REPO}} #deploys
