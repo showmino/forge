@@ -1,6 +1,6 @@
 # Deploys: Forge's Argo CD objects and forge-api's read access to them.
 # render.sh adds this when FORGE_DEPLOYS=1.
-#   ${DEPLOY_CHART_REVISION}  forge commit the chart is taken from (pinned)
+#   ${DEPLOY_CHART_REVISION}  the published chart's version (pinned), e.g. 0.20.0
 # Applications are named <service>-<env> and deploy into the namespace of that
 # name; forge-api refuses a namespace that exists and isn't Forge's.
 # Existing namespaces named like *-staging or *-production that are not Forge's
@@ -14,7 +14,11 @@ metadata:
 spec:
   description: Forge services, deployed by forge-api through ${FORGE_DEPLOY_REPO}
   sourceRepos:
-    - https://github.com/${FORGE_REPO}.git
+    # Best-effort shape for an OCI Helm source's allow-list entry, matching
+    # the Application source's repoURL below exactly; verify this against
+    # the ArgoCD version actually running on the cluster before relying on
+    # it (docs/plans/2026-10-17-phase-8-m4-chart-release.md, Review Focus).
+    - oci://ghcr.io/${FORGE_CHART_REPO}
     - https://github.com/${FORGE_DEPLOY_REPO}.git
   destinations:
     - {server: https://kubernetes.default.svc, namespace: "!docs-dev-staging"}
@@ -73,9 +77,8 @@ spec:
     spec:
       project: forge-services
       sources:
-        - repoURL: https://github.com/${FORGE_REPO}.git
+        - repoURL: oci://ghcr.io/${FORGE_CHART_REPO}
           targetRevision: ${DEPLOY_CHART_REVISION}
-          path: deploy/argocd/chart
           helm:
             releaseName: '{{ index .path.segments 1 }}'
             valueFiles:

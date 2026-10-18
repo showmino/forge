@@ -19,6 +19,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # render-live.sh's dns.yaml-presence guard pulls the published chart
+      # from ghcr.io (live.env sets FORGE_PUBLIC_DOMAINS); GITHUB_TOKEN can
+      # read this repo's own packages even while the package is private.
+      packages: read
     services:
       postgres:
         # Docker Hub's official image through Google's mirror: Docker Hub
@@ -45,6 +51,9 @@ jobs:
       - run: go test -race -count=1 ./...
       - name: Deploy chart golden
         run: make chart-test
+      - uses: azure/setup-helm@v4
+      - name: Log in to ghcr.io for the published (private) chart package
+        run: helm registry login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
       - name: The live render is the render of live.env
         run: sh deploy/k3s/render-live.sh --check
 

@@ -77,10 +77,10 @@ check "gateway domain: no metallb annotation" sh -c "! printf '%s' \"\$1\" | gre
 check "gateway domain: preview hostname" sh -c "printf '%s' \"\$1\" | grep -qF 'hostname: \"*.preview.minikube.test\"'" _ "$gwdomain"
 check "gateway domain: forge-api's own FORGE_PREVIEW_DOMAIN" sh -c "printf '%s' \"\$1\" | grep -qF 'FORGE_PREVIEW_DOMAIN, value: preview.minikube.test'" _ "$gwdomain"
 check "FORGE_PREVIEW_IP and FORGE_GATEWAY_DOMAIN together are refused" sh -c "! FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 FORGE_GATEWAY_DOMAIN=minikube.test sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
-check "App: deploy repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_DEPLOY_REPO, value: showmino/forge-deploys'" _ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
+check "App: deploy repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_DEPLOY_REPO, value: showmino/forge-deploys'" _ "$(FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0.20.0 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
 check "App: cli repo defaults from org" sh -c "printf '%s' \"\$1\" | grep -q 'FORGE_CLI_REPO, value: showmino/forge'" _ "$with"
-check "deploys.yaml has no literal showmino" sh -c "! FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 2>/dev/null | awk '/^# Deploys:/ {on=1} on' | grep -q showmino" _ "$dir/render.sh"
-check "deploys.yaml follows a different org" sh -c "printf '%s' \"\$1\" | grep -q 'someorg/forge-deploys' && printf '%s' \"\$1\" | grep -q 'someorg/forge'" _ "$(FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0123456789abcdef0123456789abcdef01234567 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
+check "deploys.yaml has no literal showmino" sh -c "! FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0.20.0 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 2>/dev/null | awk '/^# Deploys:/ {on=1} on' | grep -q showmino" _ "$dir/render.sh"
+check "deploys.yaml follows a different org" sh -c "printf '%s' \"\$1\" | grep -q 'someorg/forge-deploys' && printf '%s' \"\$1\" | grep -q 'someorg/forge'" _ "$(FORGE_GITHUB_ORG=someorg FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0.20.0 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)"
 check "App: secret volume, read-only" sh -c "printf '%s' \"\$1\" | grep -q 'secretName: forge-github-app' && printf '%s' \"\$1\" | grep -q 'readOnly: true'" _ "$with"
 check "App: key readable by the API"  sh -c "printf '%s' \"\$1\" | grep -q 'fsGroup: 65532' && printf '%s' \"\$1\" | grep -q 'defaultMode: 0440'" _ "$with"
 check "App: no #app markers"          sh -c "! printf '%s' \"\$1\" | grep -q '#app'" _ "$with"
@@ -125,7 +125,7 @@ check "previews: valid YAML for kubectl"    sh -c "printf '%s' \"\$1\" | kubectl
 check "previews need an App"                sh -c "! FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad preview IP refused"              sh -c "! FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP='1.2.3.4;x' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad pull secret refused"             sh -c "! FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_PREVIEW_PULL_SECRET='A_b' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-rev=0123456789abcdef0123456789abcdef01234567
+rev=0.20.0
 dep=$(FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
 # deploys_section: everything deploys.yaml.tmpl adds (from its first line to the end).
 deploys_section() { printf '%s\n' "$dep" | awk '/^# Deploys:/ {on=1} on'; }
@@ -218,11 +218,43 @@ check "web: the scheme's own port refused"      bad_web http://forge-web.example
 check "web: a port is fine"                     sh -c "FORGE_WEB_ORIGINS=http://localhost:3000 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 | grep -qF 'allowedOrigins: [\"http://localhost:3000\"]'"
 
 # Public addresses: off unless FORGE_PUBLIC_DOMAINS is set ($dep is a render with deploys and without it).
-# The chart revision must be one whose chart makes DNS records: this checkout's.
-head_rev=$(git -C "$dir" rev-parse HEAD)
-pub_render() { FORGE_PUBLIC_DOMAINS=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=${2:-$head_rev} FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
+# The dns.yaml-presence guard now fetches the published chart from
+# ghcr.io, which doesn't exist until this phase's own release tag ships
+# it; a stub `helm` on PATH (ahead of the real one) simulates that fetch
+# deterministically for every check below, without real network access.
+# `helm pull ... --version X -d DIR`: X ending "-no-dns" writes a tarball
+# without templates/dns.yaml; X ending "-unreachable" fails outright
+# (simulating no network or auth); anything else writes one that has it.
+fake_helm_dir=$(mktemp -d)
+cat > "$fake_helm_dir/helm" <<'HELMSTUB'
+#!/usr/bin/env sh
+set -eu
+[ "${1:-}" = pull ] || { echo "fake helm: only 'pull' is stubbed" >&2; exit 1; }
+shift
+version= outdir=.
+while [ $# -gt 0 ]; do
+  case $1 in
+    --version) version=$2; shift 2 ;;
+    -d) outdir=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+case $version in
+  *-unreachable) echo "Error: failed to do request: dial tcp: no route to host" >&2; exit 1 ;;
+esac
+work=$(mktemp -d)
+mkdir -p "$work/forge-chart/templates"
+case $version in
+  *-no-dns) : > "$work/forge-chart/templates/other.yaml" ;;
+  *) : > "$work/forge-chart/templates/dns.yaml" ;;
+esac
+tar czf "$outdir/forge-chart-$version.tgz" -C "$work" forge-chart
+rm -rf "$work"
+HELMSTUB
+chmod +x "$fake_helm_dir/helm"
+pub_render() { PATH="$fake_helm_dir:$PATH" FORGE_PUBLIC_DOMAINS=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=${2:-$rev} FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
 pub=$(pub_render showmino.com=showmino-com,deogratias.cloud=deogratias-cloud)
-dep_head=$(FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+dep_head=$(FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
 pub_has() { printf '%s\n' "$pub" | grep -qF -- "$1"; }
 pub_settings() {
   pub_has '{name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud"}' &&
@@ -247,36 +279,36 @@ check "public: adds lines and changes no others" pub_only_adds
 check "public: needs deploys"                    sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 
 # Argo CD links: off unless FORGE_ARGOCD_URL is set.
-argo_render() { FORGE_ARGOCD_URL=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
+argo_render() { FORGE_ARGOCD_URL=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
 argo_on() { out=$(argo_render https://argocd.showmino.com) && printf '%s\n' "$out" | grep -qF '{name: FORGE_ARGOCD_URL, value: "https://argocd.showmino.com"}' && ! printf '%s\n' "$out" | grep -q '#argocd'; }
 argo_off() { ! printf '%s\n' "$dep_head" | grep -q -e FORGE_ARGOCD_URL -e '#argocd'; }
 check "argocd: forge-api gets the address"        argo_on
 check "argocd: nothing rendered without it"       argo_off
 for bad in argocd.showmino.com https://argocd.showmino.com/ 'https://a.com/x' 'https://a.com|b' 'javascript:alert(1)'; do
-  check "argocd: \"$bad\" refused" sh -c "! FORGE_ARGOCD_URL='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+  check "argocd: \"$bad\" refused" sh -c "! FORGE_ARGOCD_URL='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 done
 check "argocd: needs deploys"                     sh -c "! FORGE_ARGOCD_URL=https://argocd.showmino.com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 
 # run.secrets vaults: off unless FORGE_SECRET_VAULTS is set.
-vaults_render() { FORGE_SECRET_VAULTS=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
+vaults_render() { FORGE_SECRET_VAULTS=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
 vaults_on() { out=$(vaults_render Apps,Shared) && printf '%s\n' "$out" | grep -qF '{name: FORGE_SECRET_VAULTS, value: "Apps,Shared"}' && ! printf '%s\n' "$out" | grep -q '#vaults'; }
 denied_on() { out=$(FORGE_SECRET_DENIED_ITEMS=forge-github-app,ghcr-secret vaults_render Kube) && printf '%s\n' "$out" | grep -qF '{name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,ghcr-secret"}'; }
 check "vaults: forge-api gets the denied items"   denied_on
-check "vaults: denied items need vaults"         sh -c "! FORGE_SECRET_DENIED_ITEMS=x FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "vaults: a bad denied item refused"        sh -c "! FORGE_SECRET_VAULTS=Kube FORGE_SECRET_DENIED_ITEMS='a|b' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "vaults: denied items need vaults"         sh -c "! FORGE_SECRET_DENIED_ITEMS=x FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "vaults: a bad denied item refused"        sh -c "! FORGE_SECRET_VAULTS=Kube FORGE_SECRET_DENIED_ITEMS='a|b' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 vaults_off() { ! printf '%s\n' "$dep_head" | grep -q -e FORGE_SECRET_VAULTS -e '#vaults'; }
 options_kinds() { for k in '{group: onepassword.com, kind: OnePasswordItem}' '{group: batch, kind: CronJob}' '{group: keda.sh, kind: ScaledObject}'; do printf '%s\n' "$dep_head" | grep -qF -- "$k" || return 1; done; }
 check "vaults: forge-api gets the list"           vaults_on
 check "vaults: nothing rendered without it"       vaults_off
 check "options: the project allows their kinds"   options_kinds
 for bad in 'My Vault' 'Apps,' ',Apps' 'Apps|x' 'a/b'; do
-  check "vaults: \"$bad\" refused" sh -c "! FORGE_SECRET_VAULTS='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+  check "vaults: \"$bad\" refused" sh -c "! FORGE_SECRET_VAULTS='$bad' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 done
 
 # The secret backend: off (default onepassword, nothing rendered) unless
 # FORGE_SECRET_BACKEND names a different one, in which case forge-api and the
 # chart's own helm parameter both get it, so they cannot drift apart.
-secretbackend_render() { FORGE_SECRET_BACKEND=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
+secretbackend_render() { FORGE_SECRET_BACKEND=$1 FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221; }
 secretbackend_on() {
   out=$(secretbackend_render external) &&
     printf '%s\n' "$out" | grep -qF '{name: FORGE_SECRET_BACKEND, value: "external"}' &&
@@ -287,15 +319,21 @@ secretbackend_off() { ! printf '%s\n' "$dep_head" | grep -q -e FORGE_SECRET_BACK
 check "secret backend: forge-api and the chart both get it" secretbackend_on
 check "secret backend: nothing rendered without it"         secretbackend_off
 check "secret backend: needs deploys" sh -c "! FORGE_SECRET_BACKEND=external FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "secret backend: a bad value refused" sh -c "! FORGE_SECRET_BACKEND='my backend' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "public: a chart revision without DNS records refused" sh -c "! FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=18b12326d3df2c1a11b9f664f378b579eb472aaf FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "secret backend: a bad value refused" sh -c "! FORGE_SECRET_BACKEND='my backend' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+
+# The chart revision is a published chart's SemVer now, not a commit SHA.
+check "chart revision accepts a semver" sh -c "FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0.20.0 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q 'targetRevision: 0.20.0'" _ "$dir/render.sh"
+check "chart revision refuses the old SHA shape" sh -c "! FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=2b84f5e1676aa92090e43737790655e6436cb070 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
+check "public: a chart revision without DNS records refused" sh -c "! PATH=\"$fake_helm_dir:\$PATH\" FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.0.0-no-dns FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "public: an unreachable registry refused, not silently passed" sh -c "! PATH=\"$fake_helm_dir:\$PATH\" FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.0.0-unreachable FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "public: no helm on PATH refused clearly" sh -c "! PATH=/usr/bin:/bin FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.20.0 FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 # What forge-api (ParsePublicDomains) refuses, the render refuses too.
 for bad in example.com example.com= =example-com Example.com=example-com example.com=example.com localhost=local \
   a.com=a-com,a.com=other a..com=a-com example.com=1zone example.com=zone- example.com=-zone -example.com=z example.c=z example.123=z \
   example.com=example-com,,other.io=other-io x.com=x-com,y.com=x-com-root; do
   check "public: \"$bad\" refused" bad_pub "$bad"
 done
-check "public: a bad tunnel name refused"         sh -c "! FORGE_PUBLIC_DNS_TUNNEL='a|b' FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$head_rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "public: a bad tunnel name refused"         sh -c "! FORGE_PUBLIC_DNS_TUNNEL='a|b' FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 tunnel_ignored() { [ "$(FORGE_PUBLIC_DNS_TUNNEL='x|;s|forge|HACKED' FORGE_GITHUB_APP_ID=5239131 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 | cksum)" = "$(printf '%s\n' "$with" | cksum)" ]; }
 check "public: the tunnel name is ignored without public domains" tunnel_ignored
 
