@@ -70,10 +70,12 @@
 # (FORGE_PREVIEW_IP). FORGE_PUBLIC_DNS_TUNNEL (default production) names the
 # tunnel the records point at.
 #
-# Deploys (forge deploy) need previews, plus a commit on origin/main that Argo
-# CD takes the chart from (an unpushed commit makes every Application fail);
-# lines with a trailing "deploys" marker exist only then:
-#   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=... | kubectl apply -f -
+# Deploys (forge deploy) need previews, plus the published chart's version
+# (a vX.Y.Z release tag publishes it to oci://ghcr.io/<org>/forge-chart;
+# FORGE_DEPLOY_CHART_REVISION is that version without the leading v, e.g.
+# 0.20.0, not a commit SHA); lines with a trailing "deploys" marker exist
+# only then:
+#   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.20.0 FORGE_PREVIEW_IP=... | kubectl apply -f -
 # Once deploys are on, every re-render must include FORGE_DEPLOYS=1 and the
 # current FORGE_DEPLOY_CHART_REVISION (read it with `kubectl -n argocd get
 # applicationset forge-services -o jsonpath='{.spec.template.spec.sources[0].targetRevision}'`);
@@ -168,6 +170,10 @@ templates_repo=${FORGE_TEMPLATES_REPO:-$org/forge-templates}
 forge_repo=${FORGE_REPO:-$org/forge}
 deploy_repo=${FORGE_DEPLOY_REPO:-$org/forge-deploys}
 chart_repo=${FORGE_CHART_REPO:-$org/forge-chart}
+# GHCR (and OCI references generally) require a lower-case path; release.yml
+# lowercases its own push target the same way, so push and pull always agree
+# even when FORGE_GITHUB_ORG has upper case in it.
+chart_repo=$(printf '%s' "$chart_repo" | tr '[:upper:]' '[:lower:]')
 case $app_id in
   *[!0-9]*) echo "invalid FORGE_GITHUB_APP_ID: $app_id" >&2; exit 2 ;;
 esac
@@ -259,6 +265,12 @@ case $deploys in
 esac
 if [ -n "$deploys" ]; then
   [ -n "$previews_on" ] || { echo "FORGE_DEPLOYS needs previews (FORGE_PREVIEW_IP or FORGE_GATEWAY_DOMAIN)" >&2; exit 2; }
+  # The character-class guard first: grep's ^/$ anchor per line, not per
+  # string, so a value with an embedded newline could otherwise slip a
+  # second "line" past the SemVer check and into the sed chain below.
+  case $chart_rev in
+    *[!0-9A-Za-z.-]*) echo "FORGE_DEPLOYS needs FORGE_DEPLOY_CHART_REVISION, a chart version, such as 0.20.0" >&2; exit 2 ;;
+  esac
   printf '%s' "$chart_rev" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' ||
     { echo "FORGE_DEPLOYS needs FORGE_DEPLOY_CHART_REVISION, a chart version, such as 0.20.0" >&2; exit 2; }
   deploys_marks='s/ *#deploys$//'
@@ -441,7 +453,7 @@ if [ -n "$public_domains" ]; then
     rm -rf "$chart_check_dir"
     exit 2
   fi
-  if ! tar tzf "$chart_check_dir"/*.tgz | grep -q 'templates/dns.yaml$'; then
+  if ! tar tzf "$chart_check_dir"/*.tgz | grep -Eq '^[^/]+/templates/dns\.yaml$'; then
     rm -rf "$chart_check_dir"
     echo "FORGE_PUBLIC_DOMAINS needs a FORGE_DEPLOY_CHART_REVISION whose chart makes DNS records: $chart_rev has no templates/dns.yaml" >&2
     exit 2

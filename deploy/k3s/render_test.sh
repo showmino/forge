@@ -226,6 +226,16 @@ check "web: a port is fine"                     sh -c "FORGE_WEB_ORIGINS=http://
 # without templates/dns.yaml; X ending "-unreachable" fails outright
 # (simulating no network or auth); anything else writes one that has it.
 fake_helm_dir=$(mktemp -d)
+# no_helm_dir: just the utilities render.sh itself needs, symlinked from
+# wherever they really live, guaranteed to exclude helm regardless of where
+# it happens to live on this machine (unlike a fixed /usr/bin:/bin, which
+# could include it and make the "no helm on PATH" check below hit the real
+# registry instead).
+no_helm_dir=$(mktemp -d)
+for util in sh grep sed mktemp cat dirname printf tr tar awk; do
+  p=$(command -v "$util" 2>/dev/null) && ln -s "$p" "$no_helm_dir/$util"
+done
+trap 'rm -rf "$fake_helm_dir" "$no_helm_dir"' EXIT
 cat > "$fake_helm_dir/helm" <<'HELMSTUB'
 #!/usr/bin/env sh
 set -eu
@@ -323,10 +333,13 @@ check "secret backend: a bad value refused" sh -c "! FORGE_SECRET_BACKEND='my ba
 
 # The chart revision is a published chart's SemVer now, not a commit SHA.
 check "chart revision accepts a semver" sh -c "FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0.20.0 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -q 'targetRevision: 0.20.0'" _ "$dir/render.sh"
+# An OCI source with no path, chart or ref is an invalid Argo CD Application
+# spec (every generated Application would go straight to ComparisonError).
+check "OCI chart source has a path" sh -c "FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=0.20.0 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 | grep -A8 'repoURL: oci://ghcr.io/showmino/forge-chart$' | grep -q '  path: \.$'" _ "$dir/render.sh"
 check "chart revision refuses the old SHA shape" sh -c "! FORGE_GITHUB_APP_ID=5239131 FORGE_DEPLOYS=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_DEPLOY_CHART_REVISION=2b84f5e1676aa92090e43737790655e6436cb070 sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
-check "public: a chart revision without DNS records refused" sh -c "! PATH=\"$fake_helm_dir:\$PATH\" FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.0.0-no-dns FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "public: an unreachable registry refused, not silently passed" sh -c "! PATH=\"$fake_helm_dir:\$PATH\" FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.0.0-unreachable FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "public: no helm on PATH refused clearly" sh -c "! PATH=/usr/bin:/bin FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.20.0 FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "public: a chart revision without DNS records refused" sh -c "PATH=\"$fake_helm_dir:\$PATH\" FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.0.0-no-dns FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 2>&1 1>/dev/null | grep -qF 'has no templates/dns.yaml'"
+check "public: an unreachable registry refused, not silently passed" sh -c "PATH=\"$fake_helm_dir:\$PATH\" FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.0.0-unreachable FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 2>&1 1>/dev/null | grep -qF 'could not fetch'"
+check "public: no helm on PATH refused clearly" sh -c "PATH=\"$no_helm_dir\" FORGE_PUBLIC_DOMAINS=example.com=example-com FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.20.0 FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 2>&1 1>/dev/null | grep -qF 'needs helm on PATH'"
 # What forge-api (ParsePublicDomains) refuses, the render refuses too.
 for bad in example.com example.com= =example-com Example.com=example-com example.com=example.com localhost=local \
   a.com=a-com,a.com=other a..com=a-com example.com=1zone example.com=zone- example.com=-zone -example.com=z example.c=z example.123=z \

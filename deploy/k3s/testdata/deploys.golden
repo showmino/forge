@@ -1,6 +1,6 @@
 # Deploys: Forge's Argo CD objects and forge-api's read access to them.
 # render.sh adds this when FORGE_DEPLOYS=1.
-#   0.20.0  the published chart's version (pinned), e.g. 0.20.0
+#   0.20.0  the published chart's version (pinned)
 # Applications are named <service>-<env> and deploy into the namespace of that
 # name; forge-api refuses a namespace that exists and isn't Forge's.
 # Existing namespaces named like *-staging or *-production that are not Forge's
@@ -14,10 +14,10 @@ metadata:
 spec:
   description: Forge services, deployed by forge-api through showmino/forge-deploys
   sourceRepos:
-    # Best-effort shape for an OCI Helm source's allow-list entry, matching
-    # the Application source's repoURL below exactly; verify this against
-    # the ArgoCD version actually running on the cluster before relying on
-    # it (docs/plans/2026-10-17-phase-8-m4-chart-release.md, Review Focus).
+    # An OCI Helm source's allow-list entry: the exact string ArgoCD
+    # normalizes and glob-matches against the Application source's repoURL
+    # below. Verified against ArgoCD v3.5.3 (the cluster's own version,
+    # 2026-10-18): IsSourcePermitted matches this literally.
     - oci://ghcr.io/showmino/forge-chart
     - https://github.com/showmino/forge-deploys.git
   destinations:
@@ -77,6 +77,12 @@ spec:
       sources:
         - repoURL: oci://ghcr.io/showmino/forge-chart
           targetRevision: 0.20.0
+          # Required for an OCI Helm source: with none of path/chart/ref set,
+          # Argo CD rejects the spec outright (InvalidSpecError) rather than
+          # defaulting it, so every generated Application would go straight
+          # to ComparisonError. "." is the chart itself, per Argo CD's own
+          # OCI docs.
+          path: .
           helm:
             releaseName: '{{ index .path.segments 1 }}'
             valueFiles:

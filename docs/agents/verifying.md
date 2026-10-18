@@ -155,10 +155,10 @@ and lists teams and memberships.
 
 The Phase 4 exit gate (2026-10-09): `bin/forge create gate-<x> --template go-grpc --team platform`, then `gh run watch` its CI (test → image → deploy, about 5 minutes), `bin/forge deploy status gate-<x>`, `/healthz` and Greet (`<pkg>.v1.GreeterService/Greet`, JSON over HTTP) at `http://gate-<x>.staging.10.150.1.222.nip.io` with `python3 -I` urllib, then `bin/forge deploy promote gate-<x> --yes` and the same at `.production.`. The first pod pull fails until forge-api writes `forge-pull`; that is expected.
 
-Render with deploys on (needs previews and a commit on origin/main for the chart; an unpushed commit makes every Application fail):
+Render with deploys on (needs previews and the deploy chart's published version — `FORGE_DEPLOY_CHART_REVISION` is the `vX.Y.Z` release tag without the leading `v`, e.g. `0.20.0`, not a commit SHA; a version the registry doesn't have makes every Application fail):
 
 ```sh
-FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=<gateway-ip> FORGE_GITHUB_APP_ID=<app-id> ... \
+FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.20.0 FORGE_PREVIEW_IP=<gateway-ip> FORGE_GITHUB_APP_ID=<app-id> ... \
   deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 ```
 
@@ -364,6 +364,16 @@ The package is private (owner decision, 2026-10-18): `helm show chart`/`helm pul
 `helm registry login ghcr.io` first, with a token that can read it. It needs the same "Manage Actions access:
 `forge` with role Write" as the image package; check this after the first tag that publishes it, the same way it
 was checked for the image package on 2026-10-11.
+
+Any render with `FORGE_DEPLOYS=1` and `FORGE_PUBLIC_DOMAINS` set (`render.sh`, `render-live.sh`, including the
+`render-live.sh --check` that runs on the owner's machine for a `live.env`-only rollout PR, which CI does not run
+at all) needs `helm` on `PATH` and reads the published chart to confirm it has `templates/dns.yaml` — which, with
+the package private, means `helm registry login ghcr.io` with read access must already be set up on whichever
+machine runs it. **Argo CD itself also needs a pull credential for the private package** (a repository Secret of
+type `oci` for `oci://ghcr.io/showmino`, or the repo-creds equivalent) before any Application sourced from the
+chart can sync — the existing `argocd-repo-kubernetes` credential is for `github.com`, not `ghcr.io`, and does not
+cover this. Set this up, and confirm with a single throwaway Application, before relying on the chart source in
+production; `kubectl diff` alone cannot show whether Argo CD can actually pull it.
 
 Sessions (live since forge-api `v0.2.0`): `GetServerInfo` answers `sessions: true` (forge-api has the GitHub App). After
 `bin/forge auth login`, `bin/forge auth status` shows a `session` row and `bin/forge auth session list` the sessions of
