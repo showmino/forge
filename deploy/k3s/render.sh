@@ -23,9 +23,9 @@
 #   FORGE_GITHUB_ORG=<org> FORGE_API_IMAGE=ghcr.io/showmino/forge-api:v0.1.0 deploy/k3s/render.sh forge.lan | kubectl apply -f -
 #
 # With the Forge GitHub App (templates and 'forge create'), create the Secret
-# first, then render with the App's ID (FORGE_TEMPLATES_REPO, FORGE_REPO and
-# FORGE_DEPLOY_REPO default to <org>/forge-templates, <org>/forge and
-# <org>/forge-deploys):
+# first, then render with the App's ID (FORGE_TEMPLATES_REPO, FORGE_REPO,
+# FORGE_DEPLOY_REPO and FORGE_CHART_REPO default to <org>/forge-templates,
+# <org>/forge, <org>/forge-deploys and <org>/forge-chart):
 #   kubectl -n forge create secret generic forge-github-app --from-file=github_app_private_key=<key.pem>
 #   FORGE_GITHUB_ORG=<org> FORGE_GITHUB_APP_ID=5239131 FORGE_API_IMAGE=... deploy/k3s/render.sh --lb <dex-ip> <api-ip> | kubectl apply -f -
 # or let the 1Password operator create that Secret from an item with a
@@ -70,10 +70,12 @@
 # (FORGE_PREVIEW_IP). FORGE_PUBLIC_DNS_TUNNEL (default production) names the
 # tunnel the records point at.
 #
-# Deploys (forge deploy) need previews, plus a commit on origin/main that Argo
-# CD takes the chart from (an unpushed commit makes every Application fail);
-# lines with a trailing "deploys" marker exist only then:
-#   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$(git rev-parse origin/main) FORGE_PREVIEW_IP=... | kubectl apply -f -
+# Deploys (forge deploy) need previews, plus the published chart's version
+# (a vX.Y.Z release tag publishes it to oci://ghcr.io/<org>/forge-chart;
+# FORGE_DEPLOY_CHART_REVISION is that version without the leading v, e.g.
+# 0.20.0, not a commit SHA); lines with a trailing "deploys" marker exist
+# only then:
+#   FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=0.20.0 FORGE_PREVIEW_IP=... | kubectl apply -f -
 # Once deploys are on, every re-render must include FORGE_DEPLOYS=1 and the
 # current FORGE_DEPLOY_CHART_REVISION (read it with `kubectl -n argocd get
 # applicationset forge-services -o jsonpath='{.spec.template.spec.sources[0].targetRevision}'`);
@@ -167,11 +169,16 @@ org=${FORGE_GITHUB_ORG:?FORGE_GITHUB_ORG is required}
 templates_repo=${FORGE_TEMPLATES_REPO:-$org/forge-templates}
 forge_repo=${FORGE_REPO:-$org/forge}
 deploy_repo=${FORGE_DEPLOY_REPO:-$org/forge-deploys}
+chart_repo=${FORGE_CHART_REPO:-$org/forge-chart}
+# GHCR (and OCI references generally) require a lower-case path; release.yml
+# lowercases its own push target the same way, so push and pull always agree
+# even when FORGE_GITHUB_ORG has upper case in it.
+chart_repo=$(printf '%s' "$chart_repo" | tr '[:upper:]' '[:lower:]')
 case $app_id in
   *[!0-9]*) echo "invalid FORGE_GITHUB_APP_ID: $app_id" >&2; exit 2 ;;
 esac
-case $org$templates_repo$forge_repo$deploy_repo in
-  *[!A-Za-z0-9./_-]*) echo "invalid FORGE_GITHUB_ORG, FORGE_TEMPLATES_REPO, FORGE_REPO or FORGE_DEPLOY_REPO" >&2; exit 2 ;;
+case $org$templates_repo$forge_repo$deploy_repo$chart_repo in
+  *[!A-Za-z0-9./_-]*) echo "invalid FORGE_GITHUB_ORG, FORGE_TEMPLATES_REPO, FORGE_REPO, FORGE_DEPLOY_REPO or FORGE_CHART_REPO" >&2; exit 2 ;;
 esac
 onepassword_item=${FORGE_ONEPASSWORD_ITEM:-}
 case $onepassword_item in
@@ -258,10 +265,14 @@ case $deploys in
 esac
 if [ -n "$deploys" ]; then
   [ -n "$previews_on" ] || { echo "FORGE_DEPLOYS needs previews (FORGE_PREVIEW_IP or FORGE_GATEWAY_DOMAIN)" >&2; exit 2; }
+  # The character-class guard first: grep's ^/$ anchor per line, not per
+  # string, so a value with an embedded newline could otherwise slip a
+  # second "line" past the SemVer check and into the sed chain below.
   case $chart_rev in
-    *[!0-9a-f]*|'') echo "FORGE_DEPLOYS needs FORGE_DEPLOY_CHART_REVISION, a 40-character commit SHA" >&2; exit 2 ;;
+    *[!0-9A-Za-z.-]*) echo "FORGE_DEPLOYS needs FORGE_DEPLOY_CHART_REVISION, a chart version, such as 0.20.0" >&2; exit 2 ;;
   esac
-  [ ${#chart_rev} -eq 40 ] || { echo "FORGE_DEPLOY_CHART_REVISION must be a full commit SHA" >&2; exit 2; }
+  printf '%s' "$chart_rev" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' ||
+    { echo "FORGE_DEPLOYS needs FORGE_DEPLOY_CHART_REVISION, a chart version, such as 0.20.0" >&2; exit 2; }
   deploys_marks='s/ *#deploys$//'
 else
   deploys_marks='/#deploys$/d'
@@ -428,11 +439,26 @@ if [ -n "$public_domains" ]; then
   done
   IFS=$old_ifs
   # A chart from before public addresses ignores them: the deployment would
-  # report success and be reachable nowhere.
-  if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
-    git -C "$dir" cat-file -e "$chart_rev:deploy/argocd/chart/templates/dns.yaml" 2>/dev/null ||
-      { echo "FORGE_PUBLIC_DOMAINS needs a FORGE_DEPLOY_CHART_REVISION whose chart makes DNS records: $chart_rev has no deploy/argocd/chart/templates/dns.yaml (or is not fetched here)" >&2; exit 2; }
+  # report success and be reachable nowhere. Checked against the published
+  # chart itself, not local git history: helm (and network access to
+  # ghcr.io, or prior `helm registry login` if the package is private) are
+  # both required once FORGE_PUBLIC_DOMAINS is set.
+  command -v helm >/dev/null 2>&1 ||
+    { echo "FORGE_PUBLIC_DOMAINS needs helm on PATH, to check the published chart for templates/dns.yaml" >&2; exit 2; }
+  chart_check_dir=$(mktemp -d)
+  if ! helm pull "oci://ghcr.io/$chart_repo" --version "$chart_rev" -d "$chart_check_dir" \
+      >"$chart_check_dir/pull.log" 2>&1; then
+    echo "FORGE_PUBLIC_DOMAINS: could not fetch oci://ghcr.io/$chart_repo version $chart_rev to check for templates/dns.yaml. This needs network access to ghcr.io (or, if the package is private, a prior 'helm registry login ghcr.io'); it is not necessarily that FORGE_DEPLOY_CHART_REVISION itself is wrong:" >&2
+    cat "$chart_check_dir/pull.log" >&2
+    rm -rf "$chart_check_dir"
+    exit 2
   fi
+  if ! tar tzf "$chart_check_dir"/*.tgz | grep -Eq '^[^/]+/templates/dns\.yaml$'; then
+    rm -rf "$chart_check_dir"
+    echo "FORGE_PUBLIC_DOMAINS needs a FORGE_DEPLOY_CHART_REVISION whose chart makes DNS records: $chart_rev has no templates/dns.yaml" >&2
+    exit 2
+  fi
+  rm -rf "$chart_check_dir"
   public_marks='s/ *#public$//'
 else
   public_marks='/#public$/d'
@@ -471,7 +497,7 @@ fi
     cat "$dir/resources.yaml.tmpl"
   fi
 } | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
-        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
+        -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_CHART_REPO}|$chart_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |
   PUBLIC_LISTENERS=$public_listeners awk '/#public-listeners$/ { printf "%s", ENVIRON["PUBLIC_LISTENERS"]; next } { print }'
