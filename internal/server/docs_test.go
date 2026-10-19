@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/docs"
@@ -415,5 +416,37 @@ func TestSearchDocs(t *testing.T) {
 	}
 	if _, err := f.s.SearchDocs(context.Background(), connect.NewRequest(&forgev1.SearchDocsRequest{Query: "a"})); err == nil {
 		t.Error("searched without a login")
+	}
+}
+
+func TestSearchDocsRankingAndEncoding(t *testing.T) {
+	t.Parallel()
+	f := newDocsFixture(t)
+	f.gh.Push("showmino", "ledger", map[string]string{
+		"docs/index.md":   "# Ledger\n\n" + strings.Repeat("the queue is slow\n", 20),
+		"docs/queue.md":   "# Queue\n\nShort.\n",
+		"docs/latin1.md":  "# Caf\xe9\n\nqueue caf\xe9 au lait\n",
+		"docs/bad\x1b.md": "# Escape\n\nqueue\n",
+	}, f.now)
+	resp, err := f.s.SearchDocs(readerCtx(), connect.NewRequest(&forgev1.SearchDocsRequest{Query: "queue", Service: "services/ledger"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range resp.Msg.GetResults() {
+		got = append(got, r.GetPath())
+	}
+	// The title match beats twenty matching lines; a path with a control
+	// character is never read.
+	if strings.Join(got, " ") != "queue.md index.md latin1.md" {
+		t.Errorf("order = %v", got)
+	}
+	// A page in another encoding still marshals: the bad byte is replaced.
+	if _, err := proto.Marshal(resp.Msg); err != nil {
+		t.Errorf("marshal: %v", err)
+	}
+	page, err := f.s.GetDocPage(readerCtx(), connect.NewRequest(&forgev1.GetDocPageRequest{Service: "services/ledger", Path: "latin1.md"}))
+	if err != nil || page.Msg.GetPage().GetTitle() != "Caf�" {
+		t.Errorf("latin1 page = %v, %v", page, err)
 	}
 }

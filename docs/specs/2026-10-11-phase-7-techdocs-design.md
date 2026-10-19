@@ -12,8 +12,9 @@ As built in milestone 1, beyond the design (some after an independent review):
 
 As built in milestone 3:
 
-- `SearchDocs(query, service, page_size)` looks through the pages forge-api already keeps in memory; there is no index. A page matches when it holds every word of the query (the first 8, case-insensitive), in its title, its own first heading or its text. Pages with a word in a title rank first (10 per word), then by how many lines hold a word. Each result carries its first 3 matching lines, cut to about 160 characters around the match. Pages a `docs:` list leaves out of the menu are searched too. At most 200 characters per query, 20 results by default and 100 at most, `total_size` counts them all.
-- Unlike `ListDocSets`, a search waits for stale docs to be checked with GitHub (one head check per service per minute) before it answers, so a page merged a minute ago is found: that is the exit gate.
+- `SearchDocs(query, service, page_size)` looks through the pages forge-api already keeps in memory; there is no index. A page matches when it holds every word of the query (the first 8, case-insensitive), in its title, its own first heading or its text. Pages rank by how many of the words are in a title, then by how many lines hold a word, so a page named after the words always comes before one that only mentions them. Each result carries its first 3 matching lines, cut to about 160 characters around the match. Pages a `docs:` list leaves out of the menu are searched too. At most 200 characters per query, 20 results by default and 100 at most, `total_size` counts them all.
+- Unlike `ListDocSets`, a search waits for stale docs to be checked with GitHub (one head check per service per minute) before it answers, so a page merged a minute ago is found: that is the exit gate. The check has its own limit, not the request's (10 seconds for docs read before, after which the search answers with those; 30 for docs never read), so a reader who gives up is never remembered as GitHub failing. At most 4 searches run at once.
+- Pages are kept as valid UTF-8 (a byte of another encoding becomes U+FFFD), so a page saved as Latin-1 cannot make an answer fail to marshal. Paths with control characters are not read.
 - `forge docs search <words>... [--service] [--limit]`; `-o name` prints `<service> <page>`, the arguments of `forge docs get`.
 
 ## Goal

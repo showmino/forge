@@ -9,9 +9,6 @@ const (
 	maxTerms = 8
 	// maxLineRunes is how much of a matched line is returned, around the match.
 	maxLineRunes = 160
-	// titleScore is what a word in a page's title is worth against one
-	// matched line, so pages named after the words come first.
-	titleScore = 10
 )
 
 // Terms splits a search query into its words, lowercased, each once.
@@ -41,9 +38,21 @@ type Line struct {
 
 // Match is how a page matched a search.
 type Match struct {
-	Score int
+	// TitleWords is how many of the words are in the title.
+	TitleWords int
+	// LineCount is how many lines hold a word.
+	LineCount int
 	// Lines are the first lines that hold a word, at most limit.
 	Lines []Line
+}
+
+// Better orders matches best first: more words in the title, then more
+// lines that hold one.
+func Better(a, b Match) int {
+	if a.TitleWords != b.TitleWords {
+		return b.TitleWords - a.TitleWords
+	}
+	return b.LineCount - a.LineCount
 }
 
 // Find reports whether every term is somewhere in the page, its title
@@ -58,7 +67,7 @@ func Find(md, title string, terms []string, limit int) (Match, bool) {
 	for i, t := range terms {
 		if strings.Contains(lowTitle, t) {
 			found[i] = true
-			m.Score += titleScore
+			m.TitleWords++
 		}
 	}
 	for n, line := range strings.Split(md, "\n") {
@@ -75,7 +84,7 @@ func Find(md, title string, terms []string, limit int) (Match, bool) {
 		if at < 0 {
 			continue
 		}
-		m.Score++
+		m.LineCount++
 		if len(m.Lines) < limit {
 			m.Lines = append(m.Lines, Line{Number: n + 1, Text: clip(line, low, at)})
 		}

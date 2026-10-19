@@ -42,7 +42,7 @@ first line that holds a word; -o json shows up to three per page.
 -o name prints "<service> <page>" per line, the arguments of forge docs get.`,
 		Example: `  forge docs search restart queue
   forge docs search --service payments refund
-  forge docs search alert -o name | head -1 | xargs forge docs get`,
+  forge docs search alert -o json | jq -r '.results[] | .service + " " + .path'`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			format, err := f.Format()

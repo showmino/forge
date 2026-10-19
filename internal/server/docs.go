@@ -53,6 +53,9 @@ const (
 	// docsSearches is how many searches run at once: each reads every page
 	// kept in memory.
 	docsSearches = 4
+	// docsStaleWait is how long a search waits for GitHub about docs it has
+	// read before; past it the search answers with those.
+	docsStaleWait = 10 * time.Second
 )
 
 // docSet is one service's docs as read at one commit. none is set when the
@@ -64,9 +67,11 @@ type docSet struct {
 	change             github.CommitInfo
 	pages              []docs.Page
 	content            map[string]string
-	files              map[string]github.TreeEntry
-	bytes              int64
-	none               string
+	// heads are the pages' own titles: the first heading, else the file name.
+	heads map[string]string
+	files map[string]github.TreeEntry
+	bytes int64
+	none  string
 }
 
 // docsEntry is the cache of one service. mu lets one refresh run at a time;
@@ -317,7 +322,11 @@ func (s *docsService) read(ctx context.Context, svc *forgev1.Service, prev *docS
 			s.log.WarnContext(ctx, "docs: forge.yaml does not parse, using the default page order", "service", svc.GetName(), "commit", head, "error", err)
 		}
 	}
-	set.pages = docs.Order(pages, list, func(p string) string { return docs.Title([]byte(set.content[p]), p) })
+	set.heads = make(map[string]string, len(set.content))
+	for p, md := range set.content {
+		set.heads[p] = docs.Title([]byte(md), p)
+	}
+	set.pages = docs.Order(pages, list, func(p string) string { return set.heads[p] })
 
 	if set.branch, err = s.gh.DefaultBranch(ctx, owner, repo); err != nil {
 		return nil, s.unavailable(ctx, svc, err)
@@ -373,7 +382,9 @@ func (s *docsService) readPages(ctx context.Context, set *docSet, pages []string
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			out[p] = string(data)
+			// A page in another encoding would make every answer holding a
+			// line of it fail to marshal.
+			out[p] = strings.ToValidUTF8(string(data), "\uFFFD")
 		}()
 	}
 	wg.Wait()
@@ -477,7 +488,8 @@ func (s *docsService) all(ctx context.Context, wait bool) ([]serviceDocs, error)
 		if err != nil {
 			continue // deleted since the list was read
 		}
-		if snap, fresh := s.fresh(svc); snap != nil && (fresh || !wait) {
+		snap, fresh := s.fresh(svc)
+		if snap != nil && (fresh || !wait) {
 			if !fresh {
 				s.refreshLater(svc)
 			}
@@ -485,6 +497,12 @@ func (s *docsService) all(ctx context.Context, wait bool) ([]serviceDocs, error)
 				found[i] = serviceDocs{svc, snap.set}
 			}
 			continue
+		}
+		// The read has a limit of its own and outlives a caller that goes:
+		// a cancelled request must not be remembered as GitHub failing.
+		limit := docsRefreshTimeout
+		if snap != nil && snap.set != nil {
+			limit = docsStaleWait // load answers with the docs read before
 		}
 		select {
 		case slots <- struct{}{}:
@@ -495,7 +513,9 @@ func (s *docsService) all(ctx context.Context, wait bool) ([]serviceDocs, error)
 		wg.Add(1)
 		go func() {
 			defer func() { <-slots; wg.Done() }()
-			set, err := s.load(ctx, svc)
+			lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limit)
+			defer cancel()
+			set, err := s.load(lctx, svc)
 			if err != nil {
 				s.log.WarnContext(ctx, "docs: left out", "service", svc.GetName(), "error", err)
 				return
@@ -576,7 +596,7 @@ func (s *docsService) SearchDocs(ctx context.Context, req *connect.Request[forge
 	}
 	type hit struct {
 		res   *forgev1.DocSearchResult
-		score int
+		match docs.Match
 	}
 	var hits []hit
 	for _, d := range all {
@@ -599,7 +619,7 @@ func (s *docsService) SearchDocs(ctx context.Context, req *connect.Request[forge
 		slices.Sort(rest)
 		for _, p := range append(paths, rest...) {
 			md := d.set.content[p]
-			heading := docs.Title([]byte(md), p)
+			heading := d.set.heads[p]
 			title, ok := titles[p]
 			if !ok {
 				title = heading
@@ -614,11 +634,11 @@ func (s *docsService) SearchDocs(ctx context.Context, req *connect.Request[forge
 			for _, l := range m.Lines {
 				res.Lines = append(res.Lines, &forgev1.DocSearchLine{Number: int32(l.Number), Text: l.Text}) //nolint:gosec // a page is at most 1 MiB
 			}
-			hits = append(hits, hit{res, m.Score})
+			hits = append(hits, hit{res, m})
 		}
 	}
 	// Stable, so equal scores keep the catalog's and the menu's order.
-	slices.SortStableFunc(hits, func(a, b hit) int { return b.score - a.score })
+	slices.SortStableFunc(hits, func(a, b hit) int { return docs.Better(a.match, b.match) })
 	out := &forgev1.SearchDocsResponse{TotalSize: int32(len(hits))} //nolint:gosec // at most docs.MaxPages per service
 	for _, h := range hits[:min(len(hits), size)] {
 		out.Results = append(out.Results, h.res)
@@ -687,7 +707,7 @@ func (s *docsService) GetDocPage(ctx context.Context, req *connect.Request[forge
 	page := &forgev1.DocPage{
 		Service:  svc.GetName(),
 		Path:     p,
-		Title:    docs.Title([]byte(md), p),
+		Title:    set.heads[p],
 		Markdown: md,
 		Commit:   set.commit,
 		EditUrl:  editURL(set, p),

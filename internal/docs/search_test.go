@@ -29,7 +29,7 @@ func TestFind(t *testing.T) {
 		t.Fatal("no match")
 	}
 	want := []Line{{3, "When the queue backs up:"}, {5, "- Restart the worker pod."}, {6, "- Then check the Queue depth."}}
-	if !reflect.DeepEqual(m.Lines, want) || m.Score != 3 {
+	if !reflect.DeepEqual(m.Lines, want) || m.LineCount != 3 || m.TitleWords != 0 {
 		t.Errorf("match = %+v", m)
 	}
 
@@ -37,15 +37,15 @@ func TestFind(t *testing.T) {
 	if _, ok := Find(md, "Runbook", Terms("queue database"), 3); ok {
 		t.Error("matched a page without 'database'")
 	}
-	// A word in the title ranks the page above one that only mentions it.
-	title, _ := Find(md, "Runbook", Terms("runbook"), 3)
-	body, _ := Find("# Ops\nsee the runbook\n", "Ops", Terms("runbook"), 3)
-	if title.Score <= body.Score {
-		t.Errorf("title %d <= body %d", title.Score, body.Score)
+	// A word in the title ranks the page above any number of lines.
+	title, _ := Find("# Runbook\n", "Runbook", Terms("runbook"), 3)
+	body, _ := Find(strings.Repeat("see the runbook\n", 50), "Ops", Terms("runbook"), 3)
+	if Better(title, body) >= 0 || Better(body, title) <= 0 {
+		t.Errorf("title %+v should rank above body %+v", title, body)
 	}
-	// At most max lines are returned, the score still counts them all.
+	// At most limit lines are returned, LineCount still counts them all.
 	many, _ := Find(strings.Repeat("pod\n", 10), "x", Terms("pod"), 3)
-	if len(many.Lines) != 3 || many.Score != 10 {
+	if len(many.Lines) != 3 || many.LineCount != 10 {
 		t.Errorf("many = %+v", many)
 	}
 }

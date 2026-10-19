@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Limits, because a repo's content is not trusted.
@@ -53,8 +54,9 @@ func CleanPath(p string) (string, error) {
 	if len(p) > 1024 {
 		return "", errors.New("the path is longer than 1024 characters")
 	}
-	if strings.ContainsAny(p, "\\\x00") {
-		return "", fmt.Errorf("path %q has a backslash or a NUL", p)
+	// Control characters would act on the terminal of whoever lists the path.
+	if strings.ContainsFunc(p, func(r rune) bool { return r == '\\' || unicode.IsControl(r) }) {
+		return "", fmt.Errorf("path %q has a backslash or a control character", p)
 	}
 	if strings.HasPrefix(p, "/") {
 		return "", fmt.Errorf("path %q must be relative to %s/", p, Dir)
