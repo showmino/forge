@@ -216,7 +216,13 @@ The cluster is production, and every change to it needs the owner's OK
 2. **On a branch, change `live.env`** (the new image, or the new setting),
    run `sh deploy/k3s/render-live.sh`, and read `kubectl diff -f
    deploy/k3s/live/forge.yaml`. It should show what you mean to change and
-   nothing else (besides the tracking annotations of step 1).
+   nothing else (besides the tracking annotations of step 1). With
+   `FORGE_DEX_THEME=1` a change to the theme's fonts or icon shows as base64
+   lines of up to about 120 KB in the ConfigMap `dex-theme`: read the diff
+   with `| cut -c1-160`, and compare the files in
+   `deploy/platform/chart/files/dex-theme` instead. The render also needs
+   `helm registry login ghcr.io` (or `HELM_REGISTRY_CONFIG` pointing at a
+   login) for its chart check.
 3. **Show the owner the diff and wait for the OK.** Open the pull request
    with `live.env`, `live/forge.yaml` and this file.
 4. `kubectl apply --dry-run=server -f`, then `kubectl apply -f` the file from
@@ -302,6 +308,8 @@ ask Cloudflare's DNS over HTTPS (`https://cloudflare-dns.com/dns-query?name=<hos
 application/dns-json`): a resolver that was asked before the record existed, as Forge's own free-name check
 does, may say NXDOMAIN for a while. A first production deploy showed one `ErrImagePull` before the pull secret
 was in the new namespace, and recovered by itself.
+
+Also live since 2026-10-19: Dex's pages in Forge's look (`FORGE_DEX_THEME=1` in `live.env`, forge#123, rolled out in forge#124; forge-api unchanged). Checked: no drift before (Synced at `323cc8c`), the diff was Dex only (the `frontend` block in `dex-config`, the new ConfigMap `dex-theme`, the theme mounts and `checksum/dex-theme: 3d16ff97441ff85c` on Dex's pod), server dry run (the ConfigMap's size included), Dex rolled one new pod and logs no errors, `https://forge-login.showmino.com/dex/device` shows "Forge" with the theme in light and dark (headless Chromium: 3 fonts loaded, no failed requests), `/dex/theme/` serves the stylesheet, fonts, logo and favicon with their types, and the dashboard's sign-in still goes straight to GitHub (302 to `/dex/auth/github`). Not checked: a whole CLI device sign-in (it needs the owner's GitHub login; the same flow passed on a local Dex with the same mounts). Rollback file: the v0.22.0 render without the theme.
 
 Live on k3s since 2026-10-19: forge-api `v0.22.0` (docs search: `SearchDocs`, `forge docs search`, TechDocs milestone 3, forge#119; `live.env` changed only in its image, forge#121; the chart revision stays `0.21.0`, the chart did not change). The owner merged #121 and synced `forge` in Argo CD (16:54 UTC); a `kubectl apply` of the same render followed and changed nothing but Argo CD's tracking annotations, so `forge` shows OutOfSync on those until the next Sync. Checked: no drift before (Synced, Healthy; `kubectl diff` showed only tracking annotations and `generation`), the diff was the image line alone, `render-live.sh --check` passes, server dry run, the pod 1/1 with `forge-api listening ... version 0.22.0` and no warnings or errors, `forge version` says server 0.22.0, `forge docs search` across all five services with docs answers in about 140 ms (also `--service`, `--limit`, `-o name`, no match). **The phase 7 exit gate, through the API:** showmino/techdocs#15 (a new section in `docs/forge/11-service-docs.md`) merged at 17:06:54 UTC and `forge docs search --service techdocs mermaid live editor` found it 3 seconds later. Not checked: the dashboard's search box and diagrams against production in a browser (they need the owner's login; forge-web with them is on staging, `v0.1.28-rc.1`). The render now needs `helm registry login ghcr.io` (the chart package is private): the stored Helm login on this machine was refused (403), so the render ran with `HELM_REGISTRY_CONFIG` pointing at a fresh login made with `gh auth token` (`read:packages`). Rollback file: the v0.21.0 render.
 
