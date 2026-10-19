@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -551,8 +552,8 @@ const (
 // a page merged a minute ago is found.
 func (s *docsService) SearchDocs(ctx context.Context, req *connect.Request[forgev1.SearchDocsRequest]) (*connect.Response[forgev1.SearchDocsResponse], error) {
 	q := strings.TrimSpace(req.Msg.GetQuery())
-	if len(q) > docsSearchMax {
-		return nil, invalidArg("query is %d characters; at most %d are searched", len(q), docsSearchMax)
+	if n := utf8.RuneCountInString(q); n > docsSearchMax {
+		return nil, invalidArg("query is %d characters; at most %d are searched", n, docsSearchMax)
 	}
 	terms := docs.Terms(q)
 	if len(terms) == 0 {

@@ -378,6 +378,10 @@ func TestSearchDocs(t *testing.T) {
 	if err != nil || pages(r) != "payments/notes.md" {
 		t.Errorf("notes = %v, %v", r, err)
 	}
+	// The limit counts characters, not bytes, as the dashboard's box does.
+	if _, err := search(&forgev1.SearchDocsRequest{Query: strings.Repeat("é", 200)}); err != nil {
+		t.Errorf("200 accented characters: %v", err)
+	}
 	r, err = search(&forgev1.SearchDocsRequest{Query: "xxxx"})
 	if err != nil || len(r.GetResults()) != 0 || r.GetTotalSize() != 0 {
 		t.Errorf("huge page = %v, %v", r, err)
