@@ -366,4 +366,63 @@ check "login: a path refused"                       bad_login https://login.exam
 check "login: a name without a scheme refused"      bad_login login.example.com
 check "login: upper case refused"                   bad_login https://Login.example.com
 check "login: sed characters refused"               bad_login 'https://a.example.com|x'
+
+# Forge's look on Dex's pages: off unless FORGE_DEX_THEME=1.
+theme=$(FORGE_DEX_THEME=1 FORGE_GITHUB_APP_ID=5239131 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+theme_files="$dir/../platform/chart/files/dex-theme"
+# theme_doc: the rendered documents, parsed as YAML: kind/name -> object, as JSON.
+theme_doc() { printf '%s\n' "$theme" | python3 -I -c 'import json,sys,yaml; print(json.dumps({d["kind"]+"/"+d["metadata"]["name"]: d for d in yaml.safe_load_all(sys.stdin) if d}))'; }
+theme_configmap() {
+  theme_doc | python3 -I -c '
+import base64,json,sys
+cm=json.load(sys.stdin)["ConfigMap/dex-theme"]
+assert sorted(cm["data"]) == ["header.html","logo.svg","styles.css"], cm["data"].keys()
+assert sorted(cm["binaryData"]) == ["archivo.woff2","favicon.png","plex-sans-400.woff2","plex-sans-600.woff2"], cm["binaryData"].keys()
+d=sys.argv[1]
+assert base64.b64decode(cm["binaryData"]["archivo.woff2"]) == open(d+"/archivo.woff2","rb").read()
+assert cm["data"]["styles.css"] == open(d+"/styles.css").read()
+assert cm["data"]["header.html"] == open(d+"/header.html").read()
+' "$theme_files"
+}
+theme_dex() {
+  theme_doc | python3 -I -c '
+import json,sys,yaml
+docs=json.load(sys.stdin)
+cfg=yaml.safe_load(docs["ConfigMap/dex-config"]["data"]["config.yaml"])
+assert cfg["frontend"] == {"dir":"/srv/dex/web","theme":"forge","issuer":"Forge","logoURL":"theme/logo.svg"}, cfg["frontend"]
+pod=docs["Deployment/dex"]["spec"]["template"]
+assert len(pod["metadata"]["annotations"]["checksum/dex-theme"]) == 16
+c=pod["spec"]["containers"][0]
+mounts={m["mountPath"]: m for m in c["volumeMounts"]}
+assert mounts["/srv/dex/web/themes/forge"]["name"] == "theme"
+assert mounts["/srv/dex/web/templates/header.html"] == {"name":"theme","mountPath":"/srv/dex/web/templates/header.html","subPath":"header.html"}
+assert {"name":"theme","configMap":{"name":"dex-theme"}} in pod["spec"]["volumes"]
+'
+}
+theme_no_markers() { ! printf '%s\n' "$theme" | grep -q '#theme'; }
+theme_off() { ! printf '%s\n' "$with" | grep -q -e dex-theme -e 'frontend:' -e '#theme'; }
+theme_sum_follows_files() {
+  copy=$(mktemp -d) && cp -r "$dir/.." "$copy/deploy" && printf '/* changed */\n' >> "$copy/deploy/platform/chart/files/dex-theme/styles.css" &&
+    changed=$(FORGE_DEX_THEME=1 FORGE_GITHUB_APP_ID=5239131 sh "$copy/deploy/k3s/render.sh" --lb 10.150.1.220 10.150.1.221 | grep 'checksum/dex-theme') &&
+    rm -rf "$copy" && [ "$changed" != "$(printf '%s\n' "$theme" | grep 'checksum/dex-theme')" ]
+}
+check "theme: the ConfigMap holds the theme's files as they are" theme_configmap
+check "theme: Dex's frontend, the mounts and the checksum"     theme_dex
+check "theme: no #theme markers left"                         theme_no_markers
+check "theme: nothing of it without FORGE_DEX_THEME"           theme_off
+check "theme: a changed file changes the checksum"            theme_sum_follows_files
+# kubectl apply (and Argo CD's client-side sync) keep the whole object in an
+# annotation, and all of an object's annotations must stay under 262144 bytes:
+# keep the theme well below that.
+theme_small() { [ "$(printf '%s\n' "$theme" | awk '/^kind: ConfigMap$/ {k=1} /^---$/ {k=0} k' | awk '/^  name: dex-theme$/ {on=1} on' | wc -c)" -lt 230000 ]; }
+# header.html is Dex's own with a few changes, written for one Dex version: a
+# new Dex image means comparing it with that version's header.html first.
+theme_header_version() {
+  v=$(sed -n 's/^{{\/\* Dex \(v[0-9.]*\)'"'"'s header.html.*/\1/p' "$theme_files/header.html")
+  [ -n "$v" ] && grep -q "image: ghcr.io/dexidp/dex:$v\$" "$dir/forge.yaml.tmpl" &&
+    grep -q "image: ghcr.io/dexidp/dex:$v\$" "$dir/../platform/chart/templates/dex.yaml"
+}
+check "theme: the ConfigMap stays under 230000 bytes"         theme_small
+check "theme: header.html is for the Dex image in use"         theme_header_version
+check "theme: a bad FORGE_DEX_THEME refused"                  sh -c "! FORGE_DEX_THEME=yes sh \"\$1\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1" _ "$dir/render.sh"
 exit $fail

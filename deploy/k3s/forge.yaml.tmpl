@@ -32,6 +32,12 @@ data:
     web:
       http: 0.0.0.0:5556
       allowedOrigins: [${WEB_ORIGINS_YAML}] #web
+    # Forge's look on Dex's pages: the ConfigMap dex-theme beside the image's own files. #theme
+    frontend: #theme
+      dir: /srv/dex/web #theme
+      theme: forge #theme
+      issuer: Forge #theme
+      logoURL: theme/logo.svg #theme
     oauth2:
       grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
       skipApprovalScreen: true
@@ -73,6 +79,9 @@ spec:
   template:
     metadata:
       labels: {app: dex}
+      annotations: #theme
+        # A changed theme restarts Dex: header.html is mounted by subPath, which a ConfigMap update does not reach. #theme
+        checksum/dex-theme: "${DEX_THEME_SUM}" #theme
     spec:
       containers:
         - name: dex
@@ -94,12 +103,16 @@ spec:
             httpGet: {path: /dex/healthz, port: http}
           volumeMounts:
             - {name: config, mountPath: /etc/dex}
+            - {name: theme, mountPath: /srv/dex/web/themes/forge} #theme
+            - {name: theme, mountPath: /srv/dex/web/templates/header.html, subPath: header.html} #theme
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 128Mi}
       volumes:
         - name: config
           configMap: {name: dex-config}
+        - name: theme #theme
+          configMap: {name: dex-theme} #theme
 ---
 apiVersion: apps/v1
 kind: Deployment

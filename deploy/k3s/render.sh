@@ -59,6 +59,10 @@
 # It adds Dex's public client forge-web and lets those pages call forge-api
 # from a browser. Dex reads its config at start: restart it after a change.
 #
+# FORGE_DEX_THEME=1 gives Dex's pages (sign-in, the CLI's device code, errors)
+# the dashboard's look, from deploy/platform/chart/files/dex-theme:
+#   FORGE_DEX_THEME=1 ... | kubectl apply -f -
+#
 # Public addresses: with FORGE_PUBLIC_DOMAINS a service is reached under a
 # real domain, payments.example.com in production and
 # payments-staging.example.com in staging. Each item is a domain and the name
@@ -327,6 +331,42 @@ if [ -n "$web_origins" ]; then
 else
   web_marks='/#web$/d'
 fi
+# FORGE_DEX_THEME=1 dresses Dex's pages (sign-in, the CLI's device code,
+# errors) in Forge's look: the files of deploy/platform/chart/files/dex-theme
+# (shared with the platform chart) become the ConfigMap dex-theme. Lines with
+# a trailing "theme" marker exist only then.
+theme_dir="$dir/../platform/chart/files/dex-theme"
+theme_text="styles.css header.html logo.svg"
+theme_binary="favicon.png archivo.woff2 plex-sans-400.woff2 plex-sans-600.woff2"
+case ${FORGE_DEX_THEME:-} in
+  1) theme=1 ;;
+  '') theme= ;;
+  *) echo "invalid FORGE_DEX_THEME: \"$FORGE_DEX_THEME\": set it to 1, or leave it empty for Dex's own look" >&2; exit 2 ;;
+esac
+if [ -n "$theme" ]; then
+  for f in $theme_text $theme_binary; do
+    [ -f "$theme_dir/$f" ] || { echo "FORGE_DEX_THEME: $theme_dir/$f is missing" >&2; exit 2; }
+  done
+  # shellcheck disable=SC2086 # the lists are words on purpose
+  theme_sum=$(cd "$theme_dir" && cat $theme_text $theme_binary | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)
+  theme_marks='s/ *#theme$//'
+else
+  theme_sum=
+  theme_marks='/#theme$/d'
+fi
+# theme_configmap prints the ConfigMap dex-theme: text files as they are,
+# fonts and the icon as base64.
+theme_configmap() {
+  printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dex-theme\n  namespace: forge\ndata:\n'
+  for f in $theme_text; do
+    printf '  %s: |\n' "$f"
+    sed 's/^/    /' "$theme_dir/$f"
+  done
+  printf 'binaryData:\n'
+  for f in $theme_binary; do
+    printf '  %s: %s\n' "$f" "$(base64 < "$theme_dir/$f" | tr -d '\n')"
+  done
+}
 # The login's own address. Dex has one, its issuer: what you, the CLI, the
 # dashboard and forge-api's pods all use. By default it is the LAN address
 # http://<dex host>; FORGE_LOGIN_URL gives it a public HTTPS name, which a
@@ -496,8 +536,14 @@ fi
     echo "---"
     cat "$dir/resources.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$web_marks" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+} | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_CHART_REPO}|$chart_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |
   PUBLIC_LISTENERS=$public_listeners awk '/#public-listeners$/ { printf "%s", ENVIRON["PUBLIC_LISTENERS"]; next } { print }'
+# The theme comes last and outside the sed above: its CSS and HTML must
+# reach Dex byte for byte, whatever they end a line with.
+if [ -n "$theme" ]; then
+  echo "---"
+  theme_configmap
+fi

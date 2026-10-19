@@ -1,0 +1,275 @@
+/*
+ * Forge's look for Dex's pages (sign-in, the CLI's device code, errors), from
+ * the dashboard's design language (forge-web app/globals.css): iron neutrals,
+ * ember for the one primary action, Archivo for titles, IBM Plex Sans for
+ * text. Light first; dark follows the reader's system. Dex's own
+ * static/main.css loads first; this overrides it.
+ */
+@font-face {
+  font-family: "Archivo";
+  src: url("archivo.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("plex-sans-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("plex-sans-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --bg: oklch(0.975 0.004 250);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.965 0.005 250);
+  --line: oklch(0.905 0.007 250);
+  --line-strong: oklch(0.82 0.01 250);
+  --fg: oklch(0.22 0.014 250);
+  --fg-2: oklch(0.42 0.014 250);
+  --fg-3: oklch(0.52 0.012 250);
+  --ember: oklch(0.6 0.175 42);
+  --ember-hot: oklch(0.7 0.17 55);
+  --ember-on: oklch(0.99 0.01 60);
+  --bad-bg: oklch(0.95 0.035 25);
+  --bad-fg: oklch(0.48 0.17 25);
+  --rail-bg: oklch(0.205 0.014 250);
+  --rail-fg: oklch(0.93 0.006 250);
+  --rail-line: oklch(0.3 0.014 250);
+  --elev-1: 0 1px 2px oklch(0.2 0.02 250 / 0.06), 0 0 0 1px oklch(0.2 0.02 250 / 0.03);
+  --font-display: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: oklch(0.17 0.01 250);
+    --surface: oklch(0.205 0.012 250);
+    --surface-2: oklch(0.235 0.012 250);
+    --line: oklch(0.29 0.012 250);
+    --line-strong: oklch(0.37 0.014 250);
+    --fg: oklch(0.95 0.005 250);
+    --fg-2: oklch(0.78 0.01 250);
+    --fg-3: oklch(0.68 0.012 250);
+    --ember: oklch(0.72 0.16 48);
+    --ember-hot: oklch(0.8 0.15 62);
+    --ember-on: oklch(0.2 0.03 40);
+    --bad-bg: oklch(0.31 0.07 25);
+    --bad-fg: oklch(0.86 0.09 25);
+    --rail-bg: oklch(0.14 0.01 250);
+    --rail-line: oklch(0.24 0.012 250);
+    --elev-1: inset 0 1px 0 oklch(1 0 0 / 0.04), 0 0 0 1px oklch(0 0 0 / 0.2);
+  }
+}
+
+.theme-body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The top bar is the dashboard's iron rail, laid flat. */
+.theme-navbar {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 0 20px;
+  background: var(--rail-bg);
+  border-bottom: 1px solid var(--rail-line);
+  color: var(--rail-fg);
+  box-shadow: none;
+}
+.theme-navbar__logo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: auto;
+  height: auto;
+  padding: 0;
+}
+.theme-navbar__logo {
+  width: 26px;
+  height: 26px;
+  max-height: none;
+}
+.theme-navbar__name {
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  font-weight: 720;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+}
+
+.dex-container {
+  max-width: 420px;
+  margin: 12vh auto 48px;
+  padding: 0 16px;
+  color: var(--fg);
+}
+
+.theme-panel {
+  padding: 32px 28px 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--elev-1);
+}
+.theme-panel p {
+  margin: 0 0 8px;
+  color: var(--fg-2);
+}
+
+.theme-heading {
+  margin: 0 0 8px;
+  font-family: var(--font-display);
+  font-stretch: 108%;
+  font-weight: 680;
+  font-size: 22px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.theme-form-row {
+  margin: 18px auto 0;
+}
+.theme-form-row a {
+  text-decoration: none;
+}
+
+/* Buttons: one height, the design's radius, a ring of ember when reached by keyboard. */
+.dex-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  box-shadow: none;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+.dex-btn:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}
+.dex-btn:active {
+  box-shadow: none;
+}
+
+.theme-btn-provider {
+  width: 100%;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--fg);
+}
+.theme-btn-provider:hover {
+  background: var(--surface-2);
+  border-color: var(--fg-3);
+  color: var(--fg);
+}
+.dex-btn-icon {
+  float: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  border-radius: 0;
+  background-color: transparent !important;
+  background-size: 20px;
+}
+@media (prefers-color-scheme: dark) {
+  /* GitHub's mark is black: light it on the dark surface. */
+  .dex-btn-icon--github {
+    filter: invert(1);
+  }
+}
+.dex-btn-text {
+  padding: 0;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.theme-btn--primary,
+.theme-btn--success {
+  width: 100%;
+  min-width: 0;
+  margin-top: 16px;
+  background: var(--ember);
+  border: none;
+  color: var(--ember-on);
+}
+.theme-btn--primary:hover,
+.theme-btn--success:hover {
+  background: var(--ember-hot);
+  color: var(--ember-on);
+}
+
+.theme-form-input {
+  display: block;
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: none;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+.theme-form-input::placeholder {
+  color: var(--fg-3);
+}
+.theme-form-input:focus,
+.theme-form-input:active {
+  border-color: var(--ember);
+  outline: 2px solid color-mix(in oklch, var(--ember) 35%, transparent);
+  outline-offset: 0;
+}
+.theme-form-label {
+  width: 100%;
+  margin: 4px 0;
+  color: var(--fg-2);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.dex-error-box {
+  max-width: none;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  background: var(--bad-bg);
+  border-radius: 8px;
+  color: var(--bad-fg);
+  font-size: 13.5px;
+}
+
+.dex-subtle-text,
+.dex-separator,
+.dex-list {
+  color: var(--fg-3);
+}
+
+.theme-link-back a,
+.theme-panel a:not(:has(button)) {
+  color: var(--ember);
+}
