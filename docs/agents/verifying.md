@@ -216,7 +216,13 @@ The cluster is production, and every change to it needs the owner's OK
 2. **On a branch, change `live.env`** (the new image, or the new setting),
    run `sh deploy/k3s/render-live.sh`, and read `kubectl diff -f
    deploy/k3s/live/forge.yaml`. It should show what you mean to change and
-   nothing else (besides the tracking annotations of step 1).
+   nothing else (besides the tracking annotations of step 1). With
+   `FORGE_DEX_THEME=1` a change to the theme's fonts or icon shows as base64
+   lines of up to about 120 KB in the ConfigMap `dex-theme`: read the diff
+   with `| cut -c1-160`, and compare the files in
+   `deploy/platform/chart/files/dex-theme` instead. The render also needs
+   `helm registry login ghcr.io` (or `HELM_REGISTRY_CONFIG` pointing at a
+   login) for its chart check.
 3. **Show the owner the diff and wait for the OK.** Open the pull request
    with `live.env`, `live/forge.yaml` and this file.
 4. `kubectl apply --dry-run=server -f`, then `kubectl apply -f` the file from
