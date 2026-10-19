@@ -26,6 +26,14 @@ data:
       {{- if .Values.webOrigins }}
       allowedOrigins: [{{ include "forge.webOriginsJSON" . }}]
       {{- end }}
+    {{- if .Values.dexTheme }}
+    # Forge's look on Dex's pages: the ConfigMap dex-theme beside the image's own files.
+    frontend:
+      dir: /srv/dex/web
+      theme: forge
+      issuer: Forge
+      logoURL: theme/logo.svg
+    {{- end }}
     oauth2:
       grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
       skipApprovalScreen: true
@@ -57,6 +65,23 @@ data:
           orgs:
             - name: {{ include "forge.dexGithubOrg" . }}
           teamNameField: slug
+{{- if .Values.dexTheme }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-theme
+  namespace: forge
+data:
+  {{- range $f := list "styles.css" "header.html" "logo.svg" }}
+  {{ $f }}: |
+{{ $.Files.Get (printf "files/dex-theme/%s" $f) | indent 4 }}
+  {{- end }}
+binaryData:
+  {{- range $f := list "favicon.png" "archivo.woff2" "plex-sans-400.woff2" "plex-sans-600.woff2" }}
+  {{ $f }}: {{ $.Files.Get (printf "files/dex-theme/%s" $f) | b64enc }}
+  {{- end }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -70,6 +95,15 @@ spec:
   template:
     metadata:
       labels: {app: dex}
+      {{- if .Values.dexTheme }}
+      annotations:
+        # A changed theme restarts Dex: header.html is mounted by subPath, which a ConfigMap update does not reach.
+        {{- $theme := "" }}
+        {{- range $f := list "styles.css" "header.html" "logo.svg" "favicon.png" "archivo.woff2" "plex-sans-400.woff2" "plex-sans-600.woff2" }}
+        {{- $theme = print $theme ($.Files.Get (printf "files/dex-theme/%s" $f)) }}
+        {{- end }}
+        checksum/dex-theme: {{ $theme | sha256sum | trunc 16 | quote }}
+      {{- end }}
     spec:
       containers:
         - name: dex
@@ -91,9 +125,17 @@ spec:
             httpGet: {path: /dex/healthz, port: http}
           volumeMounts:
             - {name: config, mountPath: /etc/dex}
+            {{- if .Values.dexTheme }}
+            - {name: theme, mountPath: /srv/dex/web/themes/forge}
+            - {name: theme, mountPath: /srv/dex/web/templates/header.html, subPath: header.html}
+            {{- end }}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 128Mi}
       volumes:
         - name: config
           configMap: {name: dex-config}
+        {{- if .Values.dexTheme }}
+        - name: theme
+          configMap: {name: dex-theme}
+        {{- end }}

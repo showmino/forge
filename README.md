@@ -225,7 +225,7 @@ reads them as `FORGE_ADMIN_GROUPS`, its newer name, when that is unset. Create a
 GitHub OAuth App owned by the org with the callback
 `http://dex.<dex-ip>.nip.io/dex/callback`, and put its `client_id` and
 `client_secret` in the Secret `dex-github`, or in a 1Password item named by
-`FORGE_DEX_ONEPASSWORD_ITEM`. The render also creates the CloudNativePG cluster
+`FORGE_DEX_ONEPASSWORD_ITEM`. `FORGE_DEX_THEME=1` gives Dex's pages (the sign-in page, the CLI's device code, errors) the dashboard's look: the files in `deploy/platform/chart/files/dex-theme` (styles, logo, header, fonts) become the ConfigMap `dex-theme`, mounted beside Dex's own files. The render also creates the CloudNativePG cluster
 `forge-db` (2 instances), which holds the service catalog
 and Dex's logins; it needs the CloudNativePG operator. `FORGE_DB_STORAGE_CLASS`
 names its StorageClass explicitly (showmino uses `longhorn-retain`, so its

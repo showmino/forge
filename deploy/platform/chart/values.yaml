@@ -17,6 +17,11 @@ githubAppID: ""
 # Which org's members may log in, if different from githubOrg.
 dexGithubOrg: ""
 
+# Dex's pages (the sign-in page, the CLI's device code, errors) in Forge's
+# look, from files/dex-theme: the dashboard's colours and fonts, light and
+# dark. false keeps Dex's own look.
+dexTheme: true
+
 # The GitHub teams whose members are admins (comma separated). Defaults to
 # "<dexGithubOrg>:platform-engineering". Never leave this empty: every login
 # would be able to deploy to production.

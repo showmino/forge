@@ -30,4 +30,6 @@ helm install my-forge . \
   --set exposure.apiHost=forge.example.com
 ```
 
+Dex's pages (the sign-in page, the CLI's device code, errors) have Forge's look, from `files/dex-theme`; `--set dexTheme=false` keeps Dex's own.
+
 See `values.yaml` for every setting.
