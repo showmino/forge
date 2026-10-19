@@ -24,8 +24,90 @@ func newDocsCmd(f *Factory) *cobra.Command {
 as the start page. The Forge API reads them from the repo's default branch as
 they are now: nothing is built or published. forge.yaml's docs: list sets the
 order and titles of the pages.`
-	cmd.AddCommand(newDocsListCmd(f), newDocsGetCmd(f), newDocsLintCmd(f))
+	cmd.AddCommand(newDocsListCmd(f), newDocsGetCmd(f), newDocsSearchCmd(f), newDocsLintCmd(f))
 	return cmd
+}
+
+func newDocsSearchCmd(f *Factory) *cobra.Command {
+	var service string
+	var limit int32
+	cmd := &cobra.Command{
+		Use:   "search <words>...",
+		Short: "Find the pages of every service's docs that hold some words",
+		Long: `Find the pages that hold every word given, in their title or text, without
+regard to case, across the docs of every service (or one, with --service).
+Pages with the words in their title come first. Each page is shown with the
+first line that holds a word; -o json shows up to three per page.
+
+-o name prints "<service> <page>" per line, the arguments of forge docs get.`,
+		Example: `  forge docs search restart queue
+  forge docs search --service payments refund
+  forge docs search alert -o json | jq -r '.results[] | .service + " " + .path'`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			if limit < 0 {
+				return exitcode.Usagef("--limit must not be negative")
+			}
+			name := ""
+			if service != "" {
+				if name, err = f.serviceName([]string{service}); err != nil {
+					return err
+				}
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Docs.SearchDocs(ctx, connect.NewRequest(&forgev1.SearchDocsRequest{
+				Query: strings.Join(args, " "), Service: name, PageSize: limit,
+			}))
+			if err != nil {
+				return err
+			}
+			results := resp.Msg.GetResults()
+			if len(results) == 0 && format == output.Table {
+				f.infof("No page holds all of: %s", strings.Join(args, " "))
+				return nil
+			}
+			v := output.View{Headers: []string{"service", "page", "title", "match"}, Data: resp.Msg}
+			if len(results) == 0 {
+				v.Data = map[string]any{"results": []any{}, "totalSize": 0} // protojson omits empty values
+			}
+			for _, r := range results {
+				svc := strings.TrimPrefix(r.GetService(), "services/")
+				match := "-"
+				if ls := r.GetLines(); len(ls) > 0 {
+					match = fmt.Sprintf("%d: %s", ls[0].GetNumber(), oneLine(ls[0].GetText()))
+				}
+				v.Rows = append(v.Rows, []string{svc, r.GetPath(), oneLine(r.GetTitle()), match})
+				v.Names = append(v.Names, svc+" "+r.GetPath())
+			}
+			if err := output.Print(f.IO.Out, format, v); err != nil {
+				return err
+			}
+			if more := int(resp.Msg.GetTotalSize()) - len(results); more > 0 && format == output.Table {
+				f.infof("%s more; narrow the search or raise --limit.", plural(more, "page"))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&service, "service", "", "search one service's docs only")
+	cmd.Flags().Int32Var(&limit, "limit", 0, "how many pages to show (default 20, at most 100)")
+	_ = cmd.RegisterFlagCompletionFunc("service", func(cmd *cobra.Command, _ []string, s string) ([]string, cobra.ShellCompDirective) {
+		return f.completeServices(cmd, nil, s)
+	})
+	return cmd
+}
+
+// oneLine makes text from a repo safe for one cell of a table.
+func oneLine(s string) string {
+	return strings.ReplaceAll(printable(s), "\t", " ")
 }
 
 func newDocsListCmd(f *Factory) *cobra.Command {

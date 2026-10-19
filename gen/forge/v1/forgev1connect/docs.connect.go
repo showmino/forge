@@ -41,6 +41,8 @@ const (
 	DocsServiceGetDocPageProcedure = "/forge.v1.DocsService/GetDocPage"
 	// DocsServiceGetDocAssetProcedure is the fully-qualified name of the DocsService's GetDocAsset RPC.
 	DocsServiceGetDocAssetProcedure = "/forge.v1.DocsService/GetDocAsset"
+	// DocsServiceSearchDocsProcedure is the fully-qualified name of the DocsService's SearchDocs RPC.
+	DocsServiceSearchDocsProcedure = "/forge.v1.DocsService/SearchDocs"
 )
 
 // DocsServiceClient is a client for the forge.v1.DocsService service.
@@ -55,6 +57,9 @@ type DocsServiceClient interface {
 	// GetDocAsset returns an image a page uses. The repos are private, so a
 	// browser cannot fetch it from GitHub itself.
 	GetDocAsset(context.Context, *connect.Request[v1.GetDocAssetRequest]) (*connect.Response[v1.GetDocAssetResponse], error)
+	// SearchDocs finds the pages, across every service's docs or one
+	// service's, that hold every word of a query, best first.
+	SearchDocs(context.Context, *connect.Request[v1.SearchDocsRequest]) (*connect.Response[v1.SearchDocsResponse], error)
 }
 
 // NewDocsServiceClient constructs a client for the forge.v1.DocsService service. By default, it
@@ -96,6 +101,13 @@ func NewDocsServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		searchDocs: connect.NewClient[v1.SearchDocsRequest, v1.SearchDocsResponse](
+			httpClient,
+			baseURL+DocsServiceSearchDocsProcedure,
+			connect.WithSchema(docsServiceMethods.ByName("SearchDocs")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -105,6 +117,7 @@ type docsServiceClient struct {
 	getDocSet   *connect.Client[v1.GetDocSetRequest, v1.GetDocSetResponse]
 	getDocPage  *connect.Client[v1.GetDocPageRequest, v1.GetDocPageResponse]
 	getDocAsset *connect.Client[v1.GetDocAssetRequest, v1.GetDocAssetResponse]
+	searchDocs  *connect.Client[v1.SearchDocsRequest, v1.SearchDocsResponse]
 }
 
 // ListDocSets calls forge.v1.DocsService.ListDocSets.
@@ -127,6 +140,11 @@ func (c *docsServiceClient) GetDocAsset(ctx context.Context, req *connect.Reques
 	return c.getDocAsset.CallUnary(ctx, req)
 }
 
+// SearchDocs calls forge.v1.DocsService.SearchDocs.
+func (c *docsServiceClient) SearchDocs(ctx context.Context, req *connect.Request[v1.SearchDocsRequest]) (*connect.Response[v1.SearchDocsResponse], error) {
+	return c.searchDocs.CallUnary(ctx, req)
+}
+
 // DocsServiceHandler is an implementation of the forge.v1.DocsService service.
 type DocsServiceHandler interface {
 	// ListDocSets returns the services that have docs (a docs/index.md),
@@ -139,6 +157,9 @@ type DocsServiceHandler interface {
 	// GetDocAsset returns an image a page uses. The repos are private, so a
 	// browser cannot fetch it from GitHub itself.
 	GetDocAsset(context.Context, *connect.Request[v1.GetDocAssetRequest]) (*connect.Response[v1.GetDocAssetResponse], error)
+	// SearchDocs finds the pages, across every service's docs or one
+	// service's, that hold every word of a query, best first.
+	SearchDocs(context.Context, *connect.Request[v1.SearchDocsRequest]) (*connect.Response[v1.SearchDocsResponse], error)
 }
 
 // NewDocsServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -176,6 +197,13 @@ func NewDocsServiceHandler(svc DocsServiceHandler, opts ...connect.HandlerOption
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	docsServiceSearchDocsHandler := connect.NewUnaryHandler(
+		DocsServiceSearchDocsProcedure,
+		svc.SearchDocs,
+		connect.WithSchema(docsServiceMethods.ByName("SearchDocs")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.DocsService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case DocsServiceListDocSetsProcedure:
@@ -186,6 +214,8 @@ func NewDocsServiceHandler(svc DocsServiceHandler, opts ...connect.HandlerOption
 			docsServiceGetDocPageHandler.ServeHTTP(w, r)
 		case DocsServiceGetDocAssetProcedure:
 			docsServiceGetDocAssetHandler.ServeHTTP(w, r)
+		case DocsServiceSearchDocsProcedure:
+			docsServiceSearchDocsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -209,4 +239,8 @@ func (UnimplementedDocsServiceHandler) GetDocPage(context.Context, *connect.Requ
 
 func (UnimplementedDocsServiceHandler) GetDocAsset(context.Context, *connect.Request[v1.GetDocAssetRequest]) (*connect.Response[v1.GetDocAssetResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DocsService.GetDocAsset is not implemented"))
+}
+
+func (UnimplementedDocsServiceHandler) SearchDocs(context.Context, *connect.Request[v1.SearchDocsRequest]) (*connect.Response[v1.SearchDocsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DocsService.SearchDocs is not implemented"))
 }

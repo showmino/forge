@@ -469,6 +469,7 @@ var auditReads = []string{
 	forgev1connect.DocsServiceGetDocSetProcedure,
 	forgev1connect.DocsServiceGetDocPageProcedure,
 	forgev1connect.DocsServiceGetDocAssetProcedure,
+	forgev1connect.DocsServiceSearchDocsProcedure,
 	forgev1connect.OperationServiceGetOperationProcedure,
 	forgev1connect.OperationServiceListOperationsProcedure,
 	forgev1connect.OperationServiceWatchOperationProcedure,

@@ -13,7 +13,7 @@ func TestCleanPath(t *testing.T) {
 			t.Errorf("CleanPath(%q) = %q, %v", ok, got, err)
 		}
 	}
-	for _, bad := range []string{"", "/index.md", "../forge.yaml", "a/../../b.md", "a/./b.md", "a//b.md", "a/", `a\b.md`, "a\x00.md", strings.Repeat("a", 1025)} {
+	for _, bad := range []string{"", "/index.md", "../forge.yaml", "a/../../b.md", "a/./b.md", "a//b.md", "a/", `a\b.md`, "a\x00.md", "a\x1b]0;x\x07.md", "a\u009b.md", "a\x7f.md", strings.Repeat("a", 1025)} {
 		if _, err := CleanPath(bad); err == nil {
 			t.Errorf("CleanPath(%q) accepted", bad)
 		}

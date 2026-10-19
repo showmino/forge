@@ -50,7 +50,7 @@ The v1 CLI has twelve command groups; each maps one-to-one to an API resource so
 | `resource` | `plan`, `apply`, `list`, `get` | `forge resource plan --env staging` | 5 |
 | `audit` | `list`, `get` | `forge audit list --service payments --since 7d` | 5 |
 | `op` | `list`, `watch`, `cancel` | `forge op watch op_9f2c` | 3 |
-| `docs` | `list`, `get`, `lint` | `forge docs get payments runbook.md` | 7 |
+| `docs` | `list`, `get`, `search`, `lint` | `forge docs get payments runbook.md` | 7 |
 
 Utility commands ship in Phase 1: `forge version`, `forge completion <shell>`, `forge doctor` (checks config, auth, API reachability and version skew) and `forge init` (writes `forge.yaml` for an existing repo).
 
