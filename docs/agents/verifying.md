@@ -234,6 +234,11 @@ The cluster is production, and every change to it needs the owner's OK
    live. `kubectl apply` drops the tracking annotations, so Argo CD shows
    `forge` OutOfSync until it is synced on the merged `main`; a Sync then
    changes nothing but the annotations, and still needs the owner's OK.
+   **Do not Sync between the apply and the merge:** Argo CD syncs `main`,
+   which does not have the change yet, and puts the cluster back to the old
+   render. That happened on 2026-10-19: a Sync a minute after the Dex theme
+   was applied took it away until `forge` was synced again on the merged
+   `main`. Merge first, then Sync.
    Note in this file what was checked.
 
 ### Adding a public domain
