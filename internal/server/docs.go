@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,9 @@ const (
 	docsListLoads = 4
 	// docsRefreshTimeout bounds a refresh that no request waits for.
 	docsRefreshTimeout = 30 * time.Second
+	// docsSearches is how many searches run at once: each reads every page
+	// kept in memory.
+	docsSearches = 4
 )
 
 // docSet is one service's docs as read at one commit. none is set when the
@@ -94,6 +98,8 @@ type docsService struct {
 	background func(func())
 	// slots bounds the reads from GitHub that run at once.
 	slots chan struct{}
+	// searches bounds the searches that run at once.
+	searches chan struct{}
 
 	mu         sync.Mutex
 	entries    map[string]*docsEntry
@@ -106,6 +112,7 @@ func newDocsService(gh DocsGitHub, catalog *Catalog, org string, log *slog.Logge
 		gh: gh, catalog: catalog, org: org, log: log, now: time.Now,
 		background: func(f func()) { go f() },
 		slots:      make(chan struct{}, docsReads),
+		searches:   make(chan struct{}, docsSearches),
 		entries:    map[string]*docsEntry{},
 		assets:     map[string][]byte{},
 	}
@@ -434,12 +441,35 @@ func (s *docsService) ListDocSets(ctx context.Context, _ *connect.Request[forgev
 	if s.gh == nil {
 		return nil, errNoDocsGitHub
 	}
+	all, err := s.all(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	out := &forgev1.ListDocSetsResponse{}
+	for _, d := range all {
+		out.DocSets = append(out.DocSets, docSetMessage(d.svc, d.set))
+	}
+	return connect.NewResponse(out), nil
+}
+
+// serviceDocs is one service and its docs.
+type serviceDocs struct {
+	svc *forgev1.Service
+	set *docSet
+}
+
+// all returns the docs of every service in the catalog that has docs, in
+// the catalog's order. Docs never read are read, a few services at once, and
+// a service whose read fails is left out. Stale docs are read again: before
+// answering when wait is set, else in the background, answering with the
+// docs read before so the caller never waits on GitHub for them.
+func (s *docsService) all(ctx context.Context, wait bool) ([]serviceDocs, error) {
 	ids, err := s.catalog.ids(ctx)
 	if err != nil {
 		return nil, err
 	}
 	s.forget(ids)
-	sets := make([]*forgev1.DocSet, len(ids))
+	found := make([]serviceDocs, len(ids))
 	var wg sync.WaitGroup
 	slots := make(chan struct{}, docsListLoads)
 	for i, id := range ids {
@@ -447,14 +477,12 @@ func (s *docsService) ListDocSets(ctx context.Context, _ *connect.Request[forgev
 		if err != nil {
 			continue // deleted since the list was read
 		}
-		// Docs read before are answered at once; a stale set is read again
-		// in the background, so the list never waits on GitHub for them.
-		if snap, fresh := s.fresh(svc); snap != nil {
+		if snap, fresh := s.fresh(svc); snap != nil && (fresh || !wait) {
 			if !fresh {
 				s.refreshLater(svc)
 			}
 			if snap.set != nil && snap.set.none == "" {
-				sets[i] = docSetMessage(svc, snap.set)
+				found[i] = serviceDocs{svc, snap.set}
 			}
 			continue
 		}
@@ -469,20 +497,131 @@ func (s *docsService) ListDocSets(ctx context.Context, _ *connect.Request[forgev
 			defer func() { <-slots; wg.Done() }()
 			set, err := s.load(ctx, svc)
 			if err != nil {
-				s.log.WarnContext(ctx, "docs: left out of the list", "service", svc.GetName(), "error", err)
+				s.log.WarnContext(ctx, "docs: left out", "service", svc.GetName(), "error", err)
 				return
 			}
 			if set.none == "" {
-				sets[i] = docSetMessage(svc, set)
+				found[i] = serviceDocs{svc, set}
 			}
 		}()
 	}
 	wg.Wait()
-	out := &forgev1.ListDocSetsResponse{}
-	for _, ds := range sets {
-		if ds != nil {
-			out.DocSets = append(out.DocSets, ds)
+	out := found[:0]
+	for _, d := range found {
+		if d.set != nil {
+			out = append(out, d)
 		}
+	}
+	return out, nil
+}
+
+const (
+	// docsSearchMax is the longest search query.
+	docsSearchMax = 200
+	// docsSearchPage and docsSearchPageMax are the default and the most
+	// pages a search returns.
+	docsSearchPage    = 20
+	docsSearchPageMax = 100
+	// docsSearchLines is how many matched lines a result carries.
+	docsSearchLines = 3
+)
+
+// SearchDocs looks through the pages kept in memory; nothing is indexed.
+// Unlike ListDocSets it waits for stale docs to be checked with GitHub, so
+// a page merged a minute ago is found.
+func (s *docsService) SearchDocs(ctx context.Context, req *connect.Request[forgev1.SearchDocsRequest]) (*connect.Response[forgev1.SearchDocsResponse], error) {
+	q := strings.TrimSpace(req.Msg.GetQuery())
+	if len(q) > docsSearchMax {
+		return nil, invalidArg("query is %d characters; at most %d are searched", len(q), docsSearchMax)
+	}
+	terms := docs.Terms(q)
+	if len(terms) == 0 {
+		return nil, invalidArg("query is empty: name the words to look for")
+	}
+	size := int(req.Msg.GetPageSize())
+	switch {
+	case size < 0:
+		return nil, invalidArg("page_size must not be negative")
+	case size == 0:
+		size = docsSearchPage
+	case size > docsSearchPageMax:
+		size = docsSearchPageMax
+	}
+
+	var all []serviceDocs
+	if name := req.Msg.GetService(); name != "" {
+		svc, set, err := s.service(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		all = []serviceDocs{{svc, set}}
+	} else {
+		if err := require(ctx, PermServicesRead); err != nil {
+			return nil, err
+		}
+		if s.gh == nil {
+			return nil, errNoDocsGitHub
+		}
+		var err error
+		if all, err = s.all(ctx, true); err != nil {
+			return nil, err
+		}
+	}
+
+	select {
+	case s.searches <- struct{}{}:
+		defer func() { <-s.searches }()
+	case <-ctx.Done():
+		return nil, connect.NewError(connect.CodeCanceled, ctx.Err())
+	}
+	type hit struct {
+		res   *forgev1.DocSearchResult
+		score int
+	}
+	var hits []hit
+	for _, d := range all {
+		titles := make(map[string]string, len(d.set.pages))
+		for _, p := range d.set.pages {
+			titles[p.Path] = p.Title
+		}
+		// Every page read, also those a docs: list leaves out of the menu,
+		// listed pages first in the menu's order, then the rest by path.
+		paths := make([]string, 0, len(d.set.content))
+		for _, p := range d.set.pages {
+			paths = append(paths, p.Path)
+		}
+		var rest []string
+		for p := range d.set.content {
+			if _, listed := titles[p]; !listed {
+				rest = append(rest, p)
+			}
+		}
+		slices.Sort(rest)
+		for _, p := range append(paths, rest...) {
+			md := d.set.content[p]
+			heading := docs.Title([]byte(md), p)
+			title, ok := titles[p]
+			if !ok {
+				title = heading
+			}
+			// The page's own heading counts as its title too when the
+			// docs: list names it otherwise.
+			m, ok := docs.Find(md, title+"\n"+heading, terms, docsSearchLines)
+			if !ok {
+				continue
+			}
+			res := &forgev1.DocSearchResult{Service: d.svc.GetName(), Path: p, Title: title}
+			for _, l := range m.Lines {
+				res.Lines = append(res.Lines, &forgev1.DocSearchLine{Number: int32(l.Number), Text: l.Text}) //nolint:gosec // a page is at most 1 MiB
+			}
+			hits = append(hits, hit{res, m.Score})
+		}
+	}
+	// Stable, so equal scores keep the catalog's and the menu's order.
+	slices.SortStableFunc(hits, func(a, b hit) int { return b.score - a.score })
+	out := &forgev1.SearchDocsResponse{TotalSize: int32(len(hits))} //nolint:gosec // at most docs.MaxPages per service
+	for _, h := range hits[:min(len(hits), size)] {
+		out.Results = append(out.Results, h.res)
 	}
 	return connect.NewResponse(out), nil
 }

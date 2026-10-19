@@ -329,3 +329,91 @@ func TestDocsUnavailableHidesGitHub(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestSearchDocs(t *testing.T) {
+	t.Parallel()
+	f := newDocsFixture(t)
+	ctx := readerCtx()
+	search := func(req *forgev1.SearchDocsRequest) (*forgev1.SearchDocsResponse, error) {
+		resp, err := f.s.SearchDocs(ctx, connect.NewRequest(req))
+		if err != nil {
+			return nil, err
+		}
+		return resp.Msg, nil
+	}
+	pages := func(r *forgev1.SearchDocsResponse) string {
+		var out []string
+		for _, res := range r.GetResults() {
+			out = append(out, strings.TrimPrefix(res.GetService(), "services/")+"/"+res.GetPath())
+		}
+		return strings.Join(out, " ")
+	}
+
+	r, err := search(&forgev1.SearchDocsRequest{Query: "REFUNDS charges"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages(r) != "payments/index.md" || r.GetTotalSize() != 1 {
+		t.Fatalf("refunds = %v", r)
+	}
+	res := r.GetResults()[0]
+	if res.GetTitle() != "Payments" || len(res.GetLines()) != 1 || res.GetLines()[0].GetNumber() != 2 ||
+		res.GetLines()[0].GetText() != "Charges and refunds. See the [runbook](runbook.md)." {
+		t.Errorf("result = %+v", res)
+	}
+
+	// The page named after the word comes first; its title is forge.yaml's.
+	r, err = search(&forgev1.SearchDocsRequest{Query: "runbook"})
+	if err != nil || pages(r) != "payments/runbook.md payments/index.md" || r.GetResults()[0].GetTitle() != "When it breaks" {
+		t.Errorf("runbook = %v, %v", r, err)
+	}
+	// page_size cuts the list, total_size still counts every page.
+	r, err = search(&forgev1.SearchDocsRequest{Query: "runbook", PageSize: 1})
+	if err != nil || pages(r) != "payments/runbook.md" || r.GetTotalSize() != 2 {
+		t.Errorf("page_size 1 = %v, %v", r, err)
+	}
+	// A page the docs: list leaves out is found too; one over the size limit is not.
+	r, err = search(&forgev1.SearchDocsRequest{Query: "notes"})
+	if err != nil || pages(r) != "payments/notes.md" {
+		t.Errorf("notes = %v, %v", r, err)
+	}
+	r, err = search(&forgev1.SearchDocsRequest{Query: "xxxx"})
+	if err != nil || len(r.GetResults()) != 0 || r.GetTotalSize() != 0 {
+		t.Errorf("huge page = %v, %v", r, err)
+	}
+
+	// A page pushed a minute ago is found: search checks stale docs first.
+	f.gh.Push("showmino", "ledger", map[string]string{"docs/index.md": "# Ledger\n\nDouble-entry bookkeeping.\n"}, f.now)
+	f.now = f.now.Add(docsFresh + time.Second)
+	r, err = search(&forgev1.SearchDocsRequest{Query: "bookkeeping"})
+	if err != nil || pages(r) != "ledger/index.md" {
+		t.Errorf("new page = %v, %v", r, err)
+	}
+	// One service's docs only.
+	r, err = search(&forgev1.SearchDocsRequest{Query: "index", Service: "services/ledger"})
+	if err != nil || pages(r) != "" {
+		t.Errorf("ledger only = %v, %v", r, err)
+	}
+	r, err = search(&forgev1.SearchDocsRequest{Query: "bookkeeping", Service: "services/ledger"})
+	if err != nil || pages(r) != "ledger/index.md" {
+		t.Errorf("ledger only = %v, %v", r, err)
+	}
+
+	for _, c := range []struct {
+		req  *forgev1.SearchDocsRequest
+		code connect.Code
+	}{
+		{&forgev1.SearchDocsRequest{Query: "   "}, connect.CodeInvalidArgument},
+		{&forgev1.SearchDocsRequest{Query: strings.Repeat("a", 201)}, connect.CodeInvalidArgument},
+		{&forgev1.SearchDocsRequest{Query: "a", PageSize: -1}, connect.CodeInvalidArgument},
+		{&forgev1.SearchDocsRequest{Query: "a", Service: "services/elsewhere"}, connect.CodeNotFound},
+		{&forgev1.SearchDocsRequest{Query: "a", Service: "services/Bad Name"}, connect.CodeInvalidArgument},
+	} {
+		if _, err := search(c.req); connect.CodeOf(err) != c.code {
+			t.Errorf("%+v: %v, want %v", c.req, err, c.code)
+		}
+	}
+	if _, err := f.s.SearchDocs(context.Background(), connect.NewRequest(&forgev1.SearchDocsRequest{Query: "a"})); err == nil {
+		t.Error("searched without a login")
+	}
+}

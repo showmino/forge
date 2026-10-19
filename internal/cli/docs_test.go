@@ -109,3 +109,29 @@ func TestDocsLint(t *testing.T) {
 	}
 	h.fails(int(exitcode.Usage), "docs", "lint", filepath.Join(h.dir, "nope"))
 }
+
+func TestDocsSearch(t *testing.T) {
+	t.Parallel()
+	h := docsHarness(t)
+	golden(t, "docs_search_table", h.ok("docs", "search", "RESTART").out)
+	if r := h.ok("docs", "search", "runbook", "-o", "name"); r.out != "payments runbook.md\n" {
+		t.Errorf("names: %q", r.out)
+	}
+	r := h.ok("docs", "search", "charges", "refunds", "-o", "json")
+	for _, want := range []string{`"path": "index.md"`, `"number": 3`, `"text": "Charges and refunds."`, `"totalSize": 1`} {
+		if !strings.Contains(r.out, want) {
+			t.Errorf("json lacks %s:\n%s", want, r.out)
+		}
+	}
+	if r := h.ok("docs", "search", "nothing-like-this"); r.out != "" || !strings.Contains(r.err, "No page holds all of: nothing-like-this") {
+		t.Errorf("no match: %q, %q", r.out, r.err)
+	}
+	if r := h.ok("docs", "search", "nothing-like-this", "-o", "json"); !strings.Contains(r.out, `"results": []`) {
+		t.Errorf("no match json: %q", r.out)
+	}
+	if r := h.fails(int(exitcode.NotFound), "docs", "search", "x", "--service", "ledger"); !strings.Contains(r.err, "has no docs") {
+		t.Errorf("ledger: %q", r.err)
+	}
+	h.fails(int(exitcode.Usage), "docs", "search")
+	h.fails(int(exitcode.Usage), "docs", "search", "x", "--limit", "-1")
+}
