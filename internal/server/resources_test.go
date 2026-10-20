@@ -1653,3 +1653,41 @@ func TestPlanRequestIDsArePruned(t *testing.T) {
 		t.Errorf("%d request ids kept, want only the new one", keys())
 	}
 }
+
+// A cancelled runner reports a failure of its own while it is being stopped
+// (OpenTofu shutting down on the signal), before forge-api records the cancel:
+// the run still ends as cancelled, keeping what the runner said.
+func TestCancelWhileRunnerReports(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	ctx := context.Background()
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	f.runner.Hang, f.runner.ReportOnStop = true, "apply was stopped; Interrupt received."
+	resp, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for end := time.Now().Add(5 * time.Second); len(f.runner.Started()) < 2 && time.Now().Before(end); {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := f.opc.CancelOperation(ctx, as("writer", &forgev1.CancelOperationRequest{Name: resp.GetOperation().GetName()})); err != nil {
+		t.Fatal(err)
+	}
+	op := waitCIOp(t, f.ops, resp.GetOperation().GetName())
+	if op.GetError().GetCode() != OpCodeCancelled || !strings.Contains(op.GetError().GetMessage(), "Interrupt received") {
+		t.Errorf("operation: %v", op.GetError())
+	}
+	got := f.getPlan(t, p.GetName())
+	if got.GetState() != forgev1.ResourcePlan_STATE_APPLY_FAILED || !strings.HasPrefix(got.GetMessage(), "the run was cancelled: ") {
+		t.Errorf("plan: %v", got)
+	}
+	var applies []*forgev1.AuditEvent
+	for _, ev := range f.outcomes(t, p.GetName()) {
+		if ev.GetAction() == "resource.apply" {
+			applies = append(applies, ev)
+		}
+	}
+	if len(applies) != 1 || applies[0].GetResult().GetCode() != "cancelled" {
+		t.Errorf("apply outcomes: %v", applies)
+	}
+}

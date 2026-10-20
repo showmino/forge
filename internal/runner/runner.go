@@ -182,7 +182,11 @@ func (o Options) execute(ctx context.Context, work *run.Work) run.Result {
 		}
 		o.event(ctx, "apply", "applying the saved plan")
 		if _, err := t.run(ctx, false, "apply", "-input=false", "-no-color", "-lock-timeout=60s", planFile); err != nil {
-			return fail("%s", t.failure(ctx, "apply", err))
+			why := t.failure(ctx, "apply", err)
+			if ctx.Err() == nil {
+				why += t.keepMade(ctx)
+			}
+			return fail("%s", why)
 		}
 		out, err := t.run(ctx, true, "output", "-json")
 		if err != nil {
@@ -276,6 +280,34 @@ func (t *tofu) run(ctx context.Context, capture bool, args ...string) ([]byte, e
 	}
 	err := cmd.Run()
 	return stdout.Bytes(), err
+}
+
+// keepMade takes OpenTofu's "replace it" mark off what a failed apply made.
+// A create that fails after the object exists, such as a database that was
+// not healthy within the module's wait, is marked tainted, and the next plan
+// would delete and make it again, which policy refuses without
+// allow_destroy. Kept, the next plan changes nothing and its apply puts
+// Forge's records right once the database is healthy. A stopped apply is not
+// marked, and is not passed here. It returns a line for the run's error.
+func (t *tofu) keepMade(ctx context.Context) string {
+	out, err := t.run(ctx, true, "state", "list")
+	if err != nil {
+		t.o.Log.Warn("listing the state after a failed apply", "error", err)
+		return ""
+	}
+	var kept []string
+	for _, addr := range strings.Fields(string(out)) {
+		// untaint fails on what is not tainted: that is the usual answer.
+		if _, err := t.run(ctx, false, "untaint", "-lock-timeout=60s", addr); err == nil {
+			kept = append(kept, addr)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	o := t.o
+	o.event(ctx, "apply", "kept "+strings.Join(kept, ", ")+": made but not ready in time")
+	return "\nKept " + strings.Join(kept, ", ") + ", which was made but not ready in time: plan and apply again to finish it."
 }
 
 // failure describes a failed step: why, and the end of OpenTofu's output.

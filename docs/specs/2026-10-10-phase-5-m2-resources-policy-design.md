@@ -244,6 +244,10 @@ The plan file and plan JSON are cleared when a plan is applied or expires. The s
 - Tokens, plans and state are in Postgres. If forge-api restarts during a run, the runner can still write state and complete the run, so Forge never loses track of a database it created.
 - The Operation itself is lost on a restart, as with deploys. The audit outcome is not: a run that ends gets one outcome event, whether it ends through a live Operation, through a completion after a restart, or through the sweep, and never two. The event is appended right after the plan's state is saved; if forge-api dies or the audit store fails in between, the event is missing and the failure is logged.
 - A failed apply can leave a half-made database. The state records what exists, the resource shows `failed`, and a new plan and apply repair it. If that new plan has nothing to change, applying it still puts Forge's records right.
+- Proven on a throwaway cluster on 2026-10-20 (`TestResourcesInterrupted`, build tag `e2e`), for a first create cut short while OpenTofu waits for the database:
+  - **Cancelled.** forge-api stops the runner before it records the cancel, so OpenTofu, shutting down, still saves its state with the run's token. The runner's own "stopped" report, arriving meanwhile, is recorded as the cancel (`cancelled`, with the runner's text after it), not as a failure.
+  - **The wait times out** (10 minutes). OpenTofu marks the database it made as tainted, so the next plan would replace it, which policy refuses without `allow_destroy`. After a failed apply that was not stopped, the runner takes the mark off (`tofu untaint`, while its token still lives) and says so: "Kept …, which was made but not ready in time: plan and apply again to finish it."
+  - Either way the next plan has no changes and carries the message "Forge's records differ from what exists: apply this plan to put them right."; applying it leaves one database that Forge's records and OpenTofu's state both know, without `allow_destroy`.
 
 ## 3. Policy
 

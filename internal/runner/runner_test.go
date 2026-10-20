@@ -37,6 +37,10 @@ case "$1" in
   show) echo "a warning" >&2; printf '{"resource_changes":[]}' ;;
   apply) cp plan.bin "$FAKE_DIR/applied"; ls > "$FAKE_DIR/files"; echo "Apply complete! Resources: 1 added, 0 changed, 0 destroyed." ;;
   output) printf '{"secrets":{"sensitive":false,"type":["object",{"main":"string"}],"value":{"main":"main-app"}}}' ;;
+  state) echo 'kubernetes_manifest.database["main"]' ;;
+  untaint)
+    if [ -n "$FAKE_TAINTED" ]; then echo "Resource instance $2 has been successfully untainted."
+    else echo "Error: Resource instance $2 is not currently tainted" >&2; exit 1; fi ;;
 esac
 `
 
@@ -347,5 +351,64 @@ func TestSecretsOf(t *testing.T) {
 	}
 	if _, err := secretsOf([]byte(`tofu`)); err == nil {
 		t.Error("not JSON: want an error")
+	}
+}
+
+// An apply whose create failed (the wait for a healthy database ran out)
+// leaves OpenTofu's mark to replace what it made: the runner takes it off, so
+// the next plan keeps the database instead of asking to delete it.
+func TestApplyFailureKeepsWhatWasMade(t *testing.T) {
+	t.Parallel()
+	apply := run.Work{Plan: "resourcePlans/0123456789ab", Mode: run.ModeApply, PlanFile: []byte("SAVED")}
+	for name, tc := range map[string]struct {
+		tainted  bool
+		wantKept bool
+	}{
+		"a tainted database is kept": {true, true},
+		"nothing tainted":            {false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			a := &api{work: apply}
+			env := []string{"FAKE_FAIL=apply"}
+			if tc.tainted {
+				env = append(env, "FAKE_TAINTED=1")
+			}
+			o, fake := setup(t, a, env...)
+			if err := Run(context.Background(), o); err != nil {
+				t.Fatal(err)
+			}
+			calls := read(t, filepath.Join(fake, "calls"))
+			if !strings.Contains(calls, "state list\n") || !strings.Contains(calls, `untaint -lock-timeout=60s kubernetes_manifest.database["main"]`) {
+				t.Errorf("calls:\n%s", calls)
+			}
+			res := a.results[0]
+			if !strings.HasPrefix(res.Error, "apply failed\n") {
+				t.Errorf("error: %q", res.Error)
+			}
+			kept := strings.Contains(res.Error, `Kept kubernetes_manifest.database["main"]`)
+			if kept != tc.wantKept {
+				t.Errorf("kept %v, want %v: %q", kept, tc.wantKept, res.Error)
+			}
+		})
+	}
+	// A stopped apply is not touched: an interrupted create leaves no mark.
+	a := &api{work: apply}
+	o, fake := setup(t, a, "FAKE_SLOW=apply", "FAKE_TAINTED=1")
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for {
+			if _, err := os.Stat(filepath.Join(fake, "started")); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	if err := Run(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	if calls := read(t, filepath.Join(fake, "calls")); strings.Contains(calls, "untaint") {
+		t.Errorf("a stopped apply was untainted:\n%s", calls)
 	}
 }
