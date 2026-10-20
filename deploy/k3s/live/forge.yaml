@@ -2,7 +2,7 @@
 # ingress.yaml.tmpl (Traefik) or loadbalancer.yaml.tmpl (MetalLB and similar).
 # Render with deploy/k3s/render.sh; do not apply this file directly.
 #   dex.10.150.1.220.nip.io         host name of Dex, the same for you and for pods
-#   ghcr.io/showmino/forge-api:v0.22.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
+#   ghcr.io/showmino/forge-api:v0.23.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
 #   The GitHub App settings (ID, org, template repo): see render.sh.
 #   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who is an admin.
 #   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
@@ -141,7 +141,7 @@ spec:
           secret: {secretName: forge-github-app, defaultMode: 0440}
       containers:
         - name: forge-api
-          image: ghcr.io/showmino/forge-api:v0.22.0
+          image: ghcr.io/showmino/forge-api:v0.23.0
           imagePullPolicy: IfNotPresent
           env:
             - {name: FORGE_OIDC_ISSUER, value: "https://forge-login.showmino.com/dex"}
@@ -168,10 +168,13 @@ spec:
             - {name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,forge-dex-github,ghcr-secret,arc-runners,argocd-repo-kubernetes,cert-manager,Cloudflare,crossplane-cloudflare,crossplane-github-provider-creds,grafana-admin-credentials,renovate"}
             - {name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud,forgegate.io=forgegate-io"}
             - {name: FORGE_PUBLIC_DNS_TUNNEL, value: "production"}
+            - {name: FORGE_RESOURCES, value: "1"}
+            - {name: FORGE_RUNNER_IMAGE, value: "ghcr.io/showmino/forge-runner:v0.23.0"}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
           ports:
             - {name: http, containerPort: 8080}
+            - {name: runner, containerPort: 8081}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:
@@ -612,6 +615,170 @@ roleRef:
   name: forge-api-applications
 subjects:
   - {kind: ServiceAccount, name: forge-api, namespace: forge}
+---
+# Resources: what `forge resource` needs on the cluster. render.sh adds this
+# when FORGE_RESOURCES=1.
+#   - the namespace the runner Jobs run in, and the runner's service account;
+#   - what a runner may do: manage CloudNativePG clusters, and only in the
+#     namespaces of Forge's services;
+#   - what forge-api may do: start, watch and stop the runner Jobs, keep each
+#     run's token in a Secret next to its Job, and read a database's health;
+#   - the runner API of forge-api, reachable from the runner Jobs only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: forge-runner
+  labels:
+    app.kubernetes.io/part-of: forge
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: forge-runner
+  namespace: forge-runner
+---
+# Exactly what the OpenTofu module makes (deploy/runner/module/main.tf), plus
+# reading resource definitions: the Kubernetes provider looks the Cluster
+# kind up among them before it plans.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: forge-runner
+rules:
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: forge-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: forge-runner
+subjects:
+  - {kind: ServiceAccount, name: forge-runner, namespace: forge-runner}
+---
+# RBAC cannot say "only in the namespaces of Forge's services"; this policy
+# does. It binds the runner alone: every other caller is untouched.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: forge-runner-namespaces
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [postgresql.cnpg.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [clusters]
+  matchConditions:
+    - name: is-the-forge-runner
+      expression: request.userInfo.username == "system:serviceaccount:forge-runner:forge-runner"
+  validations:
+    - expression: >-
+        has(namespaceObject.metadata.labels) &&
+        "app.kubernetes.io/managed-by" in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels["app.kubernetes.io/managed-by"] == "forge" &&
+        "forge.dev/deploy-env" in namespaceObject.metadata.labels
+      message: the Forge runner may change databases only in the staging or production namespace of a Forge service
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: forge-runner-namespaces
+spec:
+  policyName: forge-runner-namespaces
+  validationActions: [Deny]
+---
+# Exactly the calls internal/server/job_launcher.go makes, in this namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-runs
+  namespace: forge-runner
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, delete]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, update, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-runs
+  namespace: forge-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-runs
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+---
+# forge-api reads a database's health for `forge resource list` and `get`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: forge-api-resources
+rules:
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: forge-api-resources
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: forge-api-resources
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+---
+# The runner API: inside the cluster only. No Ingress or LoadBalancer points at it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-api-runner
+  namespace: forge
+spec:
+  type: ClusterIP
+  selector: {app: forge-api}
+  ports:
+    - {name: runner, port: 8081, targetPort: runner}
+---
+# The public API stays open to everyone; the runner API only to the runner Jobs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forge-api
+  namespace: forge
+spec:
+  podSelector:
+    matchLabels: {app: forge-api}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: forge-runner}
+      ports:
+        - {protocol: TCP, port: 8081}
 ---
 apiVersion: v1
 kind: ConfigMap
