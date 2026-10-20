@@ -816,6 +816,8 @@ func (c *fakeCluster) EnsureServiceNamespace(_ context.Context, service, env str
 }
 
 func (c *fakeCluster) DatabaseHealth(context.Context, string, string, string) (*forgev1.ResourceHealth, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.health, c.err
 }
 
@@ -1441,6 +1443,44 @@ func TestApplyRepairsRecords(t *testing.T) {
 			t.Errorf("last event: %q", last.GetMessage())
 		}
 	})
+	t.Run("a repair waits for a healthy database", func(t *testing.T) {
+		t.Parallel()
+		cluster := &fakeCluster{health: &forgev1.ResourceHealth{Phase: "Setting up primary", ReadyInstances: 0, Instances: 1}}
+		f := newResourceFixture(t, func(o *ResourceOptions) { o.Health = cluster })
+		// A database that exists, with its record failed by a cut short update.
+		p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		f.apply(t, p.GetName())
+		grow, _ := f.plan(t, "writer", "staging", database("10Gi", 0), false)
+		f.runner.StartErr = errors.New("no nodes")
+		f.apply(t, grow.GetName())
+		f.runner.StartErr = nil
+		// Not healthy: the repair does not call it ready.
+		again, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		if len(again.GetChanges()) != 0 || again.GetMessage() != repairMessage {
+			t.Fatalf("the repair plan: %v", again)
+		}
+		op := f.apply(t, again.GetName())
+		if op.GetError().GetCode() != "not_ready" || !strings.Contains(op.GetError().GetMessage(), "main is not healthy yet (Setting up primary, 0 of 1 ready)") {
+			t.Fatalf("repair while starting: %v", op.GetError())
+		}
+		if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_FAILED {
+			t.Errorf("record: %v", res)
+		}
+		// Healthy: the next repair puts it right.
+		cluster.mu.Lock()
+		cluster.health = &forgev1.ResourceHealth{Phase: "Cluster in healthy state", ReadyInstances: 1, Instances: 1}
+		cluster.mu.Unlock()
+		last, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+		if last.GetMessage() != repairMessage {
+			t.Fatalf("a further plan: %v", last)
+		}
+		if op := f.apply(t, last.GetName()); op.GetError() != nil {
+			t.Fatalf("repair once healthy: %v", op.GetError())
+		}
+		if res := f.getResource(t, "resources/payments/staging/main"); res.GetState() != forgev1.Resource_STATE_READY {
+			t.Errorf("record: %v", res)
+		}
+	})
 	t.Run("records in sync", func(t *testing.T) {
 		t.Parallel()
 		f := newResourceFixture(t, nil)
@@ -1651,5 +1691,43 @@ func TestPlanRequestIDsArePruned(t *testing.T) {
 	plan("production", "req-2")
 	if keys() != 1 {
 		t.Errorf("%d request ids kept, want only the new one", keys())
+	}
+}
+
+// A cancelled runner reports a failure of its own while it is being stopped
+// (OpenTofu shutting down on the signal), before forge-api records the cancel:
+// the run still ends as cancelled, keeping what the runner said.
+func TestCancelWhileRunnerReports(t *testing.T) {
+	t.Parallel()
+	f := newResourceFixture(t, nil)
+	ctx := context.Background()
+	p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
+	f.runner.Hang, f.runner.ReportOnStop = true, "apply was stopped; Interrupt received."
+	resp, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: p.GetName()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for end := time.Now().Add(5 * time.Second); len(f.runner.Started()) < 2 && time.Now().Before(end); {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := f.opc.CancelOperation(ctx, as("writer", &forgev1.CancelOperationRequest{Name: resp.GetOperation().GetName()})); err != nil {
+		t.Fatal(err)
+	}
+	op := waitCIOp(t, f.ops, resp.GetOperation().GetName())
+	if op.GetError().GetCode() != OpCodeCancelled || !strings.Contains(op.GetError().GetMessage(), "Interrupt received") {
+		t.Errorf("operation: %v", op.GetError())
+	}
+	got := f.getPlan(t, p.GetName())
+	if got.GetState() != forgev1.ResourcePlan_STATE_APPLY_FAILED || !strings.HasPrefix(got.GetMessage(), "the run was cancelled: ") {
+		t.Errorf("plan: %v", got)
+	}
+	var applies []*forgev1.AuditEvent
+	for _, ev := range f.outcomes(t, p.GetName()) {
+		if ev.GetAction() == "resource.apply" {
+			applies = append(applies, ev)
+		}
+	}
+	if len(applies) != 1 || applies[0].GetResult().GetCode() != "cancelled" {
+		t.Errorf("apply outcomes: %v", applies)
 	}
 }

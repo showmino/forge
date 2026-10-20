@@ -101,6 +101,25 @@ func (r *Resources) unlock(target, planName string) {
 	delete(r.live, planName)
 }
 
+// cancelledMessage starts the message of a run that ended by a cancel.
+const cancelledMessage = "the run was cancelled"
+
+func (r *Resources) setCancelling(planName string, on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if on {
+		r.cancelling[planName] = true
+	} else {
+		delete(r.cancelling, planName)
+	}
+}
+
+func (r *Resources) isCancelling(planName string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cancelling[planName]
+}
+
 // liveEmit adds an event to the operation watching plan's run, if there is one.
 func (r *Resources) liveEmit(planName, step, message string) {
 	r.mu.Lock()
@@ -127,7 +146,7 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 	if spec.Mode == run.ModeApply && r.o.Namespaces != nil {
 		if err := r.o.Namespaces.EnsureServiceNamespace(ctx, spec.Service, spec.Env); err != nil {
 			if ctx.Err() != nil {
-				return r.failRun(ctx, spec, OpCodeCancelled, "the run was cancelled")
+				return r.failRun(ctx, spec, OpCodeCancelled, cancelledMessage)
 			}
 			return r.failRun(ctx, spec, opCodeLaunchFailed, "namespace "+spec.Service+"-"+spec.Env+": "+clip(err.Error()))
 		}
@@ -135,7 +154,7 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 	}
 	if err := r.o.Launcher.Start(ctx, spec); err != nil {
 		if ctx.Err() != nil {
-			return r.failRun(ctx, spec, OpCodeCancelled, "the run was cancelled")
+			return r.failRun(ctx, spec, OpCodeCancelled, cancelledMessage)
 		}
 		return r.failRun(ctx, spec, opCodeLaunchFailed, "the runner could not be started: "+clip(err.Error()))
 	}
@@ -158,8 +177,12 @@ func (r *Resources) watchRun(ctx context.Context, spec run.Spec, lr *liveRun, em
 		case <-lr.ended:
 			return r.runError(ctx, spec.Plan, spec.Mode)
 		case <-ctx.Done():
+			// The runner is stopped before the cancel is recorded, so OpenTofu,
+			// shutting down, can still save its state with the run's token.
+			r.setCancelling(spec.Plan, true)
+			defer r.setCancelling(spec.Plan, false)
 			stop()
-			return r.failRun(ctx, spec, OpCodeCancelled, "the run was cancelled")
+			return r.failRun(ctx, spec, OpCodeCancelled, cancelledMessage)
 		case <-deadline.C:
 			stop()
 			return r.failRun(ctx, spec, opCodeRunTimeout, fmt.Sprintf("the run did not finish within %s", r.o.RunTimeout))
@@ -247,9 +270,40 @@ func (r *Resources) runError(ctx context.Context, planName, mode string) error {
 	case forgev1.ResourcePlan_STATE_DENIED:
 		return &OpError{Code: OpCodePolicyDenied, Message: deniedMessage(p.GetPolicy())}
 	case forgev1.ResourcePlan_STATE_FAILED, forgev1.ResourcePlan_STATE_APPLY_FAILED:
+		if strings.HasPrefix(p.GetMessage(), cancelledMessage) {
+			return &OpError{Code: OpCodeCancelled, Message: p.GetMessage()}
+		}
+		if strings.Contains(p.GetMessage(), notReadyText) {
+			return &OpError{Code: opCodeNotReady, Message: p.GetMessage()}
+		}
 		return &OpError{Code: opCodeRunFailed, Message: p.GetMessage()}
 	}
 	return &OpError{Code: OpCodeInternal, Message: fmt.Sprintf("%s is %s after its %s run", planName, planStateWord(p.GetState()), mode)}
+}
+
+// checkReady turns the success of an apply with no changes, which only puts
+// Forge's records right, into a failure while a database is not healthy: such
+// an apply runs no OpenTofu wait, so it must not call a database ready that a
+// cut short create left starting, or broken. Health that cannot be read does
+// not block it.
+func (r *Resources) checkReady(ctx context.Context, p *forgev1.ResourcePlan, end *runEnd) {
+	if r.o.Health == nil {
+		return
+	}
+	svc, _ := planTarget(p)
+	for _, s := range p.GetResources() {
+		h, err := r.o.Health.DatabaseHealth(ctx, svc, p.GetEnv(), s.GetName())
+		if err != nil {
+			r.o.Log.Warn("reading a database's health before a repair", "plan", p.GetName(), "resource", s.GetName(), "error", err)
+			continue
+		}
+		if h.GetReadyInstances() < s.GetInstances() {
+			end.code = opCodeNotReady
+			end.message = auditText(fmt.Sprintf("%s is not healthy yet (%s, %d of %d ready): plan and apply again once it is",
+				s.GetName(), h.GetPhase(), h.GetReadyInstances(), s.GetInstances()), auditMessageMax)
+			return
+		}
+	}
 }
 
 // planStateWord is a state as people read it: "apply_failed".
@@ -352,6 +406,9 @@ func (r *Resources) endRun(ctx context.Context, planName, mode string, end runEn
 	var check planCheck
 	if mode == run.ModePlan && end.code == "" {
 		check = r.checkPlan(ctx, rec, &end)
+	}
+	if mode == run.ModeApply && end.code == "" && len(rec.Plan.GetChanges()) == 0 {
+		r.checkReady(ctx, rec.Plan, &end)
 	}
 	now := timestamppb.New(r.o.Now())
 	var final *store.PlanRecord
@@ -610,7 +667,10 @@ func (r *Resources) Complete(ctx context.Context, token string, res run.Result) 
 		return err
 	}
 	end := runEnd{res: res}
-	if res.Error != "" {
+	switch {
+	case res.Error != "" && r.isCancelling(rec.Plan.GetName()):
+		end.code, end.message = OpCodeCancelled, auditText(cancelledMessage+": "+runText(res.Error), auditMessageMax)
+	case res.Error != "":
 		end.code, end.message = opCodeRunFailed, auditText(runText(res.Error), auditMessageMax)
 	}
 	won, err := r.endRun(ctx, rec.Plan.GetName(), mode, end)

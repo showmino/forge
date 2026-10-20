@@ -30,6 +30,9 @@ type Runner struct {
 	Stuck string
 	// Hang keeps a run going until it is stopped.
 	Hang bool
+	// ReportOnStop makes a stopped run report this error before Stop
+	// returns, as a real runner does when OpenTofu shuts down on a signal.
+	ReportOnStop string
 	// Silent makes a run end cleanly without reporting a result.
 	Silent bool
 	// StorageClass is what the fake module asks for (default longhorn-retain).
@@ -48,6 +51,7 @@ type Runner struct {
 type fakeRun struct {
 	status run.Status
 	stop   context.CancelFunc
+	spec   run.Spec
 }
 
 // knobs are the Runner's settings as one run sees them.
@@ -74,7 +78,7 @@ func (r *Runner) Start(_ context.Context, s run.Spec) error {
 		k.class = "longhorn-retain"
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	fr := &fakeRun{stop: cancel}
+	fr := &fakeRun{stop: cancel, spec: s}
 	r.runs[s.Plan+"/"+s.Mode] = fr
 	r.started = append(r.started, s)
 	if r.Stuck != "" {
@@ -109,6 +113,9 @@ func (r *Runner) Stop(_ context.Context, plan, mode string) error {
 	if fr, ok := r.runs[plan+"/"+mode]; ok {
 		if fr.status.Stuck {
 			r.stopped = append(r.stopped, plan+"/"+mode)
+		}
+		if r.ReportOnStop != "" && !fr.status.Done && r.API != nil {
+			_ = r.API.Complete(context.Background(), fr.spec.Token, run.Result{Error: r.ReportOnStop})
 		}
 		fr.stop()
 	}

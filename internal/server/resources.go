@@ -32,6 +32,10 @@ import (
 const (
 	OpCodePolicyDenied = "policy_denied"
 	opCodeRunFailed    = "run_failed"
+	// opCodeNotReady ends a repair while a database is not healthy yet.
+	opCodeNotReady = "not_ready"
+	// notReadyText is in the message of such a repair.
+	notReadyText       = " is not healthy yet ("
 	opCodeRunTimeout   = "run_timeout"
 	opCodeRunnerFailed = "runner_failed"
 	opCodeLaunchFailed = "launch_failed"
@@ -93,6 +97,9 @@ type Resources struct {
 	requests map[string]planRequest
 	// live maps a plan to the run an operation of this process is watching.
 	live map[string]*liveRun
+	// cancelling holds the plans whose run is being stopped for a cancel: a
+	// failure the runner reports meanwhile is the cancel's doing.
+	cancelling map[string]bool
 }
 
 // planRequest is the plan a request_id made, and when.
@@ -130,7 +137,7 @@ func NewResources(o ResourceOptions) (*Resources, error) {
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Resources{o: o, running: map[string]string{}, requests: map[string]planRequest{}, live: map[string]*liveRun{}}, nil
+	return &Resources{o: o, running: map[string]string{}, requests: map[string]planRequest{}, live: map[string]*liveRun{}, cancelling: map[string]bool{}}, nil
 }
 
 func (r *Resources) ready() error {
