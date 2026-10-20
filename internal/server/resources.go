@@ -32,6 +32,10 @@ import (
 const (
 	OpCodePolicyDenied = "policy_denied"
 	opCodeRunFailed    = "run_failed"
+	// opCodeNotReady ends a repair while a database is not healthy yet.
+	opCodeNotReady = "not_ready"
+	// notReadyText is in the message of such a repair.
+	notReadyText       = " is not healthy yet ("
 	opCodeRunTimeout   = "run_timeout"
 	opCodeRunnerFailed = "runner_failed"
 	opCodeLaunchFailed = "launch_failed"

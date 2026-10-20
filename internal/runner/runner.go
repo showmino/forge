@@ -295,19 +295,35 @@ func (t *tofu) keepMade(ctx context.Context) string {
 		t.o.Log.Warn("listing the state after a failed apply", "error", err)
 		return ""
 	}
-	var kept []string
+	var kept, lost []string
 	for _, addr := range strings.Fields(string(out)) {
-		// untaint fails on what is not tainted: that is the usual answer.
-		if _, err := t.run(ctx, false, "untaint", "-lock-timeout=60s", addr); err == nil {
+		_, err := t.run(ctx, false, "untaint", "-lock-timeout=60s", addr)
+		switch {
+		case err == nil:
 			kept = append(kept, addr)
+		case strings.Contains(t.tailText(), "not currently tainted"):
+			// The usual answer: it was not marked.
+		default:
+			t.o.Log.Warn("untainting after a failed apply", "address", addr, "error", err, "output", t.tailText())
+			lost = append(lost, addr)
 		}
 	}
-	if len(kept) == 0 {
-		return ""
+	var note string
+	if len(kept) > 0 {
+		t.o.event(ctx, "apply", "kept "+strings.Join(kept, ", ")+": made, but not healthy in time")
+		note += "\nKept " + strings.Join(kept, ", ") + ", which was made but was not healthy in time: once it is, plan and apply again to finish."
 	}
-	o := t.o
-	o.event(ctx, "apply", "kept "+strings.Join(kept, ", ")+": made but not ready in time")
-	return "\nKept " + strings.Join(kept, ", ") + ", which was made but not ready in time: plan and apply again to finish it."
+	if len(lost) > 0 {
+		note += "\nCould not keep " + strings.Join(lost, ", ") + ": the next plan may replace it, which needs --allow-destroy."
+	}
+	return note
+}
+
+// tailText is the end of the last command's output.
+func (t *tofu) tailText() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.TrimSpace(string(t.tail))
 }
 
 // failure describes a failed step: why, and the end of OpenTofu's output.

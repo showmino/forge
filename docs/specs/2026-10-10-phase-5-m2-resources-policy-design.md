@@ -248,6 +248,8 @@ The plan file and plan JSON are cleared when a plan is applied or expires. The s
   - **Cancelled.** forge-api stops the runner before it records the cancel, so OpenTofu, shutting down, still saves its state with the run's token. The runner's own "stopped" report, arriving meanwhile, is recorded as the cancel (`cancelled`, with the runner's text after it), not as a failure.
   - **The wait times out** (10 minutes). OpenTofu marks the database it made as tainted, so the next plan would replace it, which policy refuses without `allow_destroy`. After a failed apply that was not stopped, the runner takes the mark off (`tofu untaint`, while its token still lives) and says so: "Kept …, which was made but not ready in time: plan and apply again to finish it."
   - Either way the next plan has no changes and carries the message "Forge's records differ from what exists: apply this plan to put them right."; applying it leaves one database that Forge's records and OpenTofu's state both know, without `allow_destroy`.
+  - Such an apply changes nothing, so OpenTofu's wait does not run again: forge-api reads the database's live health first, and while it has fewer ready instances than declared the apply ends `not_ready` ("main is not healthy yet (<phase>, 0 of 1 ready): plan and apply again once it is") and the record stays `failed`. A database that never becomes healthy (a permanent cause) is therefore never recorded ready. Health that cannot be read does not block the repair.
+  - The runner treats OpenTofu's "not currently tainted" as the usual answer of an untaint; any other failure is logged and named in the run's error ("Could not keep …"), since the next plan may then be a replace.
 
 ## 3. Policy
 

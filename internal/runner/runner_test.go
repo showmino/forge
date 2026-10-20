@@ -39,8 +39,9 @@ case "$1" in
   output) printf '{"secrets":{"sensitive":false,"type":["object",{"main":"string"}],"value":{"main":"main-app"}}}' ;;
   state) echo 'kubernetes_manifest.database["main"]' ;;
   untaint)
+    if [ -n "$FAKE_UNTAINT_FAIL" ]; then echo "Error: Error acquiring the state lock" >&2; exit 1; fi
     if [ -n "$FAKE_TAINTED" ]; then echo "Resource instance $2 has been successfully untainted."
-    else echo "Error: Resource instance $2 is not currently tainted" >&2; exit 1; fi ;;
+    else echo "Error: Resource instance $3 is not currently tainted, and so it cannot be untainted." >&2; exit 1; fi ;;
 esac
 `
 
@@ -361,11 +362,12 @@ func TestApplyFailureKeepsWhatWasMade(t *testing.T) {
 	t.Parallel()
 	apply := run.Work{Plan: "resourcePlans/0123456789ab", Mode: run.ModeApply, PlanFile: []byte("SAVED")}
 	for name, tc := range map[string]struct {
-		tainted  bool
-		wantKept bool
+		tainted, untaintFails bool
+		wantKept, wantLost    bool
 	}{
-		"a tainted database is kept": {true, true},
-		"nothing tainted":            {false, false},
+		"a tainted database is kept": {tainted: true, wantKept: true},
+		"nothing tainted":            {},
+		"the untaint fails":          {tainted: true, untaintFails: true, wantLost: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -373,6 +375,9 @@ func TestApplyFailureKeepsWhatWasMade(t *testing.T) {
 			env := []string{"FAKE_FAIL=apply"}
 			if tc.tainted {
 				env = append(env, "FAKE_TAINTED=1")
+			}
+			if tc.untaintFails {
+				env = append(env, "FAKE_UNTAINT_FAIL=1")
 			}
 			o, fake := setup(t, a, env...)
 			if err := Run(context.Background(), o); err != nil {
@@ -387,8 +392,9 @@ func TestApplyFailureKeepsWhatWasMade(t *testing.T) {
 				t.Errorf("error: %q", res.Error)
 			}
 			kept := strings.Contains(res.Error, `Kept kubernetes_manifest.database["main"]`)
-			if kept != tc.wantKept {
-				t.Errorf("kept %v, want %v: %q", kept, tc.wantKept, res.Error)
+			lost := strings.Contains(res.Error, `Could not keep kubernetes_manifest.database["main"]`)
+			if kept != tc.wantKept || lost != tc.wantLost {
+				t.Errorf("kept %v lost %v, want %v %v: %q", kept, lost, tc.wantKept, tc.wantLost, res.Error)
 			}
 		})
 	}

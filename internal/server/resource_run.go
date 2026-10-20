@@ -273,9 +273,37 @@ func (r *Resources) runError(ctx context.Context, planName, mode string) error {
 		if strings.HasPrefix(p.GetMessage(), cancelledMessage) {
 			return &OpError{Code: OpCodeCancelled, Message: p.GetMessage()}
 		}
+		if strings.Contains(p.GetMessage(), notReadyText) {
+			return &OpError{Code: opCodeNotReady, Message: p.GetMessage()}
+		}
 		return &OpError{Code: opCodeRunFailed, Message: p.GetMessage()}
 	}
 	return &OpError{Code: OpCodeInternal, Message: fmt.Sprintf("%s is %s after its %s run", planName, planStateWord(p.GetState()), mode)}
+}
+
+// checkReady turns the success of an apply with no changes, which only puts
+// Forge's records right, into a failure while a database is not healthy: such
+// an apply runs no OpenTofu wait, so it must not call a database ready that a
+// cut short create left starting, or broken. Health that cannot be read does
+// not block it.
+func (r *Resources) checkReady(ctx context.Context, p *forgev1.ResourcePlan, end *runEnd) {
+	if r.o.Health == nil {
+		return
+	}
+	svc, _ := planTarget(p)
+	for _, s := range p.GetResources() {
+		h, err := r.o.Health.DatabaseHealth(ctx, svc, p.GetEnv(), s.GetName())
+		if err != nil {
+			r.o.Log.Warn("reading a database's health before a repair", "plan", p.GetName(), "resource", s.GetName(), "error", err)
+			continue
+		}
+		if h.GetReadyInstances() < s.GetInstances() {
+			end.code = opCodeNotReady
+			end.message = auditText(fmt.Sprintf("%s is not healthy yet (%s, %d of %d ready): plan and apply again once it is",
+				s.GetName(), h.GetPhase(), h.GetReadyInstances(), s.GetInstances()), auditMessageMax)
+			return
+		}
+	}
 }
 
 // planStateWord is a state as people read it: "apply_failed".
@@ -378,6 +406,9 @@ func (r *Resources) endRun(ctx context.Context, planName, mode string, end runEn
 	var check planCheck
 	if mode == run.ModePlan && end.code == "" {
 		check = r.checkPlan(ctx, rec, &end)
+	}
+	if mode == run.ModeApply && end.code == "" && len(rec.Plan.GetChanges()) == 0 {
+		r.checkReady(ctx, rec.Plan, &end)
 	}
 	now := timestamppb.New(r.o.Now())
 	var final *store.PlanRecord
