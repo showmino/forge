@@ -1,6 +1,6 @@
 # Phase 5, milestone 2: resources and policy
 
-Oct 10, 2026 · Showmino · Approved; amended as built on Oct 10, 2026
+Oct 10, 2026 · Showmino · Approved; amended as built on Oct 10, 2026; live on k3s and exit gate passed on Oct 20, 2026
 
 Phase 5 is "resources and audit". Milestone 1 built the audit log. Milestone 2 lets a service ask for a resource in `forge.yaml` and get it through `forge resource plan` and `forge resource apply`. Forge API runs OpenTofu for it, checks every plan against policy, and records every plan and apply in the audit log.
 
