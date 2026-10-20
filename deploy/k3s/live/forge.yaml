@@ -169,7 +169,7 @@ spec:
             - {name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud,forgegate.io=forgegate-io"}
             - {name: FORGE_PUBLIC_DNS_TUNNEL, value: "production"}
             - {name: FORGE_RESOURCES, value: "1"}
-            - {name: FORGE_RUNNER_IMAGE, value: "ghcr.io/showmino/forge-runner:v0.23.0"}
+            - {name: FORGE_RUNNER_IMAGE, value: "ghcr.io/showmino/forge-runner:v0.23.1"}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
           ports:
