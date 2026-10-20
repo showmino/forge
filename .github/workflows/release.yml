@@ -37,6 +37,27 @@ jobs:
           # A fine-grained token with contents:write on showmino/homebrew-tap.
           # Without it the release is made and the Homebrew cask is skipped.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+  # The resource runner (forge-runner, OpenTofu, the provider and the module),
+  # at the release's version: FORGE_RUNNER_IMAGE names it. amd64 only, like the
+  # cluster's nodes. A job of its own, so it can be re-run alone.
+  runner-image:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push the runner image
+        run: |
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/$owner/forge-runner:$GITHUB_REF_NAME"
+          docker build -f deploy/runner/Dockerfile \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$image" .
+          docker push "$image"
   # A separate job so a failure here (or a retry) never touches goreleaser's
   # own release, which cannot simply be re-run once it has already published.
   chart:

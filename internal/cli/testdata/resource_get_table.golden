@@ -1,0 +1,12 @@
+FIELD       VALUE
+name        resources/payments/staging/main
+service     services/payments
+env         staging
+type        postgres
+storage     5Gi
+instances   1
+state       ready
+health      unknown
+secret      main-app
+last plan   resourcePlans/PLAN
+updated     TIME

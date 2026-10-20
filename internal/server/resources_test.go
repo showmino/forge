@@ -1398,6 +1398,10 @@ func TestApplyRepairsRecords(t *testing.T) {
 		if len(gone.GetChanges()) != 0 || !hasStep(op, "records") {
 			t.Fatalf("plan: %v events %s", gone.GetChanges(), eventSteps(op))
 		}
+		// The plan itself says so, for whoever reads it later.
+		if gone.GetMessage() != repairMessage {
+			t.Errorf("plan message: %q", gone.GetMessage())
+		}
 		if op := f.apply(t, gone.GetName()); op.GetError() != nil {
 			t.Fatalf("repair: %v", op.GetError())
 		}
@@ -1443,8 +1447,8 @@ func TestApplyRepairsRecords(t *testing.T) {
 		p, _ := f.plan(t, "writer", "staging", database("5Gi", 0), false)
 		f.apply(t, p.GetName())
 		same, op := f.plan(t, "writer", "staging", database("5Gi", 0), false)
-		if len(same.GetChanges()) != 0 || hasStep(op, "records") {
-			t.Errorf("events %s", eventSteps(op))
+		if len(same.GetChanges()) != 0 || hasStep(op, "records") || same.GetMessage() != "" {
+			t.Errorf("events %s, message %q", eventSteps(op), same.GetMessage())
 		}
 		_, err := f.startApply(&forgev1.ApplyResourcePlanRequest{Name: same.GetName()})
 		wantCode(t, "nothing to apply", err, connect.CodeFailedPrecondition, "nothing to apply")
@@ -1615,4 +1619,37 @@ func TestApplyKeepsSecretNames(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestPlanRequestIDsArePruned(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	f := newResourceFixture(t, func(o *ResourceOptions) {
+		o.Now = func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	})
+	ctx := context.Background()
+	plan := func(env, id string) {
+		t.Helper()
+		req := &forgev1.PlanResourcesRequest{Service: "services/payments", Env: env, Resources: database("5Gi", 0), RequestId: id}
+		if env == "production" {
+			req.Resources = database("5Gi", 2)
+		}
+		if _, err := f.client.PlanResources(ctx, as("writer", req)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keys := func() int { f.res.mu.Lock(); defer f.res.mu.Unlock(); return len(f.res.requests) }
+	plan("staging", "req-1")
+	if keys() != 1 {
+		t.Fatalf("%d request ids kept", keys())
+	}
+	// Once the first plan could have expired, the next request drops its id.
+	mu.Lock()
+	now = now.Add(f.res.o.PlanTTL + time.Minute)
+	mu.Unlock()
+	plan("production", "req-2")
+	if keys() != 1 {
+		t.Errorf("%d request ids kept, want only the new one", keys())
+	}
 }

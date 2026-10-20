@@ -117,7 +117,8 @@ func planText(p *forgev1.ResourcePlan) string {
 	if pol != nil && !pol.GetDenied() {
 		b.WriteString("Policy: passed\n")
 	}
-	if p.GetState() == forgev1.ResourcePlan_STATE_PLANNED && len(p.GetChanges()) > 0 {
+	// A plan with no changes is applied only to repair Forge's records, which its message says.
+	if p.GetState() == forgev1.ResourcePlan_STATE_PLANNED && (len(p.GetChanges()) > 0 || p.GetMessage() != "") {
 		fmt.Fprintf(&b, "Apply it with: forge resource apply %s\n", p.GetName())
 	}
 	return b.String()
@@ -127,7 +128,7 @@ func (f *Factory) printResourcePlan(format output.Format, p *forgev1.ResourcePla
 	if format != output.Table {
 		return output.Print(f.IO.Out, format, output.View{Names: []string{p.GetName()}, Data: p})
 	}
-	_, err := fmt.Fprint(f.IO.Out, planText(p))
+	_, err := fmt.Fprint(f.IO.Out, printable(planText(p)))
 	return err
 }
 
@@ -318,8 +319,11 @@ forge.yaml or the resources changed (exit 6), and one policy now denies
 				_, err = fmt.Fprintf(f.IO.Out, "Would apply %s to %s (%s)\n", name, svc, p.GetEnv())
 				return err
 			}
-			if !yes {
-				fmt.Fprint(f.IO.ErrOut, planText(p))
+			if yes {
+				// Nobody is asked: still say which plan, above all when --env picked it.
+				f.infof("Applying %s to %s (%s)", name, svc, p.GetEnv())
+			} else {
+				fmt.Fprint(f.IO.ErrOut, printable(planText(p)))
 			}
 			if err := f.confirmApply(p, yes); err != nil {
 				return err

@@ -374,6 +374,11 @@ func (r *Resources) endRun(ctx context.Context, planName, mode string, end runEn
 		case mode == run.ModePlan:
 			p.State, p.Changes, p.Policy = forgev1.ResourcePlan_STATE_PLANNED, check.changes, check.policy
 			cur.PlanFile, cur.PlanJSON, cur.StateVersion = end.res.PlanFile, end.res.PlanJSON, check.stateVersion
+			if len(p.GetChanges()) == 0 {
+				if inSync, err := recordsMatch(ctx, tx, p); err == nil && !inSync {
+					p.Message = repairMessage
+				}
+			}
 		case end.code != "":
 			p.State, p.Message = forgev1.ResourcePlan_STATE_APPLY_FAILED, end.message
 			if err := failResources(ctx, tx, p, now); err != nil {
@@ -395,10 +400,8 @@ func (r *Resources) endRun(ctx context.Context, planName, mode string, end runEn
 	switch p := final.Plan; p.GetState() {
 	case forgev1.ResourcePlan_STATE_PLANNED:
 		r.liveEmit(planName, "policy", "passed; "+resource.Count(p.GetChanges()))
-		if len(p.GetChanges()) == 0 {
-			if inSync, err := r.recordsInSync(ctx, p); err == nil && !inSync {
-				r.liveEmit(planName, "records", "Forge's records differ from what exists; apply this plan to put them right.")
-			}
+		if p.GetMessage() == repairMessage {
+			r.liveEmit(planName, "records", repairMessage)
 		}
 	case forgev1.ResourcePlan_STATE_DENIED:
 		r.liveEmit(planName, "policy", "denied: "+deniedMessage(p.GetPolicy()))

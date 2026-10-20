@@ -91,10 +91,23 @@ var errNoTarget = errors.New("a resource plan has no service or environment")
 // exactly what the plan declares: one ready record with a Secret per
 // declared resource, with the declared settings, and no other record.
 func (r *Resources) recordsInSync(ctx context.Context, p *forgev1.ResourcePlan) (bool, error) {
+	return recordsMatch(ctx, r.o.Store, p)
+}
+
+// repairMessage is the message of a plan with no changes whose target's
+// records differ from what exists: applying it puts them right.
+const repairMessage = "Forge's records differ from what exists: apply this plan to put them right."
+
+// resourceLister reads resource records: the store, or a transaction of it.
+type resourceLister interface {
+	ListResources(ctx context.Context, service, env string) ([]*forgev1.Resource, error)
+}
+
+func recordsMatch(ctx context.Context, store resourceLister, p *forgev1.ResourcePlan) (bool, error) {
 	if p.GetService() == "" || p.GetEnv() == "" {
 		return false, errNoTarget
 	}
-	recs, err := r.o.Store.ListResources(ctx, p.GetService(), p.GetEnv())
+	recs, err := store.ListResources(ctx, p.GetService(), p.GetEnv())
 	if err != nil {
 		return false, storeErr(err)
 	}
