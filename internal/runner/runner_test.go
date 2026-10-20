@@ -47,9 +47,12 @@ esac
 
 // api records what the runner asks of forge-api.
 type api struct {
-	mu          sync.Mutex
-	work        run.Work
-	claimErr    error
+	mu       sync.Mutex
+	work     run.Work
+	claimErr error
+	// claimErrs are what the first claims answer, one each.
+	claimErrs   []error
+	claims      int
 	completeErr error
 	// completeErrs are what the first reports answer, one each.
 	completeErrs []error
@@ -58,6 +61,15 @@ type api struct {
 }
 
 func (a *api) Claim(context.Context, string) (*run.Work, error) {
+	a.mu.Lock()
+	a.claims++
+	if len(a.claimErrs) > 0 {
+		err := a.claimErrs[0]
+		a.claimErrs = a.claimErrs[1:]
+		a.mu.Unlock()
+		return nil, err
+	}
+	a.mu.Unlock()
 	if a.claimErr != nil {
 		return nil, a.claimErr
 	}
@@ -112,7 +124,7 @@ func setup(t *testing.T, a *api, env ...string) (Options, string) {
 		API: a, Token: token, StateURL: "http://forge-api-runner:8081/runner/v1/state",
 		Tofu: bin, ModuleDir: module, WorkDir: filepath.Join(dir, "work"), CLIConfig: "/opt/forge/tofurc",
 		Env:   append([]string{"PATH=" + os.Getenv("PATH"), "FAKE_DIR=" + fake}, env...),
-		Grace: 5 * time.Second, ReportFor: 300 * time.Millisecond, ReportWait: 5 * time.Millisecond,
+		Grace: 5 * time.Second, ReportFor: 300 * time.Millisecond, ReportWait: 5 * time.Millisecond, ClaimFor: 300 * time.Millisecond,
 	}, fake
 }
 
@@ -246,13 +258,28 @@ func TestRunCannotReport(t *testing.T) {
 	t.Parallel()
 	work := run.Work{Mode: run.ModePlan, Variables: variables()}
 
-	a := &api{claimErr: errors.New("the run token is not valid")}
+	// A claim forge-api refuses is final.
+	a := &api{claimErr: &run.HTTPError{Status: 401, Message: "the run token is not valid"}}
 	o, fake := setup(t, a)
-	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "claim the run: the run token is not valid") {
-		t.Errorf("a refused claim: %v", err)
+	if err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), "claim the run:") || a.claims != 1 {
+		t.Errorf("a refused claim: %v after %d tries", err, a.claims)
 	}
 	if _, err := os.Stat(filepath.Join(fake, "calls")); !errors.Is(err, os.ErrNotExist) || len(a.results) != 0 {
 		t.Error("OpenTofu ran, or a result was sent, without a claim")
+	}
+
+	// forge-api cannot be reached yet (a NetworkPolicy that has not admitted
+	// the new pod, a restart): the claim is tried again until it is.
+	a = &api{work: work, claimErrs: []error{errors.New("connect: connection refused"), &run.HTTPError{Status: 503, Message: "starting"}}}
+	o, _ = setup(t, a)
+	if err := Run(context.Background(), o); err != nil || a.claims != 3 || len(a.results) != 1 {
+		t.Errorf("a claim before forge-api is reachable: %v after %d tries", err, a.claims)
+	}
+	// It gives up after ClaimFor.
+	a = &api{work: work, claimErr: errors.New("connect: connection refused")}
+	o, _ = setup(t, a)
+	if err := Run(context.Background(), o); err == nil || a.claims < 2 {
+		t.Errorf("a claim that never gets through: %v after %d tries", err, a.claims)
 	}
 
 	a = &api{work: work, completeErr: errors.New("forge-api is away")}

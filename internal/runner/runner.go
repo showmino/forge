@@ -59,6 +59,10 @@ type Options struct {
 	// forge-api when forge-api is away (default 3m), and ReportWait the
 	// first pause between two tries (default 2s, doubling up to 20s).
 	ReportFor, ReportWait time.Duration
+	// ClaimFor is how long the runner keeps trying to claim its run while
+	// forge-api cannot be reached (default 90s): a new pod may start before
+	// the cluster's NetworkPolicy admits it, and forge-api may be restarting.
+	ClaimFor time.Duration
 	// Env is the environment OpenTofu starts from (default os.Environ()).
 	Env []string
 	Log *slog.Logger
@@ -86,13 +90,16 @@ func Run(ctx context.Context, o Options) error {
 	if o.ReportWait <= 0 {
 		o.ReportWait = 2 * time.Second
 	}
+	if o.ClaimFor <= 0 {
+		o.ClaimFor = 90 * time.Second
+	}
 	if o.Env == nil {
 		o.Env = os.Environ()
 	}
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
-	work, err := o.API.Claim(ctx, o.Token)
+	work, err := o.claim(ctx)
 	if err != nil {
 		return fmt.Errorf("claim the run: %w", err)
 	}
@@ -111,14 +118,39 @@ func Run(ctx context.Context, o Options) error {
 	return nil
 }
 
+// claim fetches the run's work. Like report, it tries again while forge-api
+// cannot be reached or answers with a server error; a refusal ends it.
+func (o Options) claim(ctx context.Context) (*run.Work, error) {
+	ctx, cancel := context.WithTimeout(ctx, o.ClaimFor)
+	defer cancel()
+	for wait := o.ReportWait; ; wait = min(2*wait, 20*time.Second) {
+		work, err := o.API.Claim(ctx, o.Token)
+		if err == nil || !retryable(err) {
+			return work, err
+		}
+		o.Log.Warn("the run could not be claimed; trying again", "error", err, "in", wait)
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(wait):
+		}
+	}
+}
+
+// retryable reports whether a call to forge-api may succeed later: it could
+// not be reached, or it answered with a server error.
+func retryable(err error) bool {
+	var refused *run.HTTPError
+	return !errors.As(err, &refused) || refused.Status >= http.StatusInternalServerError
+}
+
 // report hands res to forge-api. It tries again while forge-api cannot be
 // reached or answers with a server error, so a restart of forge-api does not
 // lose the result of an apply; an answer that refuses the result ends it.
 func (o Options) report(ctx context.Context, res run.Result) error {
 	for wait := o.ReportWait; ; wait = min(2*wait, 20*time.Second) {
 		err := o.API.Complete(ctx, o.Token, res)
-		var refused *run.HTTPError
-		if err == nil || (errors.As(err, &refused) && refused.Status < http.StatusInternalServerError) {
+		if err == nil || !retryable(err) {
 			return err
 		}
 		o.Log.Warn("the result could not be reported; trying again", "error", err, "in", wait)
