@@ -88,10 +88,17 @@ type Resources struct {
 	mu sync.Mutex
 	// running maps "<service>/<env>" to the operation running there.
 	running map[string]string
-	// requests maps a caller's PlanResources request_id (requestKey) to its plan.
-	requests map[string]string
+	// requests maps a caller's PlanResources request_id (requestKey) to its
+	// plan; an entry is dropped once the plan could have expired.
+	requests map[string]planRequest
 	// live maps a plan to the run an operation of this process is watching.
 	live map[string]*liveRun
+}
+
+// planRequest is the plan a request_id made, and when.
+type planRequest struct {
+	plan string
+	at   time.Time
 }
 
 // liveRun connects a run to the operation that watches it.
@@ -123,7 +130,7 @@ func NewResources(o ResourceOptions) (*Resources, error) {
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Resources{o: o, running: map[string]string{}, requests: map[string]string{}, live: map[string]*liveRun{}}, nil
+	return &Resources{o: o, running: map[string]string{}, requests: map[string]planRequest{}, live: map[string]*liveRun{}}, nil
 }
 
 func (r *Resources) ready() error {
@@ -255,8 +262,8 @@ func (r *Resources) PlanResources(ctx context.Context, req *connect.Request[forg
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if key := m.GetRequestId(); key != "" {
-		if planName, ok := r.requests[requestKey(ctx, key)]; ok {
-			if rec, err := r.o.Store.GetResourcePlan(ctx, planName); err == nil {
+		if req, ok := r.requests[requestKey(ctx, key)]; ok {
+			if rec, err := r.o.Store.GetResourcePlan(ctx, req.plan); err == nil {
 				op, _ := r.o.Operations.Get(rec.Plan.GetOperation())
 				return connect.NewResponse(&forgev1.PlanResourcesResponse{Operation: op, Plan: r.view(rec)}), nil
 			}
@@ -287,7 +294,12 @@ func (r *Resources) PlanResources(ctx context.Context, req *connect.Request[forg
 		return nil, err
 	}
 	if key := m.GetRequestId(); key != "" {
-		r.requests[requestKey(ctx, key)] = rec.Plan.GetName()
+		for k, old := range r.requests {
+			if now.Sub(old.at) > r.o.PlanTTL {
+				delete(r.requests, k)
+			}
+		}
+		r.requests[requestKey(ctx, key)] = planRequest{plan: rec.Plan.GetName(), at: now}
 	}
 	return connect.NewResponse(&forgev1.PlanResourcesResponse{Operation: op, Plan: r.view(rec)}), nil
 }

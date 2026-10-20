@@ -104,8 +104,13 @@ func TestResourceLifecycle(t *testing.T) {
 	h.fails(3, "resource", "apply", "--env", "production", "-y") // no plan of mine there
 
 	r = h.ok("resource", "apply", "--env", "staging", "--yes")
-	if scrub(r.out) != "Applied resourcePlans/PLAN to payments (staging)\n" || !strings.Contains(r.err, "Deploy to give the app DATABASE_URL.") {
+	golden(t, "resource_apply_table", scrub(r.out))
+	if !strings.Contains(r.err, "Deploy to give the app DATABASE_URL.") {
 		t.Errorf("apply: %v", r)
+	}
+	// --env picked the plan and nobody was asked: it is still named.
+	if !strings.HasPrefix(scrub(r.err), "Applying resourcePlans/PLAN to payments (staging)\n") {
+		t.Errorf("the plan --env picked is not named first:\n%s", r.err)
 	}
 	if got := runner.Databases(); !slices.Equal(got, []string{"payments-staging/main 5Gi x1"}) {
 		t.Errorf("databases: %v", got)
@@ -119,6 +124,7 @@ func TestResourceLifecycle(t *testing.T) {
 		t.Errorf("production: %v", r)
 	}
 	r = h.ok("resource", "get", "payments/staging/main")
+	golden(t, "resource_get_table", regexp.MustCompile(`(?m)^updated .*$`).ReplaceAllString(scrub(r.out), "updated     TIME"))
 	for _, want := range []string{"resources/payments/staging/main", "ready", "main-app", "5Gi", plan, "unknown"} {
 		if !strings.Contains(r.out, want) {
 			t.Errorf("get lacks %q:\n%s", want, r.out)
