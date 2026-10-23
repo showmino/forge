@@ -137,7 +137,7 @@ The rollout sets in `live.env` (after a forge-api release with this code):
 
 ```
 FORGE_CLUSTERS=1
-FORGE_GRAFANA_URL=<the owner's Grafana address>
+FORGE_GRAFANA_URL=https://grafana.showmino.com
 ```
 
 ## CLI

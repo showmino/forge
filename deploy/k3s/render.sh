@@ -104,7 +104,7 @@
 # Cluster capacity (forge cluster, for admins) reads the nodes, the pods and
 # metrics-server with forge-api's ServiceAccount, so it needs previews; lines
 # with a trailing "clusters" marker exist only then:
-#   FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME=default FORGE_GRAFANA_URL=http://10.150.1.202 ...
+#   FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME=default FORGE_GRAFANA_URL=https://grafana.example.com ...
 # FORGE_CLUSTER_NAME (default "default") is its name in clusters/<name>;
 # FORGE_GRAFANA_URL, optional, is linked from it.
 set -eu
