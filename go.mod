@@ -1,6 +1,6 @@
 module github.com/showmino/forge
 
-go 1.27
+go 1.27.3
 
 require (
 	connectrpc.com/connect v1.18.1
