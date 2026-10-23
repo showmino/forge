@@ -485,6 +485,8 @@ var auditReads = []string{
 	forgev1connect.ResourceServiceListResourcePlansProcedure,
 	forgev1connect.ResourceServiceListResourcesProcedure,
 	forgev1connect.ResourceServiceGetResourceProcedure,
+	forgev1connect.ClusterServiceListClustersProcedure,
+	forgev1connect.ClusterServiceGetClusterProcedure,
 }
 
 // auditInterceptor records every write call; it runs outside authentication

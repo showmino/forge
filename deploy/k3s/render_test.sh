@@ -191,6 +191,36 @@ check "resources need a runner image"       sh -c "! FORGE_RESOURCES=1 FORGE_DEP
 check "bad runner image refused"            sh -c "! FORGE_RESOURCES=1 FORGE_RUNNER_IMAGE='x; rm' FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad FORGE_RESOURCES refused"         sh -c "! FORGE_RESOURCES=yes FORGE_RUNNER_IMAGE=forge-runner:dev FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 
+# Cluster capacity: off unless FORGE_CLUSTERS=1 (the goldens above are renders without it).
+cl=$(FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME=homelab FORGE_GRAFANA_URL=http://10.150.1.202 FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+cl_nografana=$(FORGE_CLUSTERS=1 FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+# clusters_section: everything clusters.yaml.tmpl adds (from its first line to the end).
+clusters_section() { printf '%s\n' "$cl" | awk '/^# Cluster capacity:/ {on=1} on'; }
+# The permissions are pinned exactly: any change to them is a review.
+clusters_exact() { clusters_section | cmp -s - "$dir/testdata/clusters.golden"; }
+clusters_settings() {
+  printf '%s\n' "$cl" | grep -qF 'FORGE_CLUSTERS, value: "1"' &&
+    printf '%s\n' "$cl" | grep -qF 'FORGE_CLUSTER_NAME, value: "homelab"' &&
+    printf '%s\n' "$cl" | grep -qF 'FORGE_GRAFANA_URL, value: "http://10.150.1.202"'
+}
+clusters_default() {
+  printf '%s\n' "$cl_nografana" | grep -qF 'FORGE_CLUSTER_NAME, value: "default"' &&
+    ! printf '%s\n' "$cl_nografana" | grep -qF FORGE_GRAFANA_URL
+}
+no_clusters() { ! printf '%s\n' "$prev" | grep -q -e FORGE_CLUSTER -e FORGE_GRAFANA -e forge-api-clusters; }
+
+check "clusters: forge-api settings"        clusters_settings
+check "clusters: default name, no Grafana"  clusters_default
+check "clusters: nothing without it"        no_clusters
+check "clusters: RBAC exactly as reviewed"  clusters_exact
+check "clusters: no markers left"           sh -c "! printf '%s' \"\$1\" | grep -q -e '#clusters' -e '#grafana'" _ "$cl"
+check "clusters: valid YAML for kubectl"    sh -c "printf '%s' \"\$1\" | kubectl apply --dry-run=client -f - >/dev/null" _ "$cl"
+check "clusters need previews"              sh -c "! FORGE_CLUSTERS=1 FORGE_GITHUB_APP_ID=1 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "bad FORGE_CLUSTERS refused"          sh -c "! FORGE_CLUSTERS=yes FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "bad FORGE_CLUSTER_NAME refused"      sh -c "! FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME='Home|Lab' FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "bad FORGE_GRAFANA_URL refused"       sh -c "! FORGE_CLUSTERS=1 FORGE_GRAFANA_URL='javascript:alert(1)' FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "FORGE_GRAFANA_URL needs clusters"    sh -c "! FORGE_GRAFANA_URL=https://grafana.example.com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+
 # The web dashboard: off unless FORGE_WEB_ORIGINS is set (the goldens above are renders without it).
 web=$(FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io FORGE_GITHUB_APP_ID=5239131 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
 web_has() { printf '%s\n' "$web" | grep -qF -- "$1"; }

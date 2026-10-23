@@ -100,6 +100,13 @@
 # The chart revision must be one whose chart knows database.secret. Once
 # resources are on, every re-render must include both settings: a render
 # without them removes the runner's namespace and permissions.
+#
+# Cluster capacity (forge cluster, for admins) reads the nodes, the pods and
+# metrics-server with forge-api's ServiceAccount, so it needs previews; lines
+# with a trailing "clusters" marker exist only then:
+#   FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME=default FORGE_GRAFANA_URL=https://grafana.example.com ...
+# FORGE_CLUSTER_NAME (default "default") is its name in clusters/<name>;
+# FORGE_GRAFANA_URL, optional, is linked from it.
 set -eu
 
 usage() {
@@ -297,6 +304,38 @@ if [ -n "$resources" ]; then
 else
   resources_marks='/#resources$/d'
   runner_image= # unvalidated without resources; keep it out of the sed
+fi
+clusters=${FORGE_CLUSTERS:-}
+cluster_name=${FORGE_CLUSTER_NAME:-default}
+grafana_url=${FORGE_GRAFANA_URL:-}
+case $clusters in
+  ''|1) ;;
+  *) echo "invalid FORGE_CLUSTERS: $clusters (use 1)" >&2; exit 2 ;;
+esac
+if [ -n "$clusters" ]; then
+  [ -n "$previews_on" ] || { echo "FORGE_CLUSTERS needs previews (FORGE_PREVIEW_IP or FORGE_GATEWAY_DOMAIN): it uses forge-api's ServiceAccount" >&2; exit 2; }
+  # The character-class guards first: grep anchors per line, not per string.
+  case $cluster_name in
+    *[!a-z0-9-]*) echo "invalid FORGE_CLUSTER_NAME: $cluster_name (a lowercase DNS label, like default)" >&2; exit 2 ;;
+  esac
+  printf '%s' "$cluster_name" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$' ||
+    { echo "invalid FORGE_CLUSTER_NAME: $cluster_name (a lowercase DNS label, like default)" >&2; exit 2; }
+  clusters_marks='s/ *#clusters$//'
+  if [ -n "$grafana_url" ]; then
+    case $grafana_url in
+      *[!a-z0-9.:/_~-]*) echo "invalid FORGE_GRAFANA_URL: $grafana_url (lower case, like https://grafana.example.com)" >&2; exit 2 ;;
+    esac
+    printf '%s' "$grafana_url" | grep -Eq '^https?://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9._~/-]*)?$' ||
+      { echo "invalid FORGE_GRAFANA_URL: $grafana_url (an http or https address, like https://grafana.example.com)" >&2; exit 2; }
+    grafana_marks='s/ *#grafana$//'
+  else
+    grafana_marks='/#grafana$/d'
+  fi
+else
+  [ -z "$grafana_url" ] || { echo "FORGE_GRAFANA_URL needs FORGE_CLUSTERS" >&2; exit 2; }
+  clusters_marks='/#clusters$/d'
+  grafana_marks='/#grafana$/d'
+  cluster_name= # unvalidated without clusters; keep it out of the sed
 fi
 # The web dashboard: its addresses become Dex's forge-web client (redirect
 # URI <origin>/auth/callback), Dex's allowed origins and forge-api's CORS list.
@@ -536,7 +575,11 @@ fi
     echo "---"
     cat "$dir/resources.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+  if [ -n "$clusters" ]; then
+    echo "---"
+    cat "$dir/clusters.yaml.tmpl"
+  fi
+} | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "$clusters_marks" -e "$grafana_marks" -e "s|\${FORGE_CLUSTER_NAME}|$cluster_name|g" -e "s|\${FORGE_GRAFANA_URL}|$grafana_url|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_CHART_REPO}|$chart_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |

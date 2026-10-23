@@ -64,6 +64,8 @@ type Options struct {
 	// Resources serves ResourceService; nil answers FAILED_PRECONDITION. It
 	// must share Catalog and Operations with these Options.
 	Resources *Resources
+	// Clusters serves ClusterService; nil answers FAILED_PRECONDITION.
+	Clusters *Clusters
 	// CLIDir holds forge CLI builds (forge-linux-amd64, forge-linux-arm64)
 	// served at GET /cli/<name>; empty serves none.
 	CLIDir string
@@ -134,6 +136,7 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))
 	mux.Handle(forgev1connect.NewAuditServiceHandler(&auditService{store: o.Audit}, opts))
 	mux.Handle(forgev1connect.NewResourceServiceHandler(o.Resources, opts))
+	mux.Handle(forgev1connect.NewClusterServiceHandler(o.Clusters, opts))
 	mux.Handle(forgev1connect.NewDocsServiceHandler(newDocsService(o.Docs, o.Catalog, o.GitHubOrg, o.Logger), opts))
 	mux.HandleFunc("GET /cli/{name}", cliDownload(o.CLIDir))
 	mux.HandleFunc("GET /cli/releases/{tag}/{file}", cliRelease(o.CLIReleases, o.CLIRepo, o.Version, o.Logger))

@@ -59,6 +59,7 @@ type Client struct {
 	Audit        forgev1connect.AuditServiceClient
 	Resources    forgev1connect.ResourceServiceClient
 	Docs         forgev1connect.DocsServiceClient
+	Clusters     forgev1connect.ClusterServiceClient
 	BaseURL      string
 }
 
@@ -96,6 +97,7 @@ func New(baseURL string, o Options) (*Client, error) {
 		Deploys:      forgev1connect.NewDeployServiceClient(hc, baseURL, opts...),
 		Audit:        forgev1connect.NewAuditServiceClient(hc, baseURL, opts...),
 		Resources:    forgev1connect.NewResourceServiceClient(hc, baseURL, opts...),
+		Clusters:     forgev1connect.NewClusterServiceClient(hc, baseURL, opts...),
 		BaseURL:      baseURL,
 	}, nil
 }
