@@ -29,6 +29,9 @@ const clusterPrefix = "clusters/"
 // dashboard left open does not load the API server.
 const clustersFresh = 30 * time.Second
 
+// clustersTimeout bounds one read: callers wait on the lock behind it.
+const clustersTimeout = 10 * time.Second
+
 // NodeMetrics is metrics-server's resource.
 var NodeMetrics = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"}
 
@@ -74,7 +77,7 @@ func (c *Clusters) ListClusters(ctx context.Context, _ *connect.Request[forgev1.
 		return nil, err
 	}
 	if c == nil {
-		return nil, errClustersOff
+		return nil, errClustersOff()
 	}
 	cl, err := c.cluster(ctx)
 	if err != nil {
@@ -88,7 +91,7 @@ func (c *Clusters) GetCluster(ctx context.Context, req *connect.Request[forgev1.
 		return nil, err
 	}
 	if c == nil {
-		return nil, errClustersOff
+		return nil, errClustersOff()
 	}
 	id := strings.TrimPrefix(req.Msg.GetName(), clusterPrefix)
 	if id == "" {
@@ -104,7 +107,9 @@ func (c *Clusters) GetCluster(ctx context.Context, req *connect.Request[forgev1.
 	return connect.NewResponse(&forgev1.GetClusterResponse{Cluster: cl}), nil
 }
 
-var errClustersOff = connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster capacity is not configured on this Forge API (--clusters)"))
+func errClustersOff() error {
+	return connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster capacity is not configured on this Forge API (--clusters)"))
+}
 
 // cluster returns a copy of the cluster's figures, read at most every clustersFresh.
 func (c *Clusters) cluster(ctx context.Context) (*forgev1.Cluster, error) {
@@ -121,18 +126,22 @@ func (c *Clusters) cluster(ctx context.Context) (*forgev1.Cluster, error) {
 }
 
 func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
+	ctx, cancel := context.WithTimeout(ctx, clustersTimeout)
+	defer cancel()
 	nodes, err := c.o.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, c.kubeErr(ctx, "nodes", err)
 	}
-	pods, err := c.o.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "status.phase=Running"})
+	// Pending pods bound to a node count against its pod limit too.
+	pods, err := c.o.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "status.phase!=Succeeded,status.phase!=Failed"})
 	if err != nil {
 		return nil, c.kubeErr(ctx, "pods", err)
 	}
-	running := map[string]int32{}
+	onNode := map[string]int32{}
 	for i := range pods.Items {
-		if p := &pods.Items[i]; p.Status.Phase == corev1.PodRunning && p.Spec.NodeName != "" {
-			running[p.Spec.NodeName]++
+		p := &pods.Items[i]
+		if p.Spec.NodeName != "" && p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
+			onNode[p.Spec.NodeName]++
 		}
 	}
 	usage, metricsOK := c.usage(ctx)
@@ -160,7 +169,7 @@ func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
 			CpuUsedMillis:   usage[n.Name].cpu,
 			MemoryBytes:     alloc.Memory().Value(),
 			MemoryUsedBytes: usage[n.Name].memory,
-			Pods:            running[n.Name],
+			Pods:            onNode[n.Name],
 			PodsMax:         int32(alloc.Pods().Value()), //nolint:gosec // kubelet caps pods far below int32
 		}
 		node := &forgev1.Node{
@@ -172,7 +181,8 @@ func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
 			Capacity:       capa,
 		}
 		out.Nodes = append(out.Nodes, node)
-		if node.Schedulable {
+		// Headroom is only where new pods can go.
+		if node.Schedulable && node.Condition != "NotReady" {
 			t := out.Totals
 			t.CpuMillis += capa.CpuMillis
 			t.CpuUsedMillis += capa.CpuUsedMillis

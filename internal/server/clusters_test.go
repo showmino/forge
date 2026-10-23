@@ -133,6 +133,14 @@ func TestClustersErrors(t *testing.T) {
 	if _, err := off.ListClusters(adminCtx(), connect.NewRequest(&forgev1.ListClustersRequest{})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("not configured: %v", err)
 	}
+	// Switched off, it still checks who asks first.
+	if _, err := off.GetCluster(reader, connect.NewRequest(&forgev1.GetClusterRequest{Name: "clusters/default"})); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("not configured, reader: %v", err)
+	}
+	workload := context.WithValue(context.Background(), principalKey{}, &Principal{Subject: "repo:showmino/payments", Workload: &Workload{}, Permissions: []string{PermServicesRead, PermServicesWrite}})
+	if _, err := c.ListClusters(workload, connect.NewRequest(&forgev1.ListClustersRequest{})); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("CI workload: %v", err)
+	}
 
 	denied, _ := envtest.Nodes(true)
 	denied.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {

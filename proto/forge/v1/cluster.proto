@@ -29,7 +29,7 @@ message Cluster {
   google.protobuf.Timestamp create_time = 3;
   // Grafana's address, for a link; empty when none is configured.
   string grafana_url = 4;
-  // The sum over the nodes that take new pods.
+  // The sum over the nodes that take new pods: not cordoned, and ready.
   Capacity totals = 5;
   // Ordered by name.
   repeated Node nodes = 6;
@@ -63,7 +63,8 @@ message Capacity {
   int64 memory_bytes = 3;
   // Memory in use (the working set), from metrics-server.
   int64 memory_used_bytes = 4;
-  // Pods running now.
+  // Pods on the node that have not finished, pending ones included: they
+  // count against pods_max.
   int32 pods = 5;
   // The most pods that fit.
   int32 pods_max = 6;

@@ -60,7 +60,7 @@ message Capacity {
   int64 cpu_used_millis = 2;       // metrics-server; 0 without metrics
   int64 memory_bytes = 3;          // allocatable
   int64 memory_used_bytes = 4;
-  int32 pods = 5;                  // running on the node(s)
+  int32 pods = 5;                  // on the node and not finished
   int32 pods_max = 6;              // allocatable
 }
 ```
@@ -92,7 +92,11 @@ pure function with its own tests (`clusterStatus` in `internal/cli/cluster.go`;
   RPCs answer `FailedPrecondition`, like the other optional services. It
   reuses the previews' Kubernetes connection when there is one.
 - Pods per node: one `pods` list with a field selector
-  `status.phase=Running`, counted by `spec.nodeName`.
+  `status.phase!=Succeeded,status.phase!=Failed` (pending pods bound to a node
+  count against its limit too), counted by `spec.nodeName`.
+- Totals are over the nodes that take new pods: not cordoned and not
+  NotReady.
+- One read is bounded by 10 seconds: callers wait on the cache's lock behind it.
 - metrics-server down: the RPC still answers, with `metrics_available=false`
   and used values 0; clients show "No usage figures: metrics-server did not
   answer".

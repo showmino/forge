@@ -33,7 +33,7 @@ type Cluster struct {
 	CreateTime *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
 	// Grafana's address, for a link; empty when none is configured.
 	GrafanaUrl string `protobuf:"bytes,4,opt,name=grafana_url,json=grafanaUrl,proto3" json:"grafana_url,omitempty"`
-	// The sum over the nodes that take new pods.
+	// The sum over the nodes that take new pods: not cordoned, and ready.
 	Totals *Capacity `protobuf:"bytes,5,opt,name=totals,proto3" json:"totals,omitempty"`
 	// Ordered by name.
 	Nodes []*Node `protobuf:"bytes,6,rep,name=nodes,proto3" json:"nodes,omitempty"`
@@ -224,7 +224,8 @@ type Capacity struct {
 	MemoryBytes int64 `protobuf:"varint,3,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"`
 	// Memory in use (the working set), from metrics-server.
 	MemoryUsedBytes int64 `protobuf:"varint,4,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
-	// Pods running now.
+	// Pods on the node that have not finished, pending ones included: they
+	// count against pods_max.
 	Pods int32 `protobuf:"varint,5,opt,name=pods,proto3" json:"pods,omitempty"`
 	// The most pods that fit.
 	PodsMax       int32 `protobuf:"varint,6,opt,name=pods_max,json=podsMax,proto3" json:"pods_max,omitempty"`
