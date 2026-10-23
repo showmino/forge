@@ -1,0 +1,28 @@
+# Cluster capacity: what `forge cluster` needs on the cluster. render.sh adds
+# this when FORGE_CLUSTERS=1. Read only: exactly the calls
+# internal/server/clusters.go makes, with forge-api's ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: forge-api-clusters
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: forge-api-clusters
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: forge-api-clusters
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}

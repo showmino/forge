@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ClusterService reports how much room the Kubernetes cluster Forge runs on
+// has left: its nodes, their conditions and their CPU and memory. Only
+// admins may call it. Resource names follow AIP style: "clusters/{cluster}".
+service ClusterService {
+  // ListClusters returns every cluster.
+  rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // GetCluster returns one cluster.
+  rpc GetCluster(GetClusterRequest) returns (GetClusterResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Cluster is one Kubernetes cluster.
+message Cluster {
+  // "clusters/{cluster}", for example "clusters/default".
+  string name = 1;
+  // The API server's version, for example "v1.37.0+k3s1".
+  string kubernetes_version = 2;
+  // When the oldest node joined.
+  google.protobuf.Timestamp create_time = 3;
+  // Grafana's address, for a link; empty when none is configured.
+  string grafana_url = 4;
+  // The sum over the nodes that take new pods.
+  Capacity totals = 5;
+  // Ordered by name.
+  repeated Node nodes = 6;
+  // False when metrics-server did not answer: every used figure is 0.
+  bool metrics_available = 7;
+}
+
+// Node is one node of a cluster.
+message Node {
+  // The node's name in Kubernetes.
+  string name = 1;
+  // From the node-role.kubernetes.io/ labels, for example "control-plane";
+  // "worker" when it has none.
+  repeated string roles = 2;
+  // "Ready", or the first problem: "NotReady", "MemoryPressure",
+  // "DiskPressure", "PIDPressure", "NetworkUnavailable".
+  string condition = 3;
+  // False when the node is cordoned and takes no new pods.
+  bool schedulable = 4;
+  string kubelet_version = 5;
+  Capacity capacity = 6;
+}
+
+// Capacity is what can be given to pods and what is in use now.
+message Capacity {
+  // Allocatable CPU, in thousandths of a core.
+  int64 cpu_millis = 1;
+  // CPU in use, from metrics-server.
+  int64 cpu_used_millis = 2;
+  // Allocatable memory, in bytes.
+  int64 memory_bytes = 3;
+  // Memory in use (the working set), from metrics-server.
+  int64 memory_used_bytes = 4;
+  // Pods running now.
+  int32 pods = 5;
+  // The most pods that fit.
+  int32 pods_max = 6;
+}
+
+message ListClustersRequest {}
+
+message ListClustersResponse {
+  repeated Cluster clusters = 1;
+}
+
+message GetClusterRequest {
+  // "clusters/{cluster}"; the bare "{cluster}" is accepted too.
+  string name = 1;
+}
+
+message GetClusterResponse {
+  Cluster cluster = 1;
+}

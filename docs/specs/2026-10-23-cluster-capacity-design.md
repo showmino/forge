@@ -1,6 +1,6 @@
 # Cluster capacity: `forge cluster` and the dashboard's Clusters page
 
-Status: proposed 2026-10-23, waiting for the owner's go-ahead.
+Status: approved 2026-10-23; milestone 1 built (forge), not yet rolled out.
 
 ## What the owner asked for
 
@@ -28,12 +28,12 @@ Decided with the owner on 2026-10-23:
 
 ## API
 
-`proto/forge/v1/cluster.proto`, AIP-style:
+`proto/forge/v1/cluster.proto`, AIP-style (comments shortened here):
 
 ```proto
 service ClusterService {
   rpc ListClusters(ListClustersRequest) returns (ListClustersResponse);
-  rpc GetCluster(GetClusterRequest) returns (Cluster);   // name: clusters/{id}
+  rpc GetCluster(GetClusterRequest) returns (GetClusterResponse);  // name: clusters/{id}
 }
 
 message Cluster {
@@ -42,14 +42,14 @@ message Cluster {
   google.protobuf.Timestamp create_time = 3;  // oldest node's creation
   string grafana_url = 4;          // empty when --grafana-url is unset
   Capacity totals = 5;             // sum over schedulable nodes
-  repeated Node nodes = 6;         // GetCluster only; empty in List
+  repeated Node nodes = 6;         // by name, in List and Get alike
   bool metrics_available = 7;      // false when metrics-server did not answer
 }
 
 message Node {
   string name = 1;
-  repeated string roles = 2;       // control-plane, etcd, worker
-  string condition = 3;            // Ready, NotReady, MemoryPressure, DiskPressure, PIDPressure
+  repeated string roles = 2;       // control-plane, etcd; worker when none
+  string condition = 3;            // Ready, NotReady, MemoryPressure, DiskPressure, PIDPressure, NetworkUnavailable
   bool schedulable = 4;            // false when cordoned
   string kubelet_version = 5;
   Capacity capacity = 6;
@@ -65,10 +65,14 @@ message Capacity {
 }
 ```
 
+The list carries the nodes too: its status needs their conditions, and there
+is one cluster.
+
 Status ("Healthy", "Memory pressure on 1 node", "Memory at 84%") is worked out
-by the clients from these numbers, with the design's thresholds (amber at 80%,
-red at 90%), as a pure function with its own tests (`lib/cluster.ts` in
-forge-web; `internal/cli` for the table's STATUS column).
+by the clients from these numbers: a node condition first (NotReady worst),
+then CPU or memory from 80% used (the design's amber; red from 90%). It is a
+pure function with its own tests (`clusterStatus` in `internal/cli/cluster.go`;
+`lib/cluster.ts` in forge-web).
 
 ### Authorization and audit
 
@@ -80,41 +84,57 @@ forge-web; `internal/cli` for the table's STATUS column).
 
 ### Server
 
-- `internal/server/clusters.go`: the handler, over a small interface
-  (`ListNodes`, `NodeMetrics`, `ServerVersion`) so tests use a fake and the
-  e2e test the real client.
-- Served only when forge-api has Kubernetes access (the same in-cluster config
-  `--previews` uses); otherwise `Unimplemented`, like the other optional
-  services.
+- `internal/server/clusters.go`: the handler, on the Kubernetes clientset
+  (nodes, pods, server version) and the dynamic client (metrics-server's
+  `metrics.k8s.io/v1beta1` nodes, so no new dependency). Tests use fakes
+  (`envtest.Nodes`).
+- Off unless forge-api runs with `--clusters` (`FORGE_CLUSTERS=1`); off, both
+  RPCs answer `FailedPrecondition`, like the other optional services. It
+  reuses the previews' Kubernetes connection when there is one.
 - Pods per node: one `pods` list with a field selector
   `status.phase=Running`, counted by `spec.nodeName`.
 - metrics-server down: the RPC still answers, with `metrics_available=false`
   and used values 0; clients show "No usage figures: metrics-server did not
   answer".
+- No permission to read nodes or pods: `FailedPrecondition` naming the
+  ClusterRole `forge-api-clusters`.
 - Cached for 30 seconds in memory, so a dashboard left open does not load the
   API server.
+- `--grafana-url` must be an http or https address: the dashboard renders it
+  as a link.
 
 ### Kubernetes access (a cluster change: rollout needs the owner's OK)
 
-A new ClusterRole in `deploy/k3s/forge.yaml.tmpl`, bound to the `forge-api`
-ServiceAccount, read-only:
+`deploy/k3s/clusters.yaml.tmpl`, which `render.sh` adds with
+`FORGE_CLUSTERS=1` (it needs previews, whose ServiceAccount it binds): a
+ClusterRole `forge-api-clusters` bound to the `forge-api` ServiceAccount,
+read-only, exactly the calls the handler makes:
 
 ```yaml
 rules:
   - apiGroups: [""]
     resources: [nodes]
-    verbs: [get, list]
+    verbs: [list]
   - apiGroups: [""]
     resources: [pods]
     verbs: [list]
   - apiGroups: [metrics.k8s.io]
     resources: [nodes]
-    verbs: [get, list]
+    verbs: [list]
 ```
 
 The previews role already lists pods; this role keeps cluster reads separate
-so either can be removed without the other. The render goldens and
-`render_test.sh` change with it.
+so either can be removed without the other. `FORGE_CLUSTER_NAME` and
+`FORGE_GRAFANA_URL` become forge-api's settings. `render_test.sh` pins the
+role (`testdata/clusters.golden`); without `FORGE_CLUSTERS` the render is
+unchanged.
+
+The rollout sets in `live.env` (after a forge-api release with this code):
+
+```
+FORGE_CLUSTERS=1
+FORGE_GRAFANA_URL=<the owner's Grafana address>
+```
 
 ## CLI
 
@@ -122,17 +142,24 @@ so either can be removed without the other. The render goldens and
 
 ```
 $ forge cluster list
-NAME      STATUS   CPU   MEMORY   NODES   KUBERNETES
-default   Healthy  23%   61%      5       v1.37.0+k3s1
+NAME      STATUS                      CPU   MEMORY   NODES   KUBERNETES
+default   Memory pressure on 1 node   29%   42%      3       v1.37.0+k3s1
 
 $ forge cluster get default
-NAME     ROLES               CONDITION  SCHEDULABLE  CPU   MEMORY  PODS
-srv-kube control-plane,etcd  Ready      yes          31%   72%     41/110
+FIELD        VALUE
+name         clusters/default
+status       Memory pressure on 1 node
+cpu          29% of 12 cores
+...
+
+NODE       ROLES                CONDITION        SCHEDULABLE   CPU              MEMORY            PODS
+srv-cron   worker               Ready            yes           31% of 8 cores   25% of 16.0 GiB   2/110
 ...
 ```
 
-`-o json|yaml|name` as every command. Golden tests, harness tests with
-`t-writer` (admin) passing and `t-reader` denied.
+`-o json|yaml|name` as every command; JSON is the `Cluster` itself. Golden
+tests, harness tests with `t-writer` (admin) passing and `t-reader` denied.
+`forge auth can cluster.read` answers whether you may.
 
 ## Dashboard (forge-web)
 

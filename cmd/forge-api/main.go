@@ -91,6 +91,10 @@ func run() error {
 		runnerSA     = flag.String("runner-service-account", env("FORGE_RUNNER_SERVICE_ACCOUNT", "forge-runner"), "service account the runner Jobs run as")
 		runnerAPIURL = flag.String("runner-api-url", env("FORGE_RUNNER_API_URL", "http://forge-api-runner.forge.svc:8081"), "URL at which the runner Jobs reach --runner-addr")
 
+		clustersOn  = flag.Bool("clusters", env("FORGE_CLUSTERS", "") == "1" || env("FORGE_CLUSTERS", "") == "true", "serve the cluster's capacity to admins (forge cluster): nodes from Kubernetes, use from metrics-server")
+		clusterName = flag.String("cluster-name", env("FORGE_CLUSTER_NAME", "default"), "the cluster's name in clusters/<name>")
+		grafanaURL  = flag.String("grafana-url", env("FORGE_GRAFANA_URL", ""), "Grafana's address, linked from the cluster (empty: no link)")
+
 		cliDir  = flag.String("cli-dir", env("FORGE_CLI_DIR", ""), "directory of forge CLI builds served at /cli/forge-linux-<arch> for CI jobs")
 		cliRepo = flag.String("cli-repo", env("FORGE_CLI_REPO", ""), "GitHub repo (owner/name) whose releases 'forge upgrade' downloads through /cli/releases (empty: that proxy is off)")
 	)
@@ -220,6 +224,13 @@ func run() error {
 	}
 	// Deleting a service takes down its previews and deployments first.
 	catalog.EnableTeardown(deps, envs, ops)
+	cl, err := clusters(clusterFlags{on: *clustersOn, name: *clusterName, grafanaURL: *grafanaURL}, cluster, log, kubeClients)
+	if err != nil {
+		return err
+	}
+	if cl == nil {
+		log.Info("cluster capacity is off; set --clusters")
+	}
 	// A login becomes a session of Forge's own, which lasts without the
 	// identity provider; forge-api keeps its person's teams current itself.
 	// Only with the GitHub App: without it nobody could tell that a
@@ -242,6 +253,7 @@ func run() error {
 		Environments:     envs,
 		Deploys:          deps,
 		Resources:        res,
+		Clusters:         cl,
 		CLIDir:           *cliDir,
 		CLIReleases:      cliReleases(app),
 		CLIRepo:          *cliRepo,

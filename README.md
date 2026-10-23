@@ -564,6 +564,25 @@ forge audit get 1234
 Events live in PostgreSQL (`forge-db`) when forge-api has `--database-url`
 (or `FORGE_DATABASE_URL`); otherwise in memory.
 
+### Cluster capacity
+
+Admins can see how much room the cluster has left: its nodes, their
+conditions, and how much of their CPU and memory is in use (from
+metrics-server). The status is the worst problem: a node condition first, then
+CPU or memory from 80% used.
+
+```sh
+forge cluster list
+forge cluster get default
+forge cluster get default -o json | jq '.nodes[] | select(.condition != "Ready")'
+```
+
+It is off unless forge-api runs with `--clusters` (`FORGE_CLUSTERS=1`) and may
+list nodes, pods and `metrics.k8s.io` nodes; on k3s, `render.sh` adds that
+role with `FORGE_CLUSTERS=1`. `--cluster-name` names the cluster (default
+`default`) and `--grafana-url` adds a link to Grafana. Without metrics-server
+the nodes are still shown, without usage figures.
+
 ## The API
 
 One Protobuf contract served with [ConnectRPC](https://connectrpc.com): gRPC,

@@ -303,8 +303,8 @@ func newAuthCanCmd(f *Factory) *cobra.Command {
 		Use:   "can <action> [service]",
 		Short: "Check whether you may do an action",
 		Long: `Ask the API whether you may do an action, on a service or (for
-service.create and service.register) on none. Prints yes or no and exits 0 or
-5, so scripts can check before they try.
+service.create, service.register and cluster.read) on none. Prints yes or no
+and exits 0 or 5, so scripts can check before they try.
 
 Members of a service's owner team may update it, deploy, promote and roll it
 back, manage its environments and plan and apply its resources outside
@@ -314,7 +314,7 @@ production. Admins may do everything. The actions:
   service.update.team, service.delete, service.address, deploy.start,
   deploy.promote, deploy.rollback, environment.create, environment.extend,
   environment.destroy, operation.cancel, resource.plan, resource.apply,
-  resource.apply.production`,
+  resource.apply.production, cluster.read`,
 		Example: `  forge auth can deploy.promote payments
   forge auth can service.create --team billing
   forge auth can resource.apply.production payments -o json`,
