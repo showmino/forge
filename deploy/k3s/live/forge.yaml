@@ -2,7 +2,7 @@
 # ingress.yaml.tmpl (Traefik) or loadbalancer.yaml.tmpl (MetalLB and similar).
 # Render with deploy/k3s/render.sh; do not apply this file directly.
 #   dex.10.150.1.220.nip.io         host name of Dex, the same for you and for pods
-#   ghcr.io/showmino/forge-api:v0.24.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
+#   ghcr.io/showmino/forge-api:v0.25.0  e.g. forge-api:dev (imported into k3s) or ghcr.io/showmino/forge-api:v0.1.0
 #   The GitHub App settings (ID, org, template repo): see render.sh.
 #   FORGE_DEX_GITHUB_ORG, FORGE_WRITER_GROUPS (render.sh): GitHub login and who is an admin.
 #   Lines with a trailing "app" marker comment exist only when render.sh gets a GitHub App ID.
@@ -141,7 +141,7 @@ spec:
           secret: {secretName: forge-github-app, defaultMode: 0440}
       containers:
         - name: forge-api
-          image: ghcr.io/showmino/forge-api:v0.24.0
+          image: ghcr.io/showmino/forge-api:v0.25.0
           imagePullPolicy: IfNotPresent
           env:
             - {name: FORGE_OIDC_ISSUER, value: "https://forge-login.showmino.com/dex"}
@@ -173,6 +173,7 @@ spec:
             - {name: FORGE_CLUSTERS, value: "1"}
             - {name: FORGE_CLUSTER_NAME, value: "default"}
             - {name: FORGE_GRAFANA_URL, value: "https://grafana.showmino.com"}
+            - {name: FORGE_PROMETHEUS_URL, value: "http://prometheus-prometheus.monitoring.svc:9090"}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
           ports:
@@ -796,6 +797,10 @@ rules:
     verbs: [list]
   - apiGroups: [""]
     resources: [pods]
+    verbs: [list]
+  # With Prometheus: to tie volumes to their Forge service.
+  - apiGroups: [""]
+    resources: [namespaces]
     verbs: [list]
   - apiGroups: [metrics.k8s.io]
     resources: [nodes]
