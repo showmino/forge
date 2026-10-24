@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -248,18 +249,25 @@ func (c *Clusters) storage(ctx context.Context, nodes []corev1.Node) (map[string
 		if n := cmp.Or(l["kubernetes_node"], l["node"]); n != "" {
 			return n
 		}
-		host, _, _ := strings.Cut(l["instance"], ":")
+		host, _, err := net.SplitHostPort(l["instance"])
+		if err != nil {
+			host = l["instance"]
+		}
 		return byIP[host]
 	}
-	disk := map[string]nodeDisk{}
+	// Size and free space of the same series; a node's disk is its largest root.
+	seriesOf := func(l map[string]string) string { return l["instance"] + "|" + l["device"] + "|" + l["job"] }
 	avail := map[string]int64{}
 	for _, s := range res[1] {
-		avail[nodeOf(s.labels)] = int64(s.value)
+		avail[seriesOf(s.labels)] = int64(s.value)
 	}
+	disk := map[string]nodeDisk{}
 	for _, s := range res[0] {
-		if n := nodeOf(s.labels); n != "" {
-			disk[n] = nodeDisk{size: int64(s.value), used: max(int64(s.value)-avail[n], 0)}
+		n := nodeOf(s.labels)
+		if n == "" || int64(s.value) <= disk[n].size {
+			continue
 		}
+		disk[n] = nodeDisk{size: int64(s.value), used: max(int64(s.value)-avail[seriesOf(s.labels)], 0)}
 	}
 
 	// On k3s the kubelet's metrics come through the API server: the claim's

@@ -99,7 +99,7 @@ func (f *Factory) printCluster(cl *forgev1.Cluster) error {
 	t := cl.GetTotals()
 	m, s := cl.GetMetricsAvailable(), cl.GetStorageAvailable()
 	disk := "-"
-	if s {
+	if s && t.GetDiskBytes() > 0 {
 		disk = usedOf(true, t.GetDiskUsedBytes(), t.GetDiskBytes(), gibibytes)
 	}
 	rows := [][]string{

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -32,7 +33,11 @@ const promMaxBody = 8 << 20
 func (p *Prometheus) query(ctx context.Context, q string) ([]promSample, error) {
 	hc := p.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: 10 * time.Second}
+		hc = &http.Client{
+			Timeout: 10 * time.Second,
+			// The operator named the server: never follow it elsewhere.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(p.URL, "/")+"/api/v1/query?query="+url.QueryEscape(q), nil)
 	if err != nil {
@@ -70,7 +75,8 @@ func (p *Prometheus) query(ctx context.Context, q string) ([]promSample, error) 
 	for _, r := range body.Data.Result {
 		s, _ := r.Value[1].(string)
 		v, err := strconv.ParseFloat(s, 64)
-		if err != nil {
+		// Byte counts only: NaN, infinities and negatives would wrap in int64.
+		if err != nil || math.IsNaN(v) || v < 0 || v >= math.MaxInt64 {
 			continue
 		}
 		out = append(out, promSample{labels: r.Metric, value: v})
