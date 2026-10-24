@@ -1,2 +1,2 @@
-NAME      STATUS                      CPU   MEMORY   NODES   KUBERNETES
-default   Memory pressure on 1 node   29%   42%      3       v1.37.0+k3s1
+NAME      STATUS                      CPU   MEMORY   DISK   NODES   KUBERNETES
+default   Memory pressure on 1 node   29%   42%      32%    3       v1.37.0+k3s1

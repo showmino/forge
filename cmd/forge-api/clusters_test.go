@@ -16,7 +16,7 @@ import (
 func TestClusters(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.DiscardHandler)
-	ok := clusterFlags{on: true, name: "default", grafanaURL: "https://grafana.example.com/d/k8s"}
+	ok := clusterFlags{on: true, name: "default", grafanaURL: "https://grafana.example.com/d/k8s", prometheusURL: "http://prometheus-prometheus.monitoring.svc:9090"}
 	noKube := func() (kubernetes.Interface, dynamic.Interface, error) { return nil, nil, errors.New("no kubeconfig") }
 
 	if c, err := clusters(clusterFlags{}, nil, log, noKube); c != nil || err != nil {
@@ -37,6 +37,7 @@ func TestClusters(t *testing.T) {
 		"no name":        {clusterFlags{on: true}, "--cluster-name"},
 		"script grafana": {clusterFlags{on: true, name: "default", grafanaURL: "javascript:alert(1)"}, "--grafana-url"},
 		"no host":        {clusterFlags{on: true, name: "default", grafanaURL: "https://"}, "--grafana-url"},
+		"bad prometheus": {clusterFlags{on: true, name: "default", prometheusURL: "prometheus:9090"}, "--prometheus-url"},
 		"no kube":        {clusterFlags{on: true, name: "default"}, "no kubeconfig"},
 	} {
 		if _, err := clusters(tc.f, nil, log, noKube); err == nil || !strings.Contains(err.Error(), tc.msg) {

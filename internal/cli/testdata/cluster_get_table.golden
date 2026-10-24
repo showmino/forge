@@ -4,10 +4,15 @@ status       Memory pressure on 1 node
 kubernetes   v1.37.0+k3s1
 cpu          29% of 12 cores
 memory       42% of 24.0 GiB
+disk         32% of 300.0 GiB
 pods         3 of 220
 grafana      https://grafana.example.com
 
-NODE       ROLES                CONDITION        SCHEDULABLE   CPU              MEMORY            PODS
-srv-cron   worker               Ready            yes           31% of 8 cores   25% of 16.0 GiB   2/110
-srv-kube   control-plane,etcd   Ready            yes           25% of 4 cores   75% of 8.0 GiB    1/110
-srv-lab    worker               MemoryPressure   no            13% of 4 cores   88% of 8.0 GiB    1/110
+NODE       ROLES                CONDITION        SCHEDULABLE   CPU              MEMORY            DISK               PODS
+srv-cron   worker               Ready            yes           31% of 8 cores   25% of 16.0 GiB   10% of 200.0 GiB   2/110
+srv-kube   control-plane,etcd   Ready            yes           25% of 4 cores   75% of 8.0 GiB    75% of 100.0 GiB   1/110
+srv-lab    worker               MemoryPressure   no            13% of 4 cores   88% of 8.0 GiB    90% of 50.0 GiB    1/110
+
+VOLUME                     SERVICE    ENV          USED
+payments-production/data   payments   production   90% of 10.0 GiB
+monitoring/prometheus-db   -          -            40% of 50.0 GiB

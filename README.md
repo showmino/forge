@@ -567,9 +567,10 @@ Events live in PostgreSQL (`forge-db`) when forge-api has `--database-url`
 ### Cluster capacity
 
 Admins can see how much room the cluster has left: its nodes, their
-conditions, and how much of their CPU and memory is in use (from
-metrics-server). The status is the worst problem: a node condition first, then
-CPU or memory from 80% used.
+conditions, how much of their CPU and memory is in use (from metrics-server)
+and, with Prometheus, their disks and every persistent volume, tied to its
+Forge service when it has one. The status is the worst problem: a node
+condition first, then CPU, memory, disk or a volume from 80% used.
 
 ```sh
 forge cluster list
@@ -581,7 +582,9 @@ It is off unless forge-api runs with `--clusters` (`FORGE_CLUSTERS=1`) and may
 list nodes, pods and `metrics.k8s.io` nodes; on k3s, `render.sh` adds that
 role with `FORGE_CLUSTERS=1`. `--cluster-name` names the cluster (default
 `default`) and `--grafana-url` adds a link to Grafana. Without metrics-server
-the nodes are still shown, without usage figures.
+the nodes are still shown, without usage figures. `--prometheus-url`
+(`FORGE_PROMETHEUS_URL`) adds disks and volumes; forge-api then also lists
+namespaces, to tie volumes to services.
 
 ## The API
 

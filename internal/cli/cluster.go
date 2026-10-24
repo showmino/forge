@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 
@@ -45,12 +46,14 @@ in use. The figures are over the nodes that take new pods.`,
 			if err != nil {
 				return err
 			}
-			v := output.View{Headers: []string{"name", "status", "cpu", "memory", "nodes", "kubernetes"}, Data: resp.Msg}
+			v := output.View{Headers: []string{"name", "status", "cpu", "memory", "disk", "nodes", "kubernetes"}, Data: resp.Msg}
 			for _, cl := range resp.Msg.GetClusters() {
 				t := cl.GetTotals()
+				m, s := cl.GetMetricsAvailable(), cl.GetStorageAvailable()
 				v.Rows = append(v.Rows, []string{
 					strings.TrimPrefix(cl.GetName(), "clusters/"), clusterStatus(cl),
-					usedPct(cl, t.GetCpuUsedMillis(), t.GetCpuMillis()), usedPct(cl, t.GetMemoryUsedBytes(), t.GetMemoryBytes()),
+					usedPct(m, t.GetCpuUsedMillis(), t.GetCpuMillis()), usedPct(m, t.GetMemoryUsedBytes(), t.GetMemoryBytes()),
+					usedPct(s, t.GetDiskUsedBytes(), t.GetDiskBytes()),
 					fmt.Sprint(len(cl.GetNodes())), cl.GetKubernetesVersion(),
 				})
 				v.Names = append(v.Names, cl.GetName())
@@ -63,7 +66,7 @@ in use. The figures are over the nodes that take new pods.`,
 func newClusterGetCmd(f *Factory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <name>",
-		Short: "Show a cluster and its nodes",
+		Short: "Show a cluster, its nodes and its volumes",
 		Example: `  forge cluster get default
   forge cluster get default -o json | jq '.nodes[] | select(.condition != "Ready")'`,
 		Args: cobra.ExactArgs(1),
@@ -94,12 +97,18 @@ func newClusterGetCmd(f *Factory) *cobra.Command {
 
 func (f *Factory) printCluster(cl *forgev1.Cluster) error {
 	t := cl.GetTotals()
+	m, s := cl.GetMetricsAvailable(), cl.GetStorageAvailable()
+	disk := "-"
+	if s && t.GetDiskBytes() > 0 {
+		disk = usedOf(true, t.GetDiskUsedBytes(), t.GetDiskBytes(), gibibytes)
+	}
 	rows := [][]string{
 		{"name", cl.GetName()},
 		{"status", clusterStatus(cl)},
 		{"kubernetes", cl.GetKubernetesVersion()},
-		{"cpu", usedOf(cl, t.GetCpuUsedMillis(), t.GetCpuMillis(), cores)},
-		{"memory", usedOf(cl, t.GetMemoryUsedBytes(), t.GetMemoryBytes(), gibibytes)},
+		{"cpu", usedOf(m, t.GetCpuUsedMillis(), t.GetCpuMillis(), cores)},
+		{"memory", usedOf(m, t.GetMemoryUsedBytes(), t.GetMemoryBytes(), gibibytes)},
+		{"disk", disk},
 		{"pods", fmt.Sprintf("%d of %d", t.GetPods(), t.GetPodsMax())},
 	}
 	if cl.GetGrafanaUrl() != "" {
@@ -108,17 +117,21 @@ func (f *Factory) printCluster(cl *forgev1.Cluster) error {
 	if err := output.Print(f.IO.Out, output.Table, output.View{Headers: []string{"field", "value"}, Rows: rows}); err != nil {
 		return err
 	}
-	nodes := output.View{Headers: []string{"node", "roles", "condition", "schedulable", "cpu", "memory", "pods"}}
+	nodes := output.View{Headers: []string{"node", "roles", "condition", "schedulable", "cpu", "memory", "disk", "pods"}}
 	for _, n := range cl.GetNodes() {
 		c := n.GetCapacity()
 		sched := "yes"
 		if !n.GetSchedulable() {
 			sched = "no"
 		}
+		disk := "-"
+		if s && c.GetDiskBytes() > 0 {
+			disk = usedOf(true, c.GetDiskUsedBytes(), c.GetDiskBytes(), gibibytes)
+		}
 		nodes.Rows = append(nodes.Rows, []string{
 			n.GetName(), strings.Join(n.GetRoles(), ","), n.GetCondition(), sched,
-			usedOf(cl, c.GetCpuUsedMillis(), c.GetCpuMillis(), cores), usedOf(cl, c.GetMemoryUsedBytes(), c.GetMemoryBytes(), gibibytes),
-			fmt.Sprintf("%d/%d", c.GetPods(), c.GetPodsMax()),
+			usedOf(m, c.GetCpuUsedMillis(), c.GetCpuMillis(), cores), usedOf(m, c.GetMemoryUsedBytes(), c.GetMemoryBytes(), gibibytes),
+			disk, fmt.Sprintf("%d/%d", c.GetPods(), c.GetPodsMax()),
 		})
 	}
 	if _, err := fmt.Fprintln(f.IO.Out); err != nil {
@@ -127,8 +140,27 @@ func (f *Factory) printCluster(cl *forgev1.Cluster) error {
 	if err := output.Print(f.IO.Out, output.Table, nodes); err != nil {
 		return err
 	}
-	if !cl.GetMetricsAvailable() {
+	if vols := cl.GetVolumes(); len(vols) > 0 {
+		view := output.View{Headers: []string{"volume", "service", "env", "used"}}
+		for _, v := range vols {
+			svc := strings.TrimPrefix(v.GetService(), "services/")
+			view.Rows = append(view.Rows, []string{
+				v.GetNamespace() + "/" + v.GetClaim(), cmp.Or(svc, "-"), cmp.Or(v.GetEnvironment(), "-"),
+				usedOf(true, v.GetUsedBytes(), v.GetCapacityBytes(), gibibytes),
+			})
+		}
+		if _, err := fmt.Fprintln(f.IO.Out); err != nil {
+			return err
+		}
+		if err := output.Print(f.IO.Out, output.Table, view); err != nil {
+			return err
+		}
+	}
+	if !m {
 		f.infof("No usage figures: metrics-server did not answer the Forge API.")
+	}
+	if !s {
+		f.infof("No disk or volume figures: the Forge API has no Prometheus (--prometheus-url), or it did not answer.")
 	}
 	return nil
 }
@@ -146,7 +178,8 @@ var conditionWords = []struct{ condition, words string }{
 }
 
 // clusterStatus is the cluster's worst problem in a few words: a node
-// condition, then CPU or memory from 80% used, else Healthy.
+// condition, then the fullest of CPU, memory, disk or a volume from 80% used,
+// else Healthy.
 func clusterStatus(cl *forgev1.Cluster) string {
 	for _, cw := range conditionWords {
 		n := 0
@@ -163,15 +196,25 @@ func clusterStatus(cl *forgev1.Cluster) string {
 		}
 		return strings.ToUpper(cw.words[:1]) + cw.words[1:] + " on " + plural(n, "node")
 	}
+	worst, what := 0, ""
+	consider := func(p int, w string) {
+		if p > worst {
+			worst, what = p, w
+		}
+	}
+	t := cl.GetTotals()
 	if cl.GetMetricsAvailable() {
-		t := cl.GetTotals()
-		cpu, mem := pct(t.GetCpuUsedMillis(), t.GetCpuMillis()), pct(t.GetMemoryUsedBytes(), t.GetMemoryBytes())
-		if mem >= warnAt && mem >= cpu {
-			return fmt.Sprintf("Memory at %d%%", mem)
+		consider(pct(t.GetMemoryUsedBytes(), t.GetMemoryBytes()), "Memory")
+		consider(pct(t.GetCpuUsedMillis(), t.GetCpuMillis()), "CPU")
+	}
+	if cl.GetStorageAvailable() {
+		consider(pct(t.GetDiskUsedBytes(), t.GetDiskBytes()), "Disk")
+		for _, v := range cl.GetVolumes() {
+			consider(pct(v.GetUsedBytes(), v.GetCapacityBytes()), "Volume "+v.GetNamespace()+"/"+v.GetClaim())
 		}
-		if cpu >= warnAt {
-			return fmt.Sprintf("CPU at %d%%", cpu)
-		}
+	}
+	if worst >= warnAt {
+		return fmt.Sprintf("%s at %d%%", what, worst)
 	}
 	return "Healthy"
 }
@@ -183,17 +226,17 @@ func pct(used, total int64) int {
 	return int((used*100 + total/2) / total)
 }
 
-// usedPct is "42%", or "-" without metrics.
-func usedPct(cl *forgev1.Cluster, used, total int64) string {
-	if !cl.GetMetricsAvailable() || total <= 0 {
+// usedPct is "42%", or "-" without figures.
+func usedPct(ok bool, used, total int64) string {
+	if !ok || total <= 0 {
 		return "-"
 	}
 	return fmt.Sprintf("%d%%", pct(used, total))
 }
 
-// usedOf is "42% of 8 cores", or "8 cores" without metrics.
-func usedOf(cl *forgev1.Cluster, used, total int64, unit func(int64) string) string {
-	if !cl.GetMetricsAvailable() || total <= 0 {
+// usedOf is "42% of 8 cores", or "8 cores" without figures.
+func usedOf(ok bool, used, total int64, unit func(int64) string) string {
+	if !ok || total <= 0 {
 		return unit(total)
 	}
 	return fmt.Sprintf("%d%% of %s", pct(used, total), unit(total))

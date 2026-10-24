@@ -1,6 +1,6 @@
 # Cluster capacity: `forge cluster` and the dashboard's Clusters page
 
-Status: approved 2026-10-23; milestone 1 live since 2026-10-24 (forge-api `v0.24.0`).
+Status: approved 2026-10-23; milestone 1 live since 2026-10-24 (forge-api `v0.24.0`); milestone 2 built 2026-10-24, not rolled out.
 
 ## What the owner asked for
 
@@ -177,18 +177,36 @@ After the forge PR is merged: `scripts/sync-proto.sh`, then
   API still enforces it.
 - Every page shows its CLI command.
 
-## Milestone 2: disk and volumes (separate go-ahead)
+## Milestone 2: disk and volumes (go-ahead 2026-10-24)
 
 forge-api queries Prometheus (`--prometheus-url`, for example
 `http://prometheus-prometheus.monitoring.svc:9090`; forge-api's
-NetworkPolicy is ingress only, so egress is open):
+NetworkPolicy is ingress only, so egress is open) with four fixed instant
+queries (`internal/server/prometheus.go`, answers capped at 8 MiB):
 
 - Node disk: `node_filesystem_size_bytes` / `node_filesystem_avail_bytes` on
-  `/` per node (node-exporter).
-- Volumes: `kubelet_volume_stats_used_bytes` / `_capacity_bytes` per PVC, with
-  the namespace mapped to the Forge service and environment when it is one.
+  `/` per node (node-exporter); used is size minus available. The node is
+  `kubernetes_node` (or `node`) when the series has it, else the node whose
+  InternalIP is the `instance` host. Proto: `Capacity.disk_bytes`,
+  `disk_used_bytes`, summed into the totals like CPU.
+- Volumes: `kubelet_volume_stats_used_bytes` / `_capacity_bytes` per PVC.
+  On k3s the kubelet is scraped through the API server: the claim's
+  namespace is `exported_namespace`, and every API server reports it once, so
+  claims are de-duplicated. Proto: `Cluster.volumes` (namespace, claim, used,
+  capacity, and `service` and `environment` when the namespace carries
+  Forge's labels), fullest first.
+- `Cluster.storage_available` is false without Prometheus or when it fails;
+  the rest still answers, as with metrics-server.
+- Status: after node conditions, the fullest of CPU, memory, disk and any
+  volume from 80% ("Volume payments-production/data at 90%").
+- Kubernetes: `list` on namespaces, added to `forge-api-clusters` only when
+  `FORGE_PROMETHEUS_URL` is set, so the live render does not change before the
+  rollout. Without it volumes are listed but not tied to services.
 
-Prometheus unreachable: the same as metrics-server down, for those fields.
+Checked against the owner's cluster on 2026-10-24 with a local forge-api
+(dev token, read-only kubeconfig, the LAN Prometheus): five disks, nine
+claims (15 series before de-duplication), `forgegate-staging/main-1` tied to
+forgegate's staging.
 
 ## Documentation
 

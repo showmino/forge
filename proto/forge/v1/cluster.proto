@@ -35,6 +35,25 @@ message Cluster {
   repeated Node nodes = 6;
   // False when metrics-server did not answer: every used figure is 0.
   bool metrics_available = 7;
+  // False when no Prometheus is configured or it did not answer: disk figures
+  // are 0 and there are no volumes.
+  bool storage_available = 8;
+  // The persistent volumes and how full they are, fullest first.
+  repeated Volume volumes = 9;
+}
+
+// Volume is a PersistentVolumeClaim with how much of it is in use.
+message Volume {
+  string namespace = 1;
+  // The claim's name.
+  string claim = 2;
+  int64 capacity_bytes = 3;
+  int64 used_bytes = 4;
+  // "services/{service}" when the namespace is a Forge service's.
+  string service = 5;
+  // The Forge environment of that namespace: "staging", "production" or a
+  // preview's name.
+  string environment = 6;
 }
 
 // Node is one node of a cluster.
@@ -68,6 +87,9 @@ message Capacity {
   int32 pods = 5;
   // The most pods that fit.
   int32 pods_max = 6;
+  // The root filesystem's size and use, from Prometheus (node-exporter).
+  int64 disk_bytes = 7;
+  int64 disk_used_bytes = 8;
 }
 
 message ListClustersRequest {}

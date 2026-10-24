@@ -106,7 +106,9 @@
 # with a trailing "clusters" marker exist only then:
 #   FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME=default FORGE_GRAFANA_URL=https://grafana.example.com ...
 # FORGE_CLUSTER_NAME (default "default") is its name in clusters/<name>;
-# FORGE_GRAFANA_URL, optional, is linked from it.
+# FORGE_GRAFANA_URL, optional, is linked from it. FORGE_PROMETHEUS_URL,
+# optional, adds node disk and volume use (for example
+# http://prometheus-prometheus.monitoring.svc:9090).
 set -eu
 
 usage() {
@@ -308,6 +310,7 @@ fi
 clusters=${FORGE_CLUSTERS:-}
 cluster_name=${FORGE_CLUSTER_NAME:-default}
 grafana_url=${FORGE_GRAFANA_URL:-}
+prometheus_url=${FORGE_PROMETHEUS_URL:-}
 case $clusters in
   ''|1) ;;
   *) echo "invalid FORGE_CLUSTERS: $clusters (use 1)" >&2; exit 2 ;;
@@ -331,10 +334,22 @@ if [ -n "$clusters" ]; then
   else
     grafana_marks='/#grafana$/d'
   fi
+  if [ -n "$prometheus_url" ]; then
+    case $prometheus_url in
+      *[!a-z0-9.:/_~-]*) echo "invalid FORGE_PROMETHEUS_URL: $prometheus_url (lower case, like http://prometheus.monitoring.svc:9090)" >&2; exit 2 ;;
+    esac
+    printf '%s' "$prometheus_url" | grep -Eq '^https?://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9._~/-]*)?$' ||
+      { echo "invalid FORGE_PROMETHEUS_URL: $prometheus_url (an http or https address, like http://prometheus.monitoring.svc:9090)" >&2; exit 2; }
+    prometheus_marks='s/ *#prometheus$//'
+  else
+    prometheus_marks='/#prometheus$/d'
+  fi
 else
   [ -z "$grafana_url" ] || { echo "FORGE_GRAFANA_URL needs FORGE_CLUSTERS" >&2; exit 2; }
+  [ -z "$prometheus_url" ] || { echo "FORGE_PROMETHEUS_URL needs FORGE_CLUSTERS" >&2; exit 2; }
   clusters_marks='/#clusters$/d'
   grafana_marks='/#grafana$/d'
+  prometheus_marks='/#prometheus$/d'
   cluster_name= # unvalidated without clusters; keep it out of the sed
 fi
 # The web dashboard: its addresses become Dex's forge-web client (redirect
@@ -579,7 +594,7 @@ fi
     echo "---"
     cat "$dir/clusters.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "$clusters_marks" -e "$grafana_marks" -e "s|\${FORGE_CLUSTER_NAME}|$cluster_name|g" -e "s|\${FORGE_GRAFANA_URL}|$grafana_url|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+} | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "$clusters_marks" -e "$grafana_marks" -e "$prometheus_marks" -e "s|\${FORGE_CLUSTER_NAME}|$cluster_name|g" -e "s|\${FORGE_GRAFANA_URL}|$grafana_url|g" -e "s|\${FORGE_PROMETHEUS_URL}|$prometheus_url|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_CHART_REPO}|$chart_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |

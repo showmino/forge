@@ -12,6 +12,10 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [list]
+  # With Prometheus: to tie volumes to their Forge service.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [list]
   - apiGroups: [metrics.k8s.io]
     resources: [nodes]
     verbs: [list]

@@ -15,9 +15,10 @@ import (
 
 // clusterFlags are forge-api's cluster capacity settings.
 type clusterFlags struct {
-	on         bool
-	name       string
-	grafanaURL string
+	on            bool
+	name          string
+	grafanaURL    string
+	prometheusURL string
 }
 
 var clusterNameRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
@@ -38,6 +39,14 @@ func clusters(f clusterFlags, shared *server.Cluster, log *slog.Logger,
 			return nil, fmt.Errorf("--grafana-url %q must be an http or https address, like https://grafana.example.com", f.grafanaURL)
 		}
 	}
+	var prom *server.Prometheus
+	if f.prometheusURL != "" {
+		u, err := url.Parse(f.prometheusURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return nil, fmt.Errorf("--prometheus-url %q must be an http or https address, like http://prometheus.monitoring.svc:9090", f.prometheusURL)
+		}
+		prom = &server.Prometheus{URL: f.prometheusURL}
+	}
 	var (
 		kube kubernetes.Interface
 		dyn  dynamic.Interface
@@ -50,5 +59,5 @@ func clusters(f clusterFlags, shared *server.Cluster, log *slog.Logger,
 			return nil, errors.Join(errors.New("clusters: connect to Kubernetes"), err)
 		}
 	}
-	return server.NewClusters(server.ClusterOptions{Name: f.name, GrafanaURL: f.grafanaURL, Kube: kube, Dynamic: dyn, Log: log}), nil
+	return server.NewClusters(server.ClusterOptions{Name: f.name, GrafanaURL: f.grafanaURL, Prometheus: prom, Kube: kube, Dynamic: dyn, Log: log}), nil
 }
