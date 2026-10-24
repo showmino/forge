@@ -1,6 +1,6 @@
 # Cluster capacity: `forge cluster` and the dashboard's Clusters page
 
-Status: approved 2026-10-23; milestone 1 built (forge), not yet rolled out.
+Status: approved 2026-10-23; milestone 1 live since 2026-10-24 (forge-api `v0.24.0`).
 
 ## What the owner asked for
 
