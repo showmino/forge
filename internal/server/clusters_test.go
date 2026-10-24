@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -64,6 +66,57 @@ func TestGetCluster(t *testing.T) {
 	}
 	if _, err := c.GetCluster(adminCtx(), connect.NewRequest(&forgev1.GetClusterRequest{})); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("no name: %v", err)
+	}
+}
+
+func TestClusterStorage(t *testing.T) {
+	t.Parallel()
+	prom := envtest.Prometheus()
+	t.Cleanup(prom.Close)
+	get := func(p *Prometheus) *forgev1.Cluster {
+		t.Helper()
+		kube, dyn := envtest.Nodes(true)
+		resp, err := NewClusters(ClusterOptions{Kube: kube, Dynamic: dyn, Prometheus: p}).GetCluster(adminCtx(), connect.NewRequest(&forgev1.GetClusterRequest{Name: "clusters/default"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.Msg.GetCluster()
+	}
+
+	cl := get(&Prometheus{URL: prom.URL})
+	if !cl.GetStorageAvailable() {
+		t.Fatalf("storage: %v", cl)
+	}
+	disk := map[string][2]int64{}
+	for _, n := range cl.GetNodes() {
+		disk[n.GetName()] = [2]int64{n.GetCapacity().GetDiskUsedBytes() / gib, n.GetCapacity().GetDiskBytes() / gib}
+	}
+	// srv-cron's disk names only its IP: it is found by the node's address.
+	if disk["srv-kube"] != [2]int64{75, 100} || disk["srv-cron"] != [2]int64{20, 200} || disk["srv-lab"] != [2]int64{45, 50} {
+		t.Errorf("disks (used, size GiB): %v", disk)
+	}
+	if tot := cl.GetTotals(); tot.GetDiskBytes() != 300*gib || tot.GetDiskUsedBytes() != 95*gib {
+		t.Errorf("totals leave out the cordoned node: %v", tot)
+	}
+	vols := cl.GetVolumes()
+	if len(vols) != 2 {
+		t.Fatalf("volumes, one per claim although reported by two API servers: %v", vols)
+	}
+	if v := vols[0]; v.GetNamespace() != "payments-production" || v.GetClaim() != "data" || v.GetUsedBytes() != 9*gib || v.GetCapacityBytes() != 10*gib ||
+		v.GetService() != "services/payments" || v.GetEnvironment() != "production" {
+		t.Errorf("fullest first, tied to its service: %v", v)
+	}
+	if v := vols[1]; v.GetNamespace() != "monitoring" || v.GetClaim() != "prometheus-db" || v.GetService() != "" {
+		t.Errorf("not a Forge namespace: %v", v)
+	}
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "down", http.StatusServiceUnavailable) }))
+	t.Cleanup(down.Close)
+	for name, p := range map[string]*Prometheus{"none": nil, "down": {URL: down.URL}} {
+		cl := get(p)
+		if cl.GetStorageAvailable() || len(cl.GetVolumes()) != 0 || cl.GetTotals().GetDiskBytes() != 0 || !cl.GetMetricsAvailable() || len(cl.GetNodes()) != 3 {
+			t.Errorf("%s: the rest still answers, without storage: %v", name, cl)
+		}
 	}
 }
 

@@ -27,7 +27,7 @@ var NodeMetrics = schema.GroupVersionResource{Group: "metrics.k8s.io", Version: 
 // client has no node metrics, as when metrics-server is down.
 func Nodes(metrics bool) (*fake.Clientset, *dynamicfake.FakeDynamicClient) {
 	created := time.Date(2026, 4, 22, 9, 0, 0, 0, time.UTC)
-	node := func(name string, age time.Duration, labels map[string]string, cpu, mem string, cond corev1.NodeConditionType, cordoned bool) *corev1.Node {
+	node := func(name, ip string, age time.Duration, labels map[string]string, cpu, mem string, cond corev1.NodeConditionType, cordoned bool) *corev1.Node {
 		conds := []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
 		if cond != corev1.NodeReady {
 			conds = append(conds, corev1.NodeCondition{Type: cond, Status: corev1.ConditionTrue})
@@ -37,6 +37,7 @@ func Nodes(metrics bool) (*fake.Clientset, *dynamicfake.FakeDynamicClient) {
 			Spec:       corev1.NodeSpec{Unschedulable: cordoned},
 			Status: corev1.NodeStatus{
 				Conditions: conds,
+				Addresses:  []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: ip}},
 				NodeInfo:   corev1.NodeSystemInfo{KubeletVersion: "v1.37.0+k3s1"},
 				Allocatable: corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse(cpu), corev1.ResourceMemory: resource.MustParse(mem), corev1.ResourcePods: resource.MustParse("110"),
@@ -48,11 +49,15 @@ func Nodes(metrics bool) (*fake.Clientset, *dynamicfake.FakeDynamicClient) {
 		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}, Spec: corev1.PodSpec{NodeName: nodeName}, Status: corev1.PodStatus{Phase: phase}}
 	}
 	kube := fake.NewClientset(
-		node("srv-kube", 0, map[string]string{"node-role.kubernetes.io/control-plane": "true", "node-role.kubernetes.io/etcd": "true"}, "4", "8Gi", corev1.NodeReady, false),
-		node("srv-cron", 24*time.Hour, nil, "8", "16Gi", corev1.NodeReady, false),
-		node("srv-lab", 48*time.Hour, nil, "4", "8Gi", corev1.NodeMemoryPressure, true),
+		node("srv-kube", "10.150.0.10", 0, map[string]string{"node-role.kubernetes.io/control-plane": "true", "node-role.kubernetes.io/etcd": "true"}, "4", "8Gi", corev1.NodeReady, false),
+		node("srv-cron", "10.150.0.15", 24*time.Hour, nil, "8", "16Gi", corev1.NodeReady, false),
+		node("srv-lab", "10.150.0.13", 48*time.Hour, nil, "4", "8Gi", corev1.NodeMemoryPressure, true),
 		pod("a", "srv-kube", corev1.PodRunning), pod("b", "srv-cron", corev1.PodRunning), pod("c", "srv-cron", corev1.PodRunning),
 		pod("d", "srv-cron", corev1.PodSucceeded), pod("e", "srv-lab", corev1.PodRunning),
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "payments-production", Labels: map[string]string{
+			"app.kubernetes.io/managed-by": "forge", "forge.dev/service": "payments", "forge.dev/deploy-env": "production",
+		}}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monitoring"}},
 	)
 	kube.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{GitVersion: "v1.37.0+k3s1"}
 

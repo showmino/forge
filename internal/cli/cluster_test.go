@@ -10,16 +10,22 @@ import (
 	"github.com/showmino/forge/internal/server"
 )
 
-func (h *harness) serveClusters(metrics bool) {
+func (h *harness) serveClusters(metrics, storage bool) {
 	kube, dyn := envtest.Nodes(metrics)
-	h.clusters = server.NewClusters(server.ClusterOptions{Kube: kube, Dynamic: dyn, GrafanaURL: "https://grafana.example.com"})
+	o := server.ClusterOptions{Kube: kube, Dynamic: dyn, GrafanaURL: "https://grafana.example.com"}
+	if storage {
+		prom := envtest.Prometheus()
+		h.t.Cleanup(prom.Close)
+		o.Prometheus = &server.Prometheus{URL: prom.URL}
+	}
+	h.clusters = server.NewClusters(o)
 	h.startAPI(h.authn)
 }
 
 func TestClusterListAndGet(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	h.serveClusters(true)
+	h.serveClusters(true, true)
 
 	golden(t, "cluster_list_table", h.ok("cluster", "list").out)
 	golden(t, "cluster_get_table", h.ok("cluster", "get", "default").out)
@@ -42,9 +48,9 @@ func TestClusterListAndGet(t *testing.T) {
 func TestClusterWithoutMetrics(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	h.serveClusters(false)
+	h.serveClusters(false, false)
 	r := h.ok("cluster", "get", "default")
-	if !strings.Contains(r.out, "12 cores") || strings.Contains(r.out, "%") || !strings.Contains(r.err, "metrics-server did not answer") {
+	if !strings.Contains(r.out, "12 cores") || strings.Contains(r.out, "%") || !strings.Contains(r.err, "metrics-server did not answer") || !strings.Contains(r.err, "--prometheus-url") {
 		t.Errorf("without metrics:\n%v", r)
 	}
 	if r := h.ok("cluster", "list"); !strings.Contains(r.out, "Memory pressure on 1 node") {
@@ -76,6 +82,9 @@ func TestClusterStatus(t *testing.T) {
 		{&forgev1.Cluster{MetricsAvailable: false, Totals: used(910, 840)}, "Healthy"},
 		{&forgev1.Cluster{Nodes: []*forgev1.Node{node("DiskPressure"), node("DiskPressure")}}, "Disk pressure on 2 nodes"},
 		{&forgev1.Cluster{Nodes: []*forgev1.Node{node("MemoryPressure"), node("NotReady")}}, "1 node not ready"},
+		{&forgev1.Cluster{StorageAvailable: true, Totals: &forgev1.Capacity{DiskBytes: 100, DiskUsedBytes: 85}}, "Disk at 85%"},
+		{&forgev1.Cluster{MetricsAvailable: true, StorageAvailable: true, Totals: used(100, 840), Volumes: []*forgev1.Volume{{Namespace: "payments-production", Claim: "data", CapacityBytes: 10, UsedBytes: 9}}}, "Volume payments-production/data at 90%"},
+		{&forgev1.Cluster{StorageAvailable: false, Volumes: []*forgev1.Volume{{CapacityBytes: 10, UsedBytes: 9}}}, "Healthy"},
 	} {
 		if got := clusterStatus(tc.cl); got != tc.want {
 			t.Errorf("%v: got %q, want %q", tc.cl, got, tc.want)

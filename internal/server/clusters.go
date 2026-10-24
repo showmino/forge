@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -44,8 +45,10 @@ type ClusterOptions struct {
 	Kube       kubernetes.Interface
 	// Dynamic reads metrics-server's node metrics.
 	Dynamic dynamic.Interface
-	Log     *slog.Logger
-	Now     func() time.Time
+	// Prometheus, when set, gives node disk and volume use.
+	Prometheus *Prometheus
+	Log        *slog.Logger
+	Now        func() time.Time
 }
 
 // Clusters serves ClusterService from the Kubernetes API and metrics-server.
@@ -145,12 +148,15 @@ func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
 		}
 	}
 	usage, metricsOK := c.usage(ctx)
+	disk, volumes, storageOK := c.storage(ctx, nodes.Items)
 
 	out := &forgev1.Cluster{
 		Name:             clusterPrefix + c.o.Name,
 		GrafanaUrl:       c.o.GrafanaURL,
 		Totals:           &forgev1.Capacity{},
 		MetricsAvailable: metricsOK,
+		StorageAvailable: storageOK,
+		Volumes:          volumes,
 	}
 	if v, err := c.o.Kube.Discovery().ServerVersion(); err == nil {
 		out.KubernetesVersion = v.GitVersion
@@ -171,6 +177,8 @@ func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
 			MemoryUsedBytes: usage[n.Name].memory,
 			Pods:            onNode[n.Name],
 			PodsMax:         int32(alloc.Pods().Value()), //nolint:gosec // kubelet caps pods far below int32
+			DiskBytes:       disk[n.Name].size,
+			DiskUsedBytes:   disk[n.Name].used,
 		}
 		node := &forgev1.Node{
 			Name:           n.Name,
@@ -190,6 +198,8 @@ func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
 			t.MemoryUsedBytes += capa.MemoryUsedBytes
 			t.Pods += capa.Pods
 			t.PodsMax += capa.PodsMax
+			t.DiskBytes += capa.DiskBytes
+			t.DiskUsedBytes += capa.DiskUsedBytes
 		}
 	}
 	if !oldest.IsZero() {
@@ -200,6 +210,117 @@ func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
 }
 
 type nodeUsage struct{ cpu, memory int64 }
+
+// The root filesystem of each node (node-exporter), and every claim's use (kubelet).
+const (
+	promDiskSize   = `node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|ramfs|overlay|squashfs"}`
+	promDiskAvail  = `node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|ramfs|overlay|squashfs"}`
+	promVolumeSize = `kubelet_volume_stats_capacity_bytes`
+	promVolumeUsed = `kubelet_volume_stats_used_bytes`
+)
+
+type nodeDisk struct{ size, used int64 }
+
+// storage reads node disks and volumes from Prometheus; false when there is
+// none or it did not answer.
+func (c *Clusters) storage(ctx context.Context, nodes []corev1.Node) (map[string]nodeDisk, []*forgev1.Volume, bool) {
+	if c.o.Prometheus == nil {
+		return nil, nil, false
+	}
+	var res [4][]promSample
+	for i, q := range []string{promDiskSize, promDiskAvail, promVolumeSize, promVolumeUsed} {
+		var err error
+		if res[i], err = c.o.Prometheus.query(ctx, q); err != nil {
+			c.o.Log.WarnContext(ctx, "reading storage from Prometheus failed", "query", q, "error", err)
+			return nil, nil, false
+		}
+	}
+
+	byIP := map[string]string{}
+	for i := range nodes {
+		for _, a := range nodes[i].Status.Addresses {
+			if a.Type == corev1.NodeInternalIP {
+				byIP[a.Address] = nodes[i].Name
+			}
+		}
+	}
+	nodeOf := func(l map[string]string) string {
+		if n := cmp.Or(l["kubernetes_node"], l["node"]); n != "" {
+			return n
+		}
+		host, _, _ := strings.Cut(l["instance"], ":")
+		return byIP[host]
+	}
+	disk := map[string]nodeDisk{}
+	avail := map[string]int64{}
+	for _, s := range res[1] {
+		avail[nodeOf(s.labels)] = int64(s.value)
+	}
+	for _, s := range res[0] {
+		if n := nodeOf(s.labels); n != "" {
+			disk[n] = nodeDisk{size: int64(s.value), used: max(int64(s.value)-avail[n], 0)}
+		}
+	}
+
+	// On k3s the kubelet's metrics come through the API server: the claim's
+	// namespace is then exported_namespace, and each server reports it once.
+	type claim struct{ ns, name string }
+	claimOf := func(l map[string]string) claim {
+		return claim{cmp.Or(l["exported_namespace"], l["namespace"]), l["persistentvolumeclaim"]}
+	}
+	size, used := map[claim]int64{}, map[claim]int64{}
+	for _, s := range res[2] {
+		if k := claimOf(s.labels); k.name != "" {
+			size[k] = max(size[k], int64(s.value))
+		}
+	}
+	for _, s := range res[3] {
+		k := claimOf(s.labels)
+		used[k] = max(used[k], int64(s.value))
+	}
+	owners := c.forgeNamespaces(ctx)
+	volumes := make([]*forgev1.Volume, 0, len(size))
+	for k, sz := range size {
+		v := &forgev1.Volume{Namespace: k.ns, Claim: k.name, CapacityBytes: sz, UsedBytes: used[k]}
+		if o, ok := owners[k.ns]; ok {
+			v.Service, v.Environment = servicePrefix+o.service, o.env
+		}
+		volumes = append(volumes, v)
+	}
+	slices.SortFunc(volumes, func(a, b *forgev1.Volume) int {
+		if fa, fb := fullness(a), fullness(b); fa != fb {
+			return cmp.Compare(fb, fa)
+		}
+		return cmp.Or(strings.Compare(a.Namespace, b.Namespace), strings.Compare(a.Claim, b.Claim))
+	})
+	return disk, volumes, true
+}
+
+func fullness(v *forgev1.Volume) float64 {
+	if v.CapacityBytes <= 0 {
+		return 0
+	}
+	return float64(v.UsedBytes) / float64(v.CapacityBytes)
+}
+
+type nsOwner struct{ service, env string }
+
+// forgeNamespaces maps the namespaces Forge made to their service and
+// environment. Without them volumes are still listed, only not tied to a service.
+func (c *Clusters) forgeNamespaces(ctx context.Context) map[string]nsOwner {
+	list, err := c.o.Kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: labelManagedBy + "=forge"})
+	if err != nil {
+		c.o.Log.WarnContext(ctx, "listing Forge's namespaces failed", "error", err)
+		return nil
+	}
+	out := map[string]nsOwner{}
+	for _, ns := range list.Items {
+		if s := ns.Labels[labelService]; s != "" {
+			out[ns.Name] = nsOwner{service: s, env: cmp.Or(ns.Labels[labelDeployEnv], ns.Labels[labelEnvironment])}
+		}
+	}
+	return out
+}
 
 // usage reads metrics-server; false when it did not answer.
 func (c *Clusters) usage(ctx context.Context) (map[string]nodeUsage, bool) {
