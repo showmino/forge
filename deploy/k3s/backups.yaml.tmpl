@@ -1,0 +1,92 @@
+# Backups of forge-db: base backups and WAL to Azure Blob through
+# CloudNativePG's Barman Cloud plugin (installed in cnpg-system), so a restore
+# can go to any point of the last 14 days. render.sh adds this when
+# FORGE_DB_BACKUP_DEST is set; database.yaml.tmpl then names the plugin.
+#   FORGE_DB_BACKUP_DEST  https://<account>.blob.core.windows.net/<container>
+#   FORGE_DB_BACKUP_ITEM  vaults/<vault>/items/<item>: only the fields
+#                         storage-account-name and sas-token (scoped to the container)
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: forge-db-backup
+  namespace: forge
+spec:
+  itemPath: ${FORGE_DB_BACKUP_ITEM}
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: forge-db-azure
+  namespace: forge
+spec:
+  retentionPolicy: "14d"
+  configuration:
+    destinationPath: "${FORGE_DB_BACKUP_DEST}"
+    azureCredentials:
+      storageAccount: {name: forge-db-backup, key: storage-account-name}
+      storageSasToken: {name: forge-db-backup, key: sas-token}
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+# Every night at 03:00, after Longhorn's volume backups at 02:30; the first
+# one right away.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: forge-db-nightly
+  namespace: forge
+spec:
+  schedule: "0 0 3 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: forge-db
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+---
+# Prometheus reads forge-db's own metrics (CloudNativePG's exporter, port metrics).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: forge-db
+  namespace: forge
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: forge-db
+  podMetricsEndpoints:
+    - port: metrics
+---
+# While WAL cannot be archived, Postgres keeps it on the 5Gi volume until the
+# primary stops: an expired or revoked SAS token, the plugin down, Azure away.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: forge-db-backups
+  namespace: forge
+spec:
+  groups:
+    - name: forge-db-backups
+      rules:
+        - alert: ForgeDBWALArchivingFailing
+          expr: increase(cnpg_pg_stat_archiver_failed_count{namespace="forge"}[15m]) > 0
+          for: 15m
+          labels: {severity: critical}
+          annotations:
+            summary: forge-db cannot archive WAL to Azure; its volume fills until Postgres stops
+            description: Check the plugin in cnpg-system, the SAS token in 1Password (forge-backup-storage) and its access policy on the container.
+        - alert: ForgeDBWALArchivingStale
+          expr: cnpg_pg_stat_archiver_seconds_since_last_archival{namespace="forge"} > 1800 and on(pod) cnpg_pg_replication_in_recovery{namespace="forge"} == 0
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: forge-db's primary has archived no WAL for 30 minutes
+        - alert: ForgeDBVolumeFilling
+          expr: max by (persistentvolumeclaim) (kubelet_volume_stats_used_bytes{persistentvolumeclaim=~"forge-db-[0-9]+"} / kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"forge-db-[0-9]+"}) > 0.8
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: a forge-db volume is more than 80% full

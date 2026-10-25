@@ -136,6 +136,29 @@ if [ -n "$db_storage_class" ]; then
 else
   dbstorage_marks='/#dbstorage$/d'
 fi
+# Backups of forge-db to Azure Blob (backups.yaml.tmpl): both or neither.
+db_backup_dest=${FORGE_DB_BACKUP_DEST:-}
+db_backup_item=${FORGE_DB_BACKUP_ITEM:-}
+if [ -n "$db_backup_dest$db_backup_item" ]; then
+  [ -n "$db_backup_dest" ] || { echo "FORGE_DB_BACKUP_ITEM needs FORGE_DB_BACKUP_DEST, like https://<account>.blob.core.windows.net/<container>" >&2; exit 2; }
+  [ -n "$db_backup_item" ] || { echo "FORGE_DB_BACKUP_DEST needs FORGE_DB_BACKUP_ITEM, a 1Password item like vaults/production/items/forge-backup-storage" >&2; exit 2; }
+  # The character-class guards first: grep anchors per line, not per string.
+  case $db_backup_dest in
+    *[!a-z0-9.:/-]*|*--*) echo "invalid FORGE_DB_BACKUP_DEST: $db_backup_dest (like https://<account>.blob.core.windows.net/<container>)" >&2; exit 2 ;;
+  esac
+  printf '%s' "$db_backup_dest" | grep -Eq '^https://[a-z0-9]{3,24}\.blob\.core\.windows\.net/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$' ||
+    { echo "invalid FORGE_DB_BACKUP_DEST: $db_backup_dest (like https://<account>.blob.core.windows.net/<container>)" >&2; exit 2; }
+  case $db_backup_item in
+    *[!A-Za-z0-9./_-]*) echo "invalid FORGE_DB_BACKUP_ITEM: $db_backup_item (like vaults/production/items/forge-backup-storage)" >&2; exit 2 ;;
+  esac
+  printf '%s' "$db_backup_item" | grep -Eq '^vaults/[A-Za-z0-9._-]+/items/[A-Za-z0-9._-]+$' ||
+    { echo "invalid FORGE_DB_BACKUP_ITEM: $db_backup_item (like vaults/production/items/forge-backup-storage)" >&2; exit 2; }
+  backups_marks='s/ *#backups$//'
+  nobackups_marks='/#nobackups$/d'
+else
+  backups_marks='/#backups$/d'
+  nobackups_marks='s/ *#nobackups$//'
+fi
 dex_ip= api_ip=
 
 case ${1:-} in
@@ -461,6 +484,17 @@ if [ -n "$secret_denied" ]; then
   printf '%s' "$secret_denied" | grep -Eq '^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$' ||
     { echo "invalid FORGE_SECRET_DENIED_ITEMS: $secret_denied (item names, comma separated)" >&2; exit 2; }
 fi
+# The backup token may write and delete the backups: no service may read it.
+if [ -n "$db_backup_item" ]; then
+  bk_vault=${db_backup_item#vaults/} bk_vault=${bk_vault%%/items/*} bk_name=${db_backup_item##*/items/}
+  case ,$secret_vaults, in
+    *,$bk_vault,*)
+      case ,$secret_denied, in
+        *,$bk_name,*) ;;
+        *) echo "FORGE_DB_BACKUP_ITEM $bk_name is in a vault services may read ($bk_vault): add it to FORGE_SECRET_DENIED_ITEMS" >&2; exit 2 ;;
+      esac ;;
+  esac
+fi
 # Which operator populates a run.secrets entry's Secret: forge-api's own
 # governance (vaults/<vault>/items/<item> only, or also <group>/<item>) and
 # the chart's secretBackend value must agree, so render.sh sets both from
@@ -570,6 +604,10 @@ fi
   cat "$exposure"
   echo "---"
   cat "$dir/database.yaml.tmpl"
+  if [ -n "$db_backup_dest" ]; then
+    echo "---"
+    cat "$dir/backups.yaml.tmpl"
+  fi
   if [ -n "$onepassword_item" ]; then
     echo "---"
     cat "$dir/onepassword.yaml.tmpl"
@@ -596,7 +634,7 @@ fi
   fi
 } | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "$clusters_marks" -e "$grafana_marks" -e "$prometheus_marks" -e "s|\${FORGE_CLUSTER_NAME}|$cluster_name|g" -e "s|\${FORGE_GRAFANA_URL}|$grafana_url|g" -e "s|\${FORGE_PROMETHEUS_URL}|$prometheus_url|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_CHART_REPO}|$chart_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
-        -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
+        -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "$backups_marks" -e "$nobackups_marks" -e "s|\${FORGE_DB_BACKUP_DEST}|$db_backup_dest|g" -e "s|\${FORGE_DB_BACKUP_ITEM}|$db_backup_item|g" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |
   PUBLIC_LISTENERS=$public_listeners awk '/#public-listeners$/ { printf "%s", ENVIRON["PUBLIC_LISTENERS"]; next } { print }'
 # The theme comes last and outside the sed above: its CSS and HTML must
