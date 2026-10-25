@@ -11,9 +11,11 @@ at them, so that there is one copy.
 1. `AGENTS.md` at the repo root: what Forge is, the rules (the cluster is
    production, what needs the owner's OK, merging, secrets), commands,
    conventions, mistakes made before.
-2. `docs/agents/status.md`: what is built, what is live, what is left.
-3. `docs/agents/verifying.md`: the runbook. **Required for any login or deploy
-   check**, and for every rollout. Its scripts are in `docs/agents/scripts/`.
+2. `showmino/forge-ops` (private; checkout at `../forge-ops`)
+   `docs/agents/status.md`: what is built, what is live, what is left.
+3. forge-ops `docs/agents/verifying.md`: the runbook. **Required for any login
+   or deploy check**, and for every rollout. Its scripts are in
+   `docs/agents/scripts/` there.
 4. `docs/index.md`: the approved design. Read the relevant section before
    designing anything.
 5. `showmino/techdocs`, `docs/forge/`: the user documentation. Every new or
