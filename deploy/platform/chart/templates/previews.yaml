@@ -1,19 +1,14 @@
 {{- if .Values.previews.enabled }}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: forge-api
-  namespace: forge
-imagePullSecrets:
-  - name: {{ .Values.previews.pullSecret | required "previews.pullSecret is required when previews.enabled" }}
----
+{{- $domain := .Values.previews.gatewayDomain | required "previews.gatewayDomain is required with previews.enabled" }}
 # Exactly the calls internal/server/env_cluster.go makes. Kubernetes RBAC
 # cannot limit them to Forge's own namespaces; forge-api enforces that itself
 # (owned() in env_cluster.go).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: forge-api-previews
+  name: {{ printf "%s-forge-api-previews" .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: [namespaces]
@@ -34,82 +29,65 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: forge-api-previews
+  name: {{ printf "%s-forge-api-previews" .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: forge-api-previews
+  name: {{ printf "%s-forge-api-previews" .Release.Namespace }}
 subjects:
-  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
 ---
 # forge-api reads the pull secret to copy it into previews and to check images.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: forge-api-pull-secret
-  namespace: forge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [{{ .Values.previews.pullSecret }}]
+    resourceNames: [{{ .Values.previews.pullSecret | quote }}]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: forge-api-pull-secret
-  namespace: forge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: forge-api-pull-secret
 subjects:
-  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
 ---
-# LAN/"lb" mode only: MetalLB gives the Gateway's own Service the requested
-# IP via the infrastructure annotation below. "cloudLB" mode leaves the
-# annotation out and the cluster's own load balancer assigns one; point
-# previews.gatewayDomain at it afterward.
+# The Gateway previews (and with deploys, staging and production) are
+# reached through. Point *.preview.<gatewayDomain> at its address.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: forge-previews
-  namespace: forge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 spec:
-  gatewayClassName: {{ .Values.previews.gatewayClass | default "istio" | quote }}
-  {{- if eq .Values.exposure.mode "lb" }}
+  gatewayClassName: {{ .Values.previews.gatewayClass | quote }}
+  {{- with .Values.previews.gatewayAnnotations }}
   infrastructure:
     annotations:
-      metallb.universe.tf/loadBalancerIPs: {{ .Values.previews.gatewayIP | required "previews.gatewayIP is required when previews.enabled and exposure.mode is \"lb\"" }}
-      {{- with omit .Values.previews.gatewayAnnotations "metallb.universe.tf/loadBalancerIPs" }}
       {{- toYaml . | nindent 6 }}
-      {{- end }}
-  {{- else if .Values.previews.gatewayAnnotations }}
-  infrastructure:
-    annotations:
-      {{- toYaml .Values.previews.gatewayAnnotations | nindent 6 }}
   {{- end }}
   listeners:
-    {{- if eq .Values.exposure.mode "gateway" }}
-    # exposure.mode "gateway": the login and the API, routed from this
-    # namespace only (templates/exposure.yaml).
-    - name: dex
-      protocol: HTTP
-      port: 80
-      hostname: {{ include "forge.dexHost" . | quote }}
-      allowedRoutes:
-        namespaces: {from: Same}
-    - name: api
-      protocol: HTTP
-      port: 80
-      hostname: {{ include "forge.apiHost" . | quote }}
-      allowedRoutes:
-        namespaces: {from: Same}
-    {{- end }}
     - name: http
       protocol: HTTP
       port: 80
-      hostname: {{ printf "*.preview.%s" (include "forge.previewBase" .) | quote }}
+      hostname: {{ printf "*.preview.%s" $domain | quote }}
       allowedRoutes:
         namespaces:
           from: Selector
@@ -117,29 +95,21 @@ spec:
             matchLabels:
               app.kubernetes.io/managed-by: forge
     {{- if .Values.deploys.enabled }}
-    - name: staging
+    {{- range $env := list "staging" "production" }}
+    - name: {{ $env }}
       protocol: HTTP
       port: 80
-      hostname: {{ printf "*.staging.%s" (include "forge.previewBase" .) | quote }}
+      hostname: {{ printf "*.%s.%s" $env $domain | quote }}
       allowedRoutes:
         namespaces:
           from: Selector
           selector:
             matchLabels:
               app.kubernetes.io/managed-by: forge
-              forge.dev/deploy-env: staging
-    - name: production
-      protocol: HTTP
-      port: 80
-      hostname: {{ printf "*.production.%s" (include "forge.previewBase" .) | quote }}
-      allowedRoutes:
-        namespaces:
-          from: Selector
-          selector:
-            matchLabels:
-              app.kubernetes.io/managed-by: forge
-              forge.dev/deploy-env: production
+              forge.dev/deploy-env: {{ $env }}
     {{- end }}
+    {{- end }}
+{{- end }}
 {{- if .Values.clusters.enabled }}
 ---
 # Cluster capacity (clusters.enabled): exactly the calls
@@ -147,7 +117,9 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: forge-api-clusters
+  name: {{ printf "%s-forge-api-clusters" .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: [nodes, pods]
@@ -165,12 +137,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: forge-api-clusters
+  name: {{ printf "%s-forge-api-clusters" .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: forge-api-clusters
+  name: {{ printf "%s-forge-api-clusters" .Release.Namespace }}
 subjects:
-  - {kind: ServiceAccount, name: forge-api, namespace: forge}
-{{- end }}
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
 {{- end }}

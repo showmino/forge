@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := build
 BIN := bin
 
-.PHONY: build test lint chart-test platform-chart-lint generate update-golden tools dex db api api-dev image runner-image clean
+.PHONY: build test lint chart-test platform-chart-test platform-chart-golden generate update-golden tools dex db api api-dev image runner-image clean
 
 build: ## Build forge and forge-api into ./bin
 	CGO_ENABLED=0 go build -trimpath -o $(BIN)/ ./cmd/...
@@ -27,25 +27,23 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	$(HELM) template payments deploy/argocd/chart --namespace payments-production \
 	  -f deploy/argocd/chart/testdata/secret-backend-none.yaml | diff -u deploy/argocd/chart/testdata/secret-backend-none.golden -
 
-platform-chart-lint: ## Lint deploy/platform/chart and check it renders in each exposure mode
-	$(HELM) lint deploy/platform/chart
-	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
-	  --set exposure.dexHost=dex.example.com --set exposure.apiHost=forge.example.com \
-	  --set previews.enabled=true --set previews.pullSecret=x --set previews.gatewayDomain=p.example.com \
-	  --set deploys.enabled=true --set deploys.chartRevision=0.1.0 --set webOrigins='{https://forge.example.com}' \
-	  > /dev/null
-	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
-	  --set exposure.mode=lb --set exposure.dexIP=10.0.0.1 --set exposure.apiIP=10.0.0.2 \
-	  --set previews.enabled=true --set previews.pullSecret=x --set previews.gatewayIP=10.0.0.3 \
-	  > /dev/null
-	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
-	  --set exposure.mode=gateway --set imageRegistry=acr.example.io --set chartRegistry=acr.example.io \
-	  --set previews.enabled=true --set previews.pullSecret=x --set previews.gatewayDomain=203.0.113.1.nip.io \
-	  --set previews.gatewayClass=envoy --set previews.gatewayAnnotations.example\\.com/ip=x \
-	  --set deploys.enabled=true --set deploys.chartRevision=0.1.0 \
-	  --set clusters.enabled=true --set clusters.prometheusURL=http://prometheus:9090 \
-	  --set 'database.plugins[0].name=barman-cloud.cloudnative-pg.io' --set database.podLabels.a=b \
-	  > /dev/null
+PLATFORM_CHART := deploy/platform/chart
+PLATFORM_CASES := minimal gateway full
+# The bundled database's password is new on every render without a cluster.
+REDACT := sed -E 's/^(  (password|uri): ).*/\1REDACTED/'
+
+platform-chart-test: ## Lint deploy/platform/chart and compare its renders with their goldens
+	$(HELM) lint $(PLATFORM_CHART) -f $(PLATFORM_CHART)/testdata/minimal.yaml
+	for t in $(PLATFORM_CASES); do \
+	  $(HELM) template forge $(PLATFORM_CHART) --namespace forge -f $(PLATFORM_CHART)/testdata/$$t.yaml | $(REDACT) \
+	    | diff -u $(PLATFORM_CHART)/testdata/$$t.golden - || exit 1; \
+	done
+
+platform-chart-golden: ## Rewrite deploy/platform/chart's goldens after an intended change
+	for t in $(PLATFORM_CASES); do \
+	  $(HELM) template forge $(PLATFORM_CHART) --namespace forge -f $(PLATFORM_CHART)/testdata/$$t.yaml | $(REDACT) \
+	    > $(PLATFORM_CHART)/testdata/$$t.golden || exit 1; \
+	done
 
 lint: ## Lint Go code and protos
 	golangci-lint run ./...

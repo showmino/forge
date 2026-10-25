@@ -1,0 +1,39 @@
+# Every feature: CloudNativePG with backups, previews, deploys, cluster
+# capacity, run.secrets from 1Password.
+github:
+  org: acme
+  appID: "123456"
+host: forge.acme.example
+ingress:
+  tls:
+    secretName: forge-tls
+database:
+  mode: cloudnativepg
+  cloudnativepg:
+    storageClass: longhorn-retain
+    plugins:
+      - name: barman-cloud.cloudnative-pg.io
+        isWALArchiver: true
+        parameters: {barmanObjectName: forge-db-backups}
+    serviceAccountAnnotations:
+      azure.workload.identity/client-id: 00000000-0000-0000-0000-000000000000
+    podLabels:
+      azure.workload.identity/use: "true"
+imageRegistry: acr.acme.example
+argocdURL: https://argocd.acme.example
+secrets:
+  vaults: Services
+  deniedItems: forge-github
+previews:
+  enabled: true
+  pullSecret: registry
+  gatewayDomain: apps.acme.example
+  gatewayClass: envoy
+  gatewayAnnotations:
+    service.beta.kubernetes.io/azure-pip-name: forge-apps
+deploys:
+  enabled: true
+clusters:
+  enabled: true
+  name: production
+  prometheusURL: http://prometheus.monitoring:9090

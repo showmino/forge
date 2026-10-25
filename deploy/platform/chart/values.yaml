@@ -1,169 +1,192 @@
-# See docs/forge/17-running-your-own-forge.md (showmino/techdocs) for the
-# full walkthrough this chart's values map onto, including the GitHub App
-# setup, the two Secrets this chart expects to already exist
-# (forge-github-app, dex-github), and the Argo CD OCI chart-pull credential
-# needed before deploys.enabled works.
+# Forge for your GitHub organization. Required: github.org, github.appID,
+# the Secret github.existingSecret, and host. Everything else has a default.
+# The walkthrough is "Install Forge" in showmino/techdocs (docs/forge/).
 
-# Your GitHub organization. Required: Dex's connector only lets this org's
-# members log in, and the repo names below default from it.
-githubOrg: ""
+github:
+  # Your GitHub organization. Only its members can sign in.
+  org: ""
+  # Your GitHub App's numeric ID.
+  appID: ""
+  # A Secret you create in the release's namespace, with three keys:
+  #   app-private-key  the GitHub App's private key (.pem)
+  #   client-id        the GitHub App's client ID (the login uses it)
+  #   client-secret    a client secret of the GitHub App
+  # The App needs the organization permission Members: read, or the login
+  # sees no teams and nobody is an admin.
+  existingSecret: forge-github
+  # The GitHub teams whose members are admins, comma separated, as
+  # "<org>:<team-slug>". Defaults to "<org>:platform-engineering". Everyone
+  # else who signs in can read, and change the services of their own teams.
+  adminTeams: ""
+  # Your templates repo (owner/name), which `forge create` scaffolds from.
+  # Defaults to "<org>/forge-templates".
+  templatesRepo: ""
 
-# Your GitHub App's numeric ID. Required: forge create, previews and deploys
-# all need it. Create the App first (see the doc above), and create the
-# Secret forge-github-app (key github_app_private_key, the App's .pem)
-# yourself -- this chart does not create it.
-githubAppID: ""
+# The one address of Forge, without a scheme: the dashboard at /, the API at
+# /forge.v1.* and /cli/, the login at /dex. Point its DNS name at your
+# ingress controller or Gateway. The GitHub App's callback URL must be
+# https://<host>/dex/callback.
+host: ""
+# false serves http://<host>: only for a first try on a cluster without TLS.
+# The CLI's and the browser's sign-in send tokens over it.
+https: true
 
-# Which org's members may log in, if different from githubOrg.
-dexGithubOrg: ""
+# Exposure through an Ingress (any controller). TLS comes from tls.secretName,
+# which you or cert-manager fill (put cert-manager's annotation in
+# annotations); empty uses the controller's default certificate. The API
+# streams operation logs: raise the controller's read timeout, for
+# ingress-nginx nginx.ingress.kubernetes.io/proxy-read-timeout: "3600".
+# The dashboard's server and the API reach the login and the API through
+# this public address too, so it must resolve and be trusted inside the
+# cluster.
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  tls:
+    secretName: ""
 
-# Dex's pages (the sign-in page, the CLI's device code, errors) in Forge's
-# look, from files/dex-theme: the dashboard's colours and fonts, light and
-# dark. false keeps Dex's own look.
-dexTheme: true
+# Or through HTTPRoutes on a Gateway of yours (set ingress.enabled false).
+# TLS is the Gateway's listener's.
+gateway:
+  enabled: false
+  # For example: [{name: my-gateway, namespace: gateway-system}]
+  parentRefs: []
 
-# The GitHub teams whose members are admins (comma separated). Defaults to
-# "<dexGithubOrg>:platform-engineering". Never leave this empty: every login
-# would be able to deploy to production.
-writerGroups: ""
+api:
+  image:
+    repository: ghcr.io/showmino/forge-api
+    # Empty: v<appVersion>, the API this chart was released with.
+    tag: ""
+  # A host of its own for the API (optional; the dashboard then calls it
+  # across origins, which the chart allows).
+  host: ""
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    # Template releases are cached in memory (up to 100 MiB each).
+    limits: {memory: 256Mi}
 
-image: "forge-api:dev"
+web:
+  enabled: true
+  image:
+    repository: ghcr.io/showmino/forge-web
+    tag: v0.1.34
+  replicas: 1
+  resources:
+    requests: {cpu: 10m, memory: 96Mi}
+    limits: {memory: 384Mi}
 
-# Where your services' CI pushes their images: a registry host and an
-# optional path, no scheme (for example myregistry.azurecr.io). Deploys and
-# previews run <imageRegistry>/<owner>/<service>:<commit>. Empty is ghcr.io.
-# The pull secret (previews.pullSecret) must hold a login for it.
-imageRegistry: ""
-
-# How Dex and forge-api are reached.
-exposure:
-  # "cloudLB": each gets a plain LoadBalancer Service with no requested IP;
-  # point dexHost/apiHost at whatever address your cluster's load balancer
-  # assigns, after the fact. The normal choice for a cloud cluster (AKS,
-  # GKE, EKS).
-  # "lb": MetalLB-style, a specific IP you request up front (dexIP/apiIP);
-  # dexHost/apiHost are then derived as dex.<dexIP>.nip.io and
-  # forge.<apiIP>.nip.io and don't need to be set.
-  # "gateway": no load balancer of their own. Dex and forge-api are routed
-  # through the previews Gateway (previews.enabled), so the whole platform
-  # needs one public address. dexHost/apiHost default to
-  # dex.<previews.gatewayDomain> and api.<previews.gatewayDomain>. Use it
-  # when public IPs are scarce or cost money (a cloud subscription's quota).
-  # Like cloudLB it is plain HTTP: nothing here terminates TLS. The API's
-  # route turns off the request timeout (operation logs stream), an
-  # extended Gateway API feature that Envoy Gateway and Istio support.
-  mode: cloudLB
-  dexHost: ""
-  apiHost: ""
-  dexIP: ""
-  apiIP: ""
-
-# If something in front of Dex terminates TLS (a cloud load balancer with a
-# certificate, an ingress, a tunnel), set this to Dex's public HTTPS
-# address. It must exactly match the GitHub App's callback URL
-# (<loginURL>/dex/callback). Left empty, Dex's issuer is plain
-# http://<exposure.dexHost> -- fine for a first proof, not for a dashboard
-# served over HTTPS.
-loginURL: ""
-
-# Repos this org uses. Each defaults to "<githubOrg>/forge-<name>" (chartRepo
-# additionally lower-cased, which GHCR requires).
-templatesRepo: ""
-forgeRepo: ""
-deployRepo: ""
-chartRepo: ""
-# The registry the deploy chart is pulled from (Argo CD needs a login for it
-# if it is private). Empty is ghcr.io.
-chartRegistry: ""
+login:
+  image: ghcr.io/dexidp/dex:v2.41.1
+  # A host of its own for the login (optional). The GitHub App's callback URL
+  # is then https://<login.host>/dex/callback.
+  host: ""
+  # Dex's pages in Forge's look (files/dex-theme). false keeps Dex's own.
+  theme: true
 
 database:
-  # true (default): this chart creates the database itself, via
-  # CloudNativePG, and the Secret below (keys uri, password, ...).
-  # false: bring your own Postgres-compatible database. Create the Secret
-  # named by secretName yourself first, with two keys: "uri" (forge-api's
-  # full connection string, e.g. postgres://forge:<password>@<host>/forge)
-  # and "password" (just the password, which Dex's config needs as a
-  # separate field). host/port/user/dexDatabase below are only used to tell
-  # Dex how to reach it; forge-api only ever reads the Secret's "uri".
-  managed: true
-  # Unset uses the cluster's own default StorageClass. Only meaningful when
-  # managed is true.
-  storageClass: ""
-  secretName: forge-db-app
-  host: forge-db-rw.forge.svc
-  port: 5432
-  user: forge
-  # A second database on the same server, for Dex's own sessions --
-  # separate from forge-api's "forge" database. Create it yourself if
-  # managed is false and it doesn't already exist.
-  dexDatabase: dex
-  # Only with managed: true. CloudNativePG plugins on the Cluster, for
-  # example backups with the Barman Cloud plugin:
-  #   plugins:
-  #     - name: barman-cloud.cloudnative-pg.io
-  #       isWALArchiver: true
-  #       parameters: {barmanObjectName: forge-db-backups}
-  plugins: []
-  # Annotations on the database pods' ServiceAccount (forge-db) and labels on
-  # the pods, for example a cloud workload identity that lets the backups
-  # write to a storage account.
-  serviceAccountAnnotations: {}
-  podLabels: {}
+  # "bundled": one PostgreSQL pod with a volume, in this release. Its password
+  # is generated once into the Secret forge-db, which an uninstall keeps.
+  # No backups: use "cloudnativepg" or "external" for data you can't lose.
+  # "external": a PostgreSQL server of yours (see external below).
+  # "cloudnativepg": a CloudNativePG Cluster (the operator must be installed),
+  # with backups through its plugins.
+  mode: bundled
+  bundled:
+    image: mirror.gcr.io/library/postgres:18
+    size: 5Gi
+    # Empty: the cluster's default StorageClass.
+    storageClass: ""
+    # Empty: the chart makes the Secret forge-db once, and reads it back on
+    # every upgrade. A tool that renders without access to the cluster (Argo
+    # CD, helm template) would make a new password each time: name a Secret of
+    # yours instead, with "password" and "uri"
+    # (postgres://forge:<password>@forge-db.<namespace>.svc:5432/forge?sslmode=disable).
+    existingSecret: ""
+  external:
+    # A Secret you create, with "uri" (the API's connection string, for
+    # example postgres://forge:<password>@db.example.com:5432/forge?sslmode=require)
+    # and "password" (the same password: the login needs it on its own).
+    existingSecret: ""
+    # For the login, which keeps its sessions in a second database on the
+    # same server, owned by the same user. Create that database first.
+    host: ""
+    port: 5432
+    user: forge
+    loginDatabase: dex
+    sslMode: require
+  cloudnativepg:
+    instances: 2
+    size: 5Gi
+    storageClass: ""
+    # CloudNativePG plugins on the Cluster, for example backups with the
+    # Barman Cloud plugin:
+    #   - name: barman-cloud.cloudnative-pg.io
+    #     isWALArchiver: true
+    #     parameters: {barmanObjectName: forge-db-backups}
+    plugins: []
+    # Annotations on the database pods' ServiceAccount (a workload identity
+    # for the backups) and labels on the pods.
+    serviceAccountAnnotations: {}
+    podLabels: {}
 
-# The dashboard's address(es), comma-free list form here (one entry per
-# origin). Adds Dex's forge-web OAuth client and forge-api's CORS list. Each
-# must be a bare scheme+host, no path, e.g. "https://forge.example.com".
-# Leave empty to skip the dashboard entirely.
-webOrigins: []
+# Where your services' CI pushes their images: a registry host and an
+# optional path, no scheme. Deploys and previews run
+# <imageRegistry>/<owner>/<service>:<commit>. Empty is ghcr.io.
+imageRegistry: ""
 
-# Argo CD's own web address, just for linking a deployment to its
-# Application in deploy output. Optional.
+# Argo CD's web address, to link a deployment to its Application. Optional.
 argocdURL: ""
 
-# run.secrets: which 1Password vaults a service may read from, and which
-# items in them no service may (the platform's own credentials). Only
-# meaningful with the default secrets backend.
-secretVaults: ""
-secretDeniedItems: ""
-secretBackend: onepassword
+# Where `forge upgrade` downloads the CLI from (GitHub releases, owner/name).
+cliRepo: showmino/forge
 
+# run.secrets in a service's forge.yaml: off until vaults names the groups
+# services may read. With the backend "onepassword" (the 1Password operator
+# must be installed) a group is a vault and an item is
+# vaults/<vault>/items/<item>; deniedItems are the items in those vaults no
+# service may read (the platform's own credentials).
+secrets:
+  backend: onepassword
+  vaults: ""
+  deniedItems: ""
+
+# Previews: `forge preview` runs a branch in a namespace of its own, under
+# *.preview.<gatewayDomain>. Needs a Gateway API implementation (Istio, Envoy
+# Gateway, ...); the chart makes the Gateway forge-previews.
 previews:
   enabled: false
-  # A dockerconfigjson Secret already in namespace "forge" (e.g. a registry
-  # pull secret you created by hand) that pods pulling private images need.
+  # A dockerconfigjson Secret in the release's namespace, copied into each
+  # preview to pull your services' images. Required with previews.
   pullSecret: ""
-  # "lb" mode: a MetalLB-style IP for the previews/deploys Gateway.
-  gatewayIP: ""
-  # "cloudLB" mode: a domain you control; previews are reached under
-  # *.preview.<gatewayDomain>, staging/production under
-  # *.staging.<gatewayDomain> / *.production.<gatewayDomain>. You generally
-  # won't know this until after the Gateway's own LoadBalancer Service gets
-  # an address -- apply once, check that address, then upgrade with the
-  # right value.
+  # A domain you control; point *.preview.<gatewayDomain> (and with deploys
+  # *.staging.<gatewayDomain> and *.production.<gatewayDomain>) at the
+  # Gateway's address.
   gatewayDomain: ""
-  # The name of an existing GatewayClass (Istio, Envoy Gateway, or any other
-  # conformant Gateway API implementation). This chart does not install one.
+  # The name of an existing GatewayClass.
   gatewayClass: istio
-  # Annotations for the Service your Gateway implementation creates for the
-  # Gateway (spec.infrastructure), for example a cloud's fixed public IP:
-  #   service.beta.kubernetes.io/azure-pip-name: my-ip
+  # Annotations for the Service your Gateway implementation creates, for
+  # example a cloud's fixed public IP.
   gatewayAnnotations: {}
 
+# Deploys: `forge deploy` writes to your forge-deploys repo and Argo CD
+# deploys from it. Needs Argo CD in the namespace argocd, previews.enabled
+# (the Gateway the services are reached through) and the release in the
+# namespace forge (the deploy chart routes through forge/forge-previews).
 deploys:
   enabled: false
-  # The published chart's version (not a commit SHA), e.g. "0.21.0" -- a
-  # vX.Y.Z tag push publishes deploy/argocd/chart to
-  # oci://ghcr.io/<chartRepo>. Required when deploys.enabled is true.
-  # Changing this re-renders every deployed service; see the warning in the
-  # techdocs page about the fleet-wide effect of a chart-revision bump.
+  # Defaults to "<org>/forge-deploys"; an empty repo with a main branch that
+  # the GitHub App can write to.
+  repo: ""
+  # The chart services are deployed with; it is public.
+  chart: oci://ghcr.io/showmino/forge-chart
+  # Empty: this chart's appVersion. Changing it redeploys every service.
   chartRevision: ""
 
-# Cluster capacity: `forge cluster list/get` (admins only) shows this
-# cluster's nodes, CPU and memory (from metrics-server). Needs
-# previews.enabled (forge-api's ServiceAccount).
+# Cluster capacity: `forge cluster list/get` (admins) shows this cluster's
+# nodes, CPU and memory, from metrics-server.
 clusters:
   enabled: false
-  # The cluster's name in clusters/<name>.
   name: default
   # Optional: Prometheus (adds disk and volumes), and a Grafana to link to.
   prometheusURL: ""

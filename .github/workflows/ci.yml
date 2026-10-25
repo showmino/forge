@@ -42,8 +42,8 @@ jobs:
       - run: go test -race -count=1 ./...
       - name: Deploy chart golden
         run: make chart-test
-      - name: Platform chart lint
-        run: make platform-chart-lint
+      - name: Forge chart golden
+        run: make platform-chart-test
 
   lint:
     runs-on: ubuntu-latest

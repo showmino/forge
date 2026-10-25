@@ -279,8 +279,9 @@ func run() error {
 	if len(origins) > 0 {
 		log.Info("the web dashboard may call the API from a browser", "origins", origins, "client", *webClientID)
 	}
-	if (len(origins) > 0) != (*webClientID != "") {
-		log.Warn("the web dashboard needs both --cors-origins and --oidc-web-client-id; only one is set, so it cannot log in")
+	// A dashboard on the API's own host needs no CORS origins.
+	if len(origins) > 0 && *webClientID == "" {
+		log.Warn("--cors-origins is set without --oidc-web-client-id, so the web dashboard cannot log in")
 	}
 	srv := server.HTTPServer(*addr, server.CORS(origins, h))
 	// Open watch streams end only with their operation; cancel their request

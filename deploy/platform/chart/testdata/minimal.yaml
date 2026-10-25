@@ -1,0 +1,11 @@
+# The least an install needs: one host through an Ingress, the bundled database.
+github:
+  org: acme
+  appID: "123456"
+host: forge.acme.example
+ingress:
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  tls:
+    secretName: forge-tls

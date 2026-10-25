@@ -1,0 +1,479 @@
+---
+# Source: forge/templates/forge-api.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: forge-api
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+---
+# Source: forge/templates/dex.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+data:
+  config.yaml: |
+    issuer: https://login.acme.example/dex
+    storage:
+      type: postgres
+      config:
+        host: "db.acme.example"
+        port: 5432
+        database: "forge_login"
+        user: "forge_app"
+        password: $DEX_DB_PASSWORD
+        ssl:
+          mode: "require"
+    web:
+      http: 0.0.0.0:5556
+      allowedOrigins: ["https://forge.acme.example"]
+    oauth2:
+      grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
+      skipApprovalScreen: true
+    expiry:
+      idTokens: 1h
+    staticClients:
+      - id: forge-cli
+        name: Forge CLI
+        public: true
+        redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
+      - id: forge-web
+        name: Forge dashboard
+        public: true
+        redirectURIs: ["https://forge.acme.example/auth/callback"]
+    # Only members of the org sign in; groups are "<org>:<team-slug>", and
+    # github.adminTeams picks the admins among them.
+    connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $GITHUB_CLIENT_ID
+          clientSecret: $GITHUB_CLIENT_SECRET
+          redirectURI: https://login.acme.example/dex/callback
+          orgs:
+            - name: acme
+          teamNameField: slug
+---
+# Source: forge/templates/dex.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  selector: {app: dex}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+# Source: forge/templates/forge-api.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-api
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  selector: {app: forge-api}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+# Source: forge/templates/web.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-web
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  selector: {app: forge-web}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+# Source: forge/templates/dex.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: dex}
+  template:
+    metadata:
+      labels: {app: dex}
+      annotations:
+        # Dex reads its config only when it starts, and header.html is mounted
+        # by subPath, which a ConfigMap update does not reach.
+        checksum/config: "b3c15c3d23244805"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's dex user.
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: dex
+          image: "ghcr.io/dexidp/dex:v2.41.1"
+          args: [dex, serve, /etc/dex/config.yaml]
+          env:
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef: {name: forge-github, key: client-id}
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: {name: forge-github, key: client-secret}
+            - name: DEX_DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: acme-db, key: password}
+          ports:
+            - {name: http, containerPort: 5556}
+          readinessProbe:
+            httpGet: {path: /dex/healthz, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/dex}
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+      volumes:
+        - name: config
+          configMap: {name: dex-config}
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+---
+# Source: forge/templates/forge-api.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forge-api
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  replicas: 1 # operations are in memory; keep one replica
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: forge-api}
+  template:
+    metadata:
+      labels: {app: forge-api}
+    spec:
+      serviceAccountName: forge-api
+      securityContext:
+        runAsNonRoot: true
+        # distroless "nonroot" by number: the kubelet cannot check a user name.
+        runAsUser: 65532
+        runAsGroup: 65532
+        # Secret files are root-owned; the group lets the API read its 0440 key.
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - name: github-app
+          secret:
+            secretName: forge-github
+            defaultMode: 0440
+            items:
+              - {key: app-private-key, path: app-private-key}
+      containers:
+        - name: forge-api
+          image: "ghcr.io/showmino/forge-api:v0.0.0-test"
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: FORGE_OIDC_ISSUER, value: "https://login.acme.example/dex"}
+            - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
+            - {name: FORGE_OIDC_WEB_CLIENT_ID, value: forge-web}
+            - {name: FORGE_CORS_ORIGINS, value: "https://forge.acme.example"}
+            - {name: FORGE_ADMIN_GROUPS, value: "acme:admins,acme:sre"}
+            - name: FORGE_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: acme-db, key: uri}
+            - {name: FORGE_LOG_FORMAT, value: json}
+            - {name: FORGE_GITHUB_APP_ID, value: "123456"}
+            - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/app-private-key}
+            - {name: FORGE_GITHUB_ORG, value: "acme"}
+            - {name: FORGE_TEMPLATES_REPO, value: "acme/templates"}
+            - {name: FORGE_CLI_REPO, value: "showmino/forge"}
+            - {name: FORGE_SECRET_BACKEND, value: "onepassword"}
+          volumeMounts:
+            - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+---
+# Source: forge/templates/web.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forge-web
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: forge-web}
+  template:
+    metadata:
+      labels: {app: forge-web}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+      containers:
+        - name: forge-web
+          image: "ghcr.io/showmino/forge-web:v0.1.34"
+          imagePullPolicy: IfNotPresent
+          env:
+            # The browser calls this address too, so it is the public one.
+            - {name: FORGE_API_URL, value: "https://api.acme.example"}
+          ports:
+            - {name: http, containerPort: 3000}
+          readinessProbe:
+            httpGet: {path: /api/healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /api/healthz, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            limits:
+              memory: 384Mi
+            requests:
+              cpu: 10m
+              memory: 96Mi
+---
+# Source: forge/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: forge-9df49b96
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  parentRefs:
+    - name: public
+      namespace: gateway-system
+  hostnames: ["api.acme.example"]
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.AuditService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.AuthService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.ClusterService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.DeployService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.DocsService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.EnvironmentService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.OperationService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.ResourceService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.ServiceCatalogService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.TeamService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /forge.v1.TemplateService}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
+        - path: {type: PathPrefix, value: /cli}
+      backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+---
+# Source: forge/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: forge-f68f8f78
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  parentRefs:
+    - name: public
+      namespace: gateway-system
+  hostnames: ["forge.acme.example"]
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      backendRefs:
+        - {name: forge-web, port: 80}
+---
+# Source: forge/templates/exposure.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: forge-60f4f48f
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  parentRefs:
+    - name: public
+      namespace: gateway-system
+  hostnames: ["login.acme.example"]
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /dex}
+      backendRefs:
+        - {name: dex, port: 80}
+---
+# Source: forge/templates/tests/forge-test.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: forge-test
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    # Through the public address: the API answers, and the login serves its
+    # discovery document with the issuer the API trusts.
+    - name: test
+      image: mirror.gcr.io/curlimages/curl:8.16.0
+      command: [sh, -ec]
+      args:
+        - |
+          curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' https://api.acme.example/forge.v1.AuthService/GetServerInfo
+          echo
+          curl -fsS https://login.acme.example/dex/.well-known/openid-configuration | grep -F '"issuer": "https://login.acme.example/dex"'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
