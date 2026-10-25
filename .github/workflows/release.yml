@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,7 +41,7 @@ jobs:
   # at the release's version: FORGE_RUNNER_IMAGE names it. amd64 only, like the
   # cluster's nodes. A job of its own, so it can be re-run alone.
   runner-image:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -61,7 +61,7 @@ jobs:
   # A separate job so a failure here (or a retry) never touches goreleaser's
   # own release, which cannot simply be re-run once it has already published.
   chart:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
