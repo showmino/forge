@@ -298,6 +298,21 @@ if [ -n "$previews_on" ]; then
 else
   pull_secret= # unvalidated without previews; keep it out of the sed
 fi
+# Optional: the pull secret comes from this 1Password item (a
+# dockerconfigjson), so a namespace forge made again has it. Without it, the
+# Secret is made by hand.
+pull_secret_item=${FORGE_PREVIEW_PULL_SECRET_ITEM:-}
+if [ -n "$pull_secret_item" ]; then
+  [ -n "$previews_on" ] || { echo "FORGE_PREVIEW_PULL_SECRET_ITEM needs previews" >&2; exit 2; }
+  case $pull_secret_item in
+    *[!A-Za-z0-9./_-]*) echo "invalid FORGE_PREVIEW_PULL_SECRET_ITEM: $pull_secret_item (like vaults/Kube/items/ghcr-secret)" >&2; exit 2 ;;
+  esac
+  printf '%s' "$pull_secret_item" | grep -Eq '^vaults/[A-Za-z0-9._-]+/items/[A-Za-z0-9._-]+$' ||
+    { echo "invalid FORGE_PREVIEW_PULL_SECRET_ITEM: $pull_secret_item (like vaults/Kube/items/ghcr-secret)" >&2; exit 2; }
+  pullitem_marks='s/ *#pullsecretitem$//'
+else
+  pullitem_marks='/#pullsecretitem$/d'
+fi
 if [ -n "$previews_on" ] && [ -z "$app_id" ]; then
   echo "previews need FORGE_GITHUB_APP_ID" >&2; exit 2
 fi
@@ -524,6 +539,17 @@ if [ -n "$secret_denied" ]; then
   printf '%s' "$secret_denied" | grep -Eq '^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$' ||
     { echo "invalid FORGE_SECRET_DENIED_ITEMS: $secret_denied (item names, comma separated)" >&2; exit 2; }
 fi
+# The registry login is the platform's: no service may read it either.
+if [ -n "$pull_secret_item" ]; then
+  ps_vault=${pull_secret_item#vaults/} ps_vault=${ps_vault%%/items/*} ps_name=${pull_secret_item##*/items/}
+  case ,$secret_vaults, in
+    *,$ps_vault,*)
+      case ,$secret_denied, in
+        *,$ps_name,*) ;;
+        *) echo "FORGE_PREVIEW_PULL_SECRET_ITEM $ps_name is in a vault services may read ($ps_vault): add it to FORGE_SECRET_DENIED_ITEMS" >&2; exit 2 ;;
+      esac ;;
+  esac
+fi
 # The backup token may write and delete the backups: no service may read it.
 if [ -n "$db_backup_item" ]; then
   bk_vault=${db_backup_item#vaults/} bk_vault=${bk_vault%%/items/*} bk_name=${db_backup_item##*/items/}
@@ -672,7 +698,7 @@ fi
     echo "---"
     cat "$dir/clusters.yaml.tmpl"
   fi
-} | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "$clusters_marks" -e "$grafana_marks" -e "$prometheus_marks" -e "$remote_marks" -e "s|\${FORGE_REMOTE_CLUSTERS}|$remote_clusters|g" -e "s|\${REMOTE_CLUSTERS_YAML}|$remote_yaml|g" -e "s|\${FORGE_CLUSTER_NAME}|$cluster_name|g" -e "s|\${FORGE_GRAFANA_URL}|$grafana_url|g" -e "s|\${FORGE_PROMETHEUS_URL}|$prometheus_url|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
+} | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "$clusters_marks" -e "$grafana_marks" -e "$prometheus_marks" -e "$remote_marks" -e "s|\${FORGE_REMOTE_CLUSTERS}|$remote_clusters|g" -e "s|\${REMOTE_CLUSTERS_YAML}|$remote_yaml|g" -e "s|\${FORGE_CLUSTER_NAME}|$cluster_name|g" -e "s|\${FORGE_GRAFANA_URL}|$grafana_url|g" -e "s|\${FORGE_PROMETHEUS_URL}|$prometheus_url|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "$pullitem_marks" -e "s|\${FORGE_PREVIEW_PULL_SECRET_ITEM}|$pull_secret_item|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_CHART_REPO}|$chart_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
         -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "$backups_marks" -e "$nobackups_marks" -e "s|\${FORGE_DB_BACKUP_DEST}|$db_backup_dest|g" -e "s|\${BACKUP_SERVER_PARAM}|$backup_server_param|g" -e "s|\${FORGE_DB_BACKUP_ITEM}|$db_backup_item|g" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |

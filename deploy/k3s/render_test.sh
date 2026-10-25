@@ -256,6 +256,17 @@ check "bad FORGE_DB_BACKUP_DEST refused"      refuses 'invalid FORGE_DB_BACKUP_D
 check "short container refused"               refuses 'invalid FORGE_DB_BACKUP_DEST' FORGE_DB_BACKUP_DEST=https://stminoforgesdcproduction.blob.core.windows.net/x FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x
 check "bad FORGE_DB_BACKUP_ITEM refused"      refuses 'invalid FORGE_DB_BACKUP_ITEM' FORGE_DB_BACKUP_DEST=$bk_dest 'FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x|y'
 check "dotted FORGE_DB_BACKUP_ITEM refused"   refuses 'invalid FORGE_DB_BACKUP_ITEM' FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/a/../b
+pull_item() {
+  FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 FORGE_PREVIEW_PULL_SECRET_ITEM=vaults/Kube/items/ghcr-secret sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 |
+    awk '$0 == "kind: OnePasswordItem" {on=1} on && /^---/ {on=0} on' > /tmp/render-pullitem.$$
+  grep -qF 'name: mino-ghcr' /tmp/render-pullitem.$$ && grep -qF 'type: kubernetes.io/dockerconfigjson' /tmp/render-pullitem.$$ &&
+    grep -qF 'itemPath: vaults/Kube/items/ghcr-secret' /tmp/render-pullitem.$$ && ! grep -q '#pullsecretitem' /tmp/render-pullitem.$$
+}
+check "pull secret from 1Password"            pull_item
+check "pull secret item needs previews"       refuses 'needs previews' FORGE_PREVIEW_PULL_SECRET_ITEM=vaults/Kube/items/ghcr-secret
+check "bad pull secret item refused"          refuses 'invalid FORGE_PREVIEW_PULL_SECRET_ITEM' FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 'FORGE_PREVIEW_PULL_SECRET_ITEM=vaults/Kube/items/a b'
+# shellcheck disable=SC2086
+check "pull secret item must be denied to services" refuses 'add it to FORGE_SECRET_DENIED_ITEMS' $bk_deploys FORGE_SECRET_VAULTS=Kube FORGE_SECRET_DENIED_ITEMS=other FORGE_PREVIEW_PULL_SECRET_ITEM=vaults/Kube/items/ghcr-secret
 bk_server() {
   FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/production/items/forge-backup-storage FORGE_DB_BACKUP_SERVER_NAME=forge-db-r20261025 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 |
     grep -qF 'parameters: {barmanObjectName: forge-db-azure, serverName: forge-db-r20261025}'

@@ -10,6 +10,16 @@ metadata:
   namespace: forge
 imagePullSecrets:
   - name: ${PULL_SECRET}
+--- #pullsecretitem
+# The pull secret from 1Password (FORGE_PREVIEW_PULL_SECRET_ITEM). #pullsecretitem
+apiVersion: onepassword.com/v1 #pullsecretitem
+kind: OnePasswordItem #pullsecretitem
+metadata: #pullsecretitem
+  name: ${PULL_SECRET} #pullsecretitem
+  namespace: forge #pullsecretitem
+type: kubernetes.io/dockerconfigjson #pullsecretitem
+spec: #pullsecretitem
+  itemPath: ${FORGE_PREVIEW_PULL_SECRET_ITEM} #pullsecretitem
 ---
 # Exactly the calls internal/server/env_cluster.go makes. Kubernetes RBAC
 # cannot limit them to Forge's own namespaces; forge-api enforces that itself
