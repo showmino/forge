@@ -208,6 +208,50 @@ Checked against the owner's cluster on 2026-10-24 with a local forge-api
 claims (15 series before de-duplication), `forgegate-staging/main-1` tied to
 forgegate's staging.
 
+## Milestone 3: other clusters (decided with the owner 2026-10-25)
+
+The owner added an AKS cluster, which Argo CD on k3s already knows as
+`aks-production`. Forge should show it; deploying to it is not part of this.
+
+| Decision | Choice |
+| --- | --- |
+| Scope | See it only: nodes, CPU, memory, pods |
+| Credential | Argo CD's, from its cluster Secret (the owner chose this over a read-only ServiceAccount of Forge's own on AKS) |
+| Names | `clusters/production` for k3s (`FORGE_CLUSTER_NAME=production`, was `default`) and `clusters/aks-production` |
+| Disk and volumes on AKS | None: there is no Prometheus forge-api can reach there |
+
+- forge-api: `--remote-clusters` (`FORGE_REMOTE_CLUSTERS`), names of Argo
+  CD cluster Secrets in `argocd`, comma-separated; each is a cluster of that
+  name, listed after the one forge-api runs on. The Secret's name is the
+  cluster's name, so it must be a DNS label of at most 40 characters
+  (`argocd cluster add` makes longer ones; register such a cluster under a
+  short Secret name). On every read (at most every
+  30 seconds per cluster) forge-api gets the Secret and builds new clients
+  only when it changed, so a rotated credential is picked up
+  (`cmd/forge-api/clusters.go`). It takes a bearer token or a client
+  certificate over verified TLS and refuses the rest: exec plugins (they
+  would run a program in forge-api), AWS and password logins, `insecure`.
+- Server: one cache per cluster; a list reads them in parallel. A cluster
+  that cannot be read is a row with `Cluster.unavailable_reason` (new field
+  10) and nothing else; only when every cluster fails is the list an error.
+  A remote's failed read is remembered for 30 seconds, so a cluster that is
+  down does not make every list wait (the cluster forge-api runs on is
+  asked again each time). `GetCluster` on it is the error. Remote clusters
+  get no Grafana link and no Prometheus figures.
+- render.sh: `FORGE_REMOTE_CLUSTERS` (needs `FORGE_CLUSTERS`; DNS labels,
+  none twice, none equal to `FORGE_CLUSTER_NAME`) sets the env var and adds
+  the Role `forge-api-remote-clusters` in `argocd`: `get` on exactly those
+  Secrets (`testdata/clusters.golden`).
+- CLI: such a cluster says `Unavailable` in `forge cluster list`, with the
+  reason under the table.
+- Security: forge-api can then do on AKS whatever Argo CD can, which is
+  normally cluster-admin; it only lists nodes and pods and reads node
+  metrics. A Forge API that is taken over is a way into AKS. The owner's
+  choice; a read-only ServiceAccount on AKS is the way to narrow it later
+  (register it as its own Argo CD-style Secret and name that one).
+- Dashboard: `unavailable_reason` shown on the Clusters page (forge-web,
+  after `sync-proto.sh`).
+
 ## Documentation
 
 - techdocs: a page `docs/forge/` for "Cluster capacity" (admins), and

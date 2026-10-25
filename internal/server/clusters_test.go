@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	k8stesting "k8s.io/client-go/testing"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
@@ -158,6 +161,68 @@ func TestListClusters(t *testing.T) {
 	}
 }
 
+func TestRemoteClusters(t *testing.T) {
+	t.Parallel()
+	kube, dyn := envtest.Nodes(true)
+	remoteKube, remoteDyn := envtest.Nodes(false)
+	prom := envtest.Prometheus()
+	t.Cleanup(prom.Close)
+	connects := 0
+	down := errors.New("Argo CD's cluster Secret argocd/gone was not found")
+	c := NewClusters(ClusterOptions{Name: "production", Kube: kube, Dynamic: dyn, GrafanaURL: "https://grafana.example.com", Prometheus: &Prometheus{URL: prom.URL},
+		Remotes: []RemoteCluster{
+			{Name: "aks", Connect: func(context.Context) (kubernetes.Interface, dynamic.Interface, error) {
+				connects++
+				return remoteKube, remoteDyn, nil
+			}},
+			{Name: "gone", Connect: func(context.Context) (kubernetes.Interface, dynamic.Interface, error) { return nil, nil, down }},
+		}})
+
+	resp, err := c.ListClusters(adminCtx(), connect.NewRequest(&forgev1.ListClustersRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cls := resp.Msg.GetClusters()
+	if len(cls) != 3 || cls[0].GetName() != "clusters/production" || cls[1].GetName() != "clusters/aks" || cls[2].GetName() != "clusters/gone" {
+		t.Fatalf("this cluster first, then the remotes in order: %v", cls)
+	}
+	if !cls[0].GetStorageAvailable() || cls[0].GetGrafanaUrl() == "" || cls[0].GetUnavailableReason() != "" {
+		t.Errorf("production keeps Prometheus and Grafana: %v", cls[0])
+	}
+	aks := cls[1]
+	if len(aks.GetNodes()) != 3 || aks.GetStorageAvailable() || len(aks.GetVolumes()) != 0 || aks.GetGrafanaUrl() != "" || aks.GetUnavailableReason() != "" {
+		t.Errorf("a remote has its nodes, and no Prometheus or Grafana of this cluster: %v", aks)
+	}
+	if g := cls[2]; g.GetUnavailableReason() != "cluster gone: "+down.Error() || len(g.GetNodes()) != 0 {
+		t.Errorf("a remote that cannot be read is a row with the reason: %v", g)
+	}
+
+	if _, err := c.GetCluster(adminCtx(), connect.NewRequest(&forgev1.GetClusterRequest{Name: "clusters/aks"})); err != nil {
+		t.Errorf("get a remote: %v", err)
+	}
+	if connects != 1 {
+		t.Errorf("a remote is read once within %s, connected %d times", clustersFresh, connects)
+	}
+	if _, err := c.GetCluster(adminCtx(), connect.NewRequest(&forgev1.GetClusterRequest{Name: "gone"})); connect.CodeOf(err) != connect.CodeFailedPrecondition || !contains(err, "argocd/gone") {
+		t.Errorf("get the unreadable one: %v", err)
+	}
+	if _, err := c.GetCluster(adminCtx(), connect.NewRequest(&forgev1.GetClusterRequest{Name: "other"})); connect.CodeOf(err) != connect.CodeNotFound || !contains(err, "clusters/production, clusters/aks, clusters/gone") {
+		t.Errorf("unknown cluster names the ones there are: %v", err)
+	}
+
+	refused, _ := envtest.Nodes(true)
+	refused.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewUnauthorized("token expired")
+	})
+	c = NewClusters(ClusterOptions{Kube: kube, Dynamic: dyn, Remotes: []RemoteCluster{{Name: "aks", Connect: func(context.Context) (kubernetes.Interface, dynamic.Interface, error) {
+		return refused, nil, nil
+	}}}})
+	resp, err = c.ListClusters(adminCtx(), connect.NewRequest(&forgev1.ListClustersRequest{}))
+	if err != nil || resp.Msg.GetClusters()[1].GetUnavailableReason() != "cluster aks refuses its credential for listing nodes" {
+		t.Errorf("refused credential: %v %v", resp, err)
+	}
+}
+
 func TestClustersWithoutMetrics(t *testing.T) {
 	t.Parallel()
 	kube, dyn := envtest.Nodes(false)
@@ -202,5 +267,23 @@ func TestClustersErrors(t *testing.T) {
 	_, err := NewClusters(ClusterOptions{Kube: denied, Dynamic: dyn}).ListClusters(adminCtx(), connect.NewRequest(&forgev1.ListClustersRequest{}))
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !contains(err, "forge-api-clusters") {
 		t.Errorf("no ClusterRole: %v", err)
+	}
+
+	// This cluster's failure is not remembered: a fixed ClusterRole shows at once.
+	flaky, _ := envtest.Nodes(true)
+	fail := true
+	flaky.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if fail {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "nodes"}, "", nil)
+		}
+		return false, nil, nil
+	})
+	c = NewClusters(ClusterOptions{Kube: flaky, Dynamic: dyn})
+	if _, err := c.ListClusters(adminCtx(), connect.NewRequest(&forgev1.ListClustersRequest{})); err == nil {
+		t.Fatal("want the forbidden error first")
+	}
+	fail = false
+	if _, err := c.ListClusters(adminCtx(), connect.NewRequest(&forgev1.ListClustersRequest{})); err != nil {
+		t.Errorf("after the fix: %v", err)
 	}
 }

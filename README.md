@@ -586,6 +586,14 @@ the nodes are still shown, without usage figures. `--prometheus-url`
 (`FORGE_PROMETHEUS_URL`) adds disks and volumes; forge-api then also lists
 namespaces, to tie volumes to services.
 
+Other clusters Argo CD knows can be shown too: `--remote-clusters`
+(`FORGE_REMOTE_CLUSTERS`) names Argo CD cluster Secrets in namespace `argocd`,
+comma-separated, and forge-api reads each cluster with the credential in its
+Secret (a bearer token or client certificate over verified TLS; exec plugins,
+cloud logins and `insecure` are refused). `render.sh` then adds a Role that
+may `get` exactly those Secrets. A cluster that cannot be read is listed as
+`Unavailable`, with the reason.
+
 ## The API
 
 One Protobuf contract served with [ConnectRPC](https://connectrpc.com): gRPC,

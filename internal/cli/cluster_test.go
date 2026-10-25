@@ -1,8 +1,13 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/envtest"
@@ -56,6 +61,34 @@ func TestClusterWithoutMetrics(t *testing.T) {
 	if r := h.ok("cluster", "list"); !strings.Contains(r.out, "Memory pressure on 1 node") {
 		t.Errorf("list:\n%s", r.out)
 	}
+}
+
+func TestClusterListRemotes(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	kube, dyn := envtest.Nodes(true)
+	remote, remoteDyn := envtest.Nodes(true)
+	h.clusters = server.NewClusters(server.ClusterOptions{Name: "production", Kube: kube, Dynamic: dyn, Remotes: []server.RemoteCluster{
+		{Name: "aks", Connect: func(context.Context) (kubernetes.Interface, dynamic.Interface, error) { return remote, remoteDyn, nil }},
+		{Name: "gone", Connect: func(context.Context) (kubernetes.Interface, dynamic.Interface, error) {
+			return nil, nil, errors.New("there is no Argo CD cluster Secret argocd/gone")
+		}},
+	}})
+	h.startAPI(h.authn)
+
+	r := h.ok("cluster", "list")
+	lines := strings.Split(strings.TrimSpace(r.out), "\n")
+	if len(lines) != 4 || !strings.HasPrefix(lines[1], "production ") || !strings.HasPrefix(lines[2], "aks ") ||
+		!strings.HasPrefix(lines[3], "gone ") || !strings.Contains(lines[3], "Unavailable") || strings.Contains(lines[3], "%") {
+		t.Errorf("list:\n%s", r.out)
+	}
+	if !strings.Contains(r.err, "gone: cluster gone: there is no Argo CD cluster Secret argocd/gone") {
+		t.Errorf("the reason is said: %q", r.err)
+	}
+	if r := h.fails(int(exitcode.Conflict), "cluster", "get", "gone"); !strings.Contains(r.err, "argocd/gone") {
+		t.Errorf("get the unreadable one: %v", r)
+	}
+	h.ok("cluster", "get", "aks")
 }
 
 func TestClusterNotConfigured(t *testing.T) {
