@@ -1,6 +1,6 @@
 # forge-db backups: CloudNativePG to Azure Blob, with point-in-time recovery
 
-Status: proposed 2026-10-25, waiting for the owner's go-ahead. Issue #48.
+Status: approved 2026-10-25; the plugin (showmino/kubernetes#130) and the render are built, not rolled out. Issue #48.
 
 ## What there is today
 
@@ -35,11 +35,13 @@ needs cert-manager, which runs.
 
 ### 2. The credential (the owner, in Azure and 1Password)
 
-- Container `forge-db` in `stminoforgesdcproduction`.
-- A SAS token on that container only: read, add, create, write, delete, list;
-  HTTPS only; an expiry the owner chooses (a year), noted in the runbook.
-- 1Password item, vault Kube, for example `forge-db-backup`, with the fields
-  `AZURE_STORAGE_ACCOUNT` and `AZURE_STORAGE_SAS_TOKEN`. It goes into
+- Container `forge-db` in `stminoforgesdcproduction` (made 2026-10-25).
+- A SAS token on that container only, through the stored access policy
+  `forge` (read, add, create, write, delete, list; HTTPS only), expiring
+  2027-10-25: deleting the policy revokes it at once. Rotate it before then.
+- 1Password item `vaults/Kube/items/forge-backup-storage` with exactly the
+  fields `storage-account-name` and `sas-token` (the operator copies every
+  field into the Secret: no account key in it). It goes into
   `FORGE_SECRET_DENIED_ITEMS`: no service may read it.
 - Recommended on the account: blob soft delete (7 days) and a lifecycle rule
   that deletes blobs older than 30 days, as a backstop if Barman's own
@@ -54,7 +56,7 @@ set (lines marked `#backups`):
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata: {name: forge-db-backup, namespace: forge}
-spec: {itemPath: "${FORGE_DB_BACKUP_ITEM}"}   # vaults/Kube/items/forge-db-backup
+spec: {itemPath: "${FORGE_DB_BACKUP_ITEM}"}   # vaults/Kube/items/forge-backup-storage
 ---
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
@@ -64,8 +66,8 @@ spec:
   configuration:
     destinationPath: "${FORGE_DB_BACKUP_DEST}"  # https://stminoforgesdcproduction.blob.core.windows.net/forge-db
     azureCredentials:
-      storageAccount: {name: forge-db-backup, key: AZURE_STORAGE_ACCOUNT}
-      storageSasToken: {name: forge-db-backup, key: AZURE_STORAGE_SAS_TOKEN}
+      storageAccount: {name: forge-db-backup, key: storage-account-name}
+      storageSasToken: {name: forge-db-backup, key: sas-token}
     wal: {compression: gzip}
     data: {compression: gzip}
 ---
@@ -132,10 +134,11 @@ in CI.
 
 ### 6. Knowing it works
 
-A `PrometheusRule` in the same template (kube-prometheus-stack picks it up):
-an alert when the last successful backup is older than 26 hours, and when
-WAL archiving fails (the plugin's and CloudNativePG's metrics). Where it
-alerts goes wherever the cluster's Alertmanager sends today.
+After the rollout, once the plugin's metrics can be read: a `PrometheusRule`
+(kube-prometheus-stack picks it up) that alerts when the last successful
+backup is older than 26 hours, and when WAL archiving fails. Until then
+`kubectl -n forge get backups` and the Cluster's `ContinuousArchiving`
+condition say it.
 
 ## Not in this design
 

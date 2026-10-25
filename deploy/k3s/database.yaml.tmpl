@@ -20,6 +20,10 @@ spec:
   resources:
     requests: {cpu: 50m, memory: 256Mi}
     limits: {memory: 512Mi}
+  plugins: #backups
+    - name: barman-cloud.cloudnative-pg.io #backups
+      isWALArchiver: true #backups
+      parameters: {barmanObjectName: forge-db-azure} #backups
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Database

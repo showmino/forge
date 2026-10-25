@@ -1,0 +1,48 @@
+# Backups of forge-db: base backups and WAL to Azure Blob through
+# CloudNativePG's Barman Cloud plugin (installed in cnpg-system), so a restore
+# can go to any point of the last 14 days. render.sh adds this when
+# FORGE_DB_BACKUP_DEST is set; database.yaml.tmpl then names the plugin.
+#   https://stminoforgesdcproduction.blob.core.windows.net/forge-db  https://<account>.blob.core.windows.net/<container>
+#   vaults/Kube/items/forge-backup-storage  vaults/<vault>/items/<item>: fields
+#                            storage-account-name and sas-token (scoped to the container)
+apiVersion: onepassword.com/v1
+kind: OnePasswordItem
+metadata:
+  name: forge-db-backup
+  namespace: forge
+spec:
+  itemPath: vaults/Kube/items/forge-backup-storage
+---
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: forge-db-azure
+  namespace: forge
+spec:
+  retentionPolicy: "14d"
+  configuration:
+    destinationPath: "https://stminoforgesdcproduction.blob.core.windows.net/forge-db"
+    azureCredentials:
+      storageAccount: {name: forge-db-backup, key: storage-account-name}
+      storageSasToken: {name: forge-db-backup, key: sas-token}
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+# Every night at 03:00, after Longhorn's volume backups at 02:30; the first
+# one right away.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: forge-db-nightly
+  namespace: forge
+spec:
+  schedule: "0 0 3 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: forge-db
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
