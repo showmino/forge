@@ -228,23 +228,34 @@ check "FORGE_PROMETHEUS_URL needs clusters" sh -c "! FORGE_PROMETHEUS_URL=http:/
 # Backups of forge-db: off unless FORGE_DB_BACKUP_DEST is set (the goldens above are renders without it).
 bk_dest=https://stminoforgesdcproduction.blob.core.windows.net/forge-db
 bk=$(FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/forge-backup-storage sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
-# backups_section: what backups.yaml.tmpl adds, to the ScheduledBackup's last line.
-backups_section() { printf '%s\n' "$bk" | awk '/^# Backups of forge-db/ {on=1} on {print} on && $0 == "    name: barman-cloud.cloudnative-pg.io" {exit}'; }
+# backups_section: what backups.yaml.tmpl adds, to its last line.
+backups_section() { printf '%s\n' "$bk" | awk '/^# Backups of forge-db/ {on=1} on {print} on && /summary: a forge-db volume is more than 80% full$/ {exit}'; }
 backups_exact() { backups_section | cmp -s - "$dir/testdata/backups.golden"; }
 backups_plugin() {
   printf '%s\n' "$bk" | awk '$0 == "kind: Cluster" {on=1} on && /^---/ {on=0} on' | grep -qF 'parameters: {barmanObjectName: forge-db-azure}' &&
-    printf '%s\n' "$bk" | grep -qF 'isWALArchiver: true'
+    printf '%s\n' "$bk" | grep -qF 'isWALArchiver: true' &&
+    printf '%s\n' "$bk" | grep -qF 'Backed up to Azure Blob' && ! printf '%s\n' "$bk" | grep -qF 'No backups yet'
 }
-no_backups() { ! printf '%s\n' "$without" | grep -q -e plugins: -e forge-db-azure -e ScheduledBackup -e forge-db-backup; }
+no_backups() { ! printf '%s\n' "$without" | grep -q -e plugins: -e forge-db-azure -e ScheduledBackup -e forge-db-backup -e 'Backed up to Azure' -e '#nobackups'; }
+# refuses <message> <env...>: render.sh fails, and says <message>.
+refuses() { msg=$1; shift; ! env "$@" sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 >/tmp/render-refuses.$$ 2>&1 && grep -qF -- "$msg" /tmp/render-refuses.$$; }
+bk_deploys="FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222"
 
 check "backups: objects exactly as reviewed"  backups_exact
 check "backups: forge-db names the plugin"    backups_plugin
 check "backups: nothing without it"           no_backups
-check "backups: no #backups markers"          sh -c "! printf '%s' \"\$1\" | grep -qF '#backups'" _ "$bk"
-check "backups need the 1Password item"       sh -c "! FORGE_DB_BACKUP_DEST=$bk_dest sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "backups need a destination"            sh -c "! FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "bad FORGE_DB_BACKUP_DEST refused"      sh -c "! FORGE_DB_BACKUP_DEST='https://evil.example.com/x' FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
-check "bad FORGE_DB_BACKUP_ITEM refused"      sh -c "! FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM='vaults/Kube/items/x|y' sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+check "backups: no #backups markers"          sh -c "! printf '%s' \"\$1\" | grep -q -e '#backups' -e '#nobackups'" _ "$bk"
+check "backups need the 1Password item"       refuses 'needs FORGE_DB_BACKUP_ITEM' FORGE_DB_BACKUP_DEST=$bk_dest
+check "backups need a destination"            refuses 'needs FORGE_DB_BACKUP_DEST' FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x
+check "bad FORGE_DB_BACKUP_DEST refused"      refuses 'invalid FORGE_DB_BACKUP_DEST' FORGE_DB_BACKUP_DEST=https://evil.example.com/x FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x
+check "short container refused"               refuses 'invalid FORGE_DB_BACKUP_DEST' FORGE_DB_BACKUP_DEST=https://stminoforgesdcproduction.blob.core.windows.net/x FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x
+check "bad FORGE_DB_BACKUP_ITEM refused"      refuses 'invalid FORGE_DB_BACKUP_ITEM' FORGE_DB_BACKUP_DEST=$bk_dest 'FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x|y'
+check "dotted FORGE_DB_BACKUP_ITEM refused"   refuses 'invalid FORGE_DB_BACKUP_ITEM' FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/a/../b
+# shellcheck disable=SC2086 # bk_deploys is a list of assignments on purpose
+check "backup item must be denied to services" refuses 'add it to FORGE_SECRET_DENIED_ITEMS' $bk_deploys FORGE_SECRET_VAULTS=Kube FORGE_SECRET_DENIED_ITEMS=other FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/forge-backup-storage
+# shellcheck disable=SC2086
+check "a denied backup item renders"          sh -c "env $bk_deploys FORGE_SECRET_VAULTS=Kube FORGE_SECRET_DENIED_ITEMS=other,forge-backup-storage FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/forge-backup-storage sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+rm -f /tmp/render-refuses.$$
 
 # The web dashboard: off unless FORGE_WEB_ORIGINS is set (the goldens above are renders without it).
 web=$(FORGE_WEB_ORIGINS=http://forge-web.staging.10.150.1.222.nip.io,http://forge-web.production.10.150.1.222.nip.io FORGE_GITHUB_APP_ID=5239131 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)

@@ -94,26 +94,49 @@ and in `database.yaml.tmpl`, on the `Cluster`:
 
 `render.sh` checks `FORGE_DB_BACKUP_DEST` (an `https://<account>.blob.core.windows.net/<container>`
 address) and `FORGE_DB_BACKUP_ITEM` (`vaults/<vault>/items/<item>`), and
-needs both. `render_test.sh` pins the objects in a golden and checks that
-without them the render is unchanged. forge-api is not touched; its
-NetworkPolicy is ingress only.
+needs both. When `FORGE_SECRET_VAULTS` holds the item's vault, it refuses
+the render unless the item is in `FORGE_SECRET_DENIED_ITEMS`: the token may
+write and delete the backups. `render_test.sh` pins the objects in a golden
+and checks that without them the render is unchanged. forge-api is not
+touched; its NetworkPolicy is ingress only.
+
+Because `FORGE_SECRET_VAULTS` is `Kube` today and the item lives there,
+`forge-backup-storage` joins `FORGE_SECRET_DENIED_ITEMS` at once, in a rollout
+of its own (a forge-api setting only), not with the backups.
 
 ### 4. The rollout (needs the owner's OK)
 
-`live.env` gets `FORGE_DB_BACKUP_DEST` and `FORGE_DB_BACKUP_ITEM`, and the
-item joins `FORGE_SECRET_DENIED_ITEMS`. Adding the plugin to the `Cluster`
-puts a sidecar into the Postgres pods: CloudNativePG restarts the replica,
-then switches over and restarts the old primary. forge-api and Dex see a few
-seconds of failed connections. Then:
+First the plugin's Argo CD app must be Synced and Healthy (otherwise the
+`ObjectStore` has no kind). Then `live.env` gets `FORGE_DB_BACKUP_DEST` and
+`FORGE_DB_BACKUP_ITEM`. Adding the plugin to the `Cluster` puts a sidecar
+into the Postgres pods: CloudNativePG restarts the replica, then restarts the
+primary in place (`primaryUpdateMethod` is the default, `restart`). forge-api
+and Dex lose the database for as long as Postgres takes to start, some tens
+of seconds. Then:
 
 - `kubectl -n forge get cluster forge-db` shows `ContinuousArchiving` true;
-- `kubectl -n forge get backups` shows the first backup `completed`;
-- the container has `forge-db/base/...` and `forge-db/wals/...`.
+- `kubectl -n forge get backups`: the first backup (`immediate`) may have
+  failed during the restarts and is not retried; if so, create a one-off
+  `Backup` (`method: plugin`, plugin `barman-cloud.cloudnative-pg.io`) and see
+  it `completed`;
+- the container has `forge-db/base/...` and `forge-db/wals/...`;
+- the 1Password Secret `forge-db-backup` has exactly the keys
+  `storage-account-name` and `sas-token` (names only);
+- Argo CD shows `forge` Synced (the plugin entry says `enabled: true`, as
+  CloudNativePG defaults it).
 
 ### 5. The restore drill (needs the owner's OK when it runs)
 
-In a namespace `forge-db-drill`: the 1Password item and the `ObjectStore`
-(read side) again, and a `Cluster` `forge-db-drill` with one instance and
+In a namespace `forge-db-drill`, at least an hour after the first base
+backup completed:
+
+- its own 1Password item with a second SAS token, from a second stored
+  access policy with read and list only, and an `ObjectStore` on it with no
+  `retentionPolicy`: the drill can never write to or prune the production
+  backups;
+- a `Cluster` `forge-db-drill` with one instance, no `plugins:`, on a storage
+  class whose reclaim policy is `Delete` (not `longhorn-retain`: a Released
+  volume would keep a copy of production data), and
 
 ```yaml
   bootstrap:
@@ -122,23 +145,32 @@ In a namespace `forge-db-drill`: the 1Password item and the `ObjectStore`
     - name: origin
       plugin:
         name: barman-cloud.cloudnative-pg.io
-        parameters: {barmanObjectName: forge-db-azure, serverName: forge-db}
+        parameters: {barmanObjectName: forge-db-drill-azure, serverName: forge-db}
 ```
 
-once to the latest WAL and once to a `recoveryTarget.targetTime` an hour
-back. Check: the counts of services, audit events, sessions and resource
-records match the live database at those moments (read with `psql` on
-both, read-only on the live one); then delete the namespace. The steps go
-into `verifying.md`, with the time it took. The drill is run by hand, never
-in CI.
+Before it: note a time T (RFC 3339 with offset) and the counts of services,
+audit events, sessions and resource records at T (read-only `psql` on the
+live database). Restore once to the latest WAL and once to
+`recoveryTarget.targetTime: T`; the second must show T's counts exactly.
+Then delete the namespace and check that no PersistentVolume of it is left.
+The steps go into `verifying.md`, with the time it took. The drill is run by
+hand, never in CI.
 
 ### 6. Knowing it works
 
-After the rollout, once the plugin's metrics can be read: a `PrometheusRule`
-(kube-prometheus-stack picks it up) that alerts when the last successful
-backup is older than 26 hours, and when WAL archiving fails. Until then
-`kubectl -n forge get backups` and the Cluster's `ContinuousArchiving`
-condition say it.
+With the backups, the template adds a `PodMonitor` for forge-db (Prometheus
+reads CloudNativePG's own exporter) and a `PrometheusRule`:
+
+- `ForgeDBWALArchivingFailing` (critical): archive failures in the last 15
+  minutes. While WAL cannot be archived, Postgres keeps it on the 5Gi volume
+  until the primary stops.
+- `ForgeDBWALArchivingStale`: the primary archived nothing for 30 minutes.
+- `ForgeDBVolumeFilling`: a forge-db volume above 80%.
+
+They go wherever the cluster's Alertmanager sends today. An alert on the age
+of the last base backup follows once the plugin's metrics are known; until
+then `kubectl -n forge get backups` says it. The SAS token expires
+2027-10-25: the owner keeps a reminder.
 
 ## Not in this design
 
@@ -152,5 +184,8 @@ condition say it.
 
 - That the SAS token's permissions are enough for Barman's retention to
   delete old backups (it needs delete and list); the drill will show it.
-- The plugin's metric names on v0.15.1; the alert is written against what it
-  exposes once installed.
+- The plugin's metric names on v0.15.1, for the backup-age alert.
+- That `barman-cloud` in plugin v0.15.1 supports PostgreSQL 18; the first
+  backup will show it.
+- The time zones: the ScheduledBackup runs on the operator's clock, Longhorn's
+  jobs on Longhorn's.
