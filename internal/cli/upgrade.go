@@ -142,7 +142,7 @@ func trustedAPI(raw string) error {
 		return nil
 	}
 	return exitcode.Usagef("forge upgrade needs the API over HTTPS, not %s", raw).
-		WithHint("name the HTTPS address, for example --api-url https://forge-api.showmino.com")
+		WithHint("name the HTTPS address, for example --api-url https://forge.example.com")
 }
 
 // downloadCLI fetches this platform's archive of release version from the
