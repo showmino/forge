@@ -1,0 +1,28 @@
+# A Gateway instead of an Ingress, the API and the login on hosts of their
+# own, an external database.
+github:
+  org: acme
+  appID: "123456"
+  adminTeams: acme:admins,acme:sre
+  templatesRepo: acme/templates
+host: forge.acme.example
+api:
+  host: api.acme.example
+  image:
+    tag: v0.0.0-test
+login:
+  host: login.acme.example
+  theme: false
+ingress:
+  enabled: false
+gateway:
+  enabled: true
+  parentRefs:
+    - {name: public, namespace: gateway-system}
+database:
+  mode: external
+  external:
+    existingSecret: acme-db
+    host: db.acme.example
+    user: forge_app
+    loginDatabase: forge_login

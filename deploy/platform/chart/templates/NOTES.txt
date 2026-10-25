@@ -1,48 +1,28 @@
-Forge is deploying. Check:
+Forge is starting at {{ include "forge.webURL" . }}.
 
-  kubectl -n forge get pods
-  curl {{ include "forge.dexURL" . }}/dex/.well-known/openid-configuration
-  curl http://{{ include "forge.apiHost" . }}/healthz
+  kubectl -n {{ .Release.Namespace }} get pods
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-If the pods aren't starting, the Secrets this chart expects to already
-exist are the usual cause:
+The GitHub App's callback URL must be exactly:
 
-  kubectl -n forge get secret forge-github-app dex-github{{ if not .Values.database.managed }} {{ .Values.database.secretName | default "forge-db-app" }}{{ end }}
+  {{ include "forge.issuer" . }}/callback
 
-(github_app_private_key on the first, client_id/client_secret on the
-second{{ if not .Values.database.managed }}, uri and password on {{ .Values.database.secretName | default "forge-db-app" }}{{ end }}.)
-See docs/forge/17-running-your-own-forge.md in showmino/techdocs for how to
-create the first two from your GitHub App.
-{{- if not .Values.database.managed }}
+Pods that don't start usually miss the Secret {{ .Values.github.existingSecret }}
+(keys app-private-key, client-id, client-secret){{ if eq .Values.database.mode "external" }} or {{ .Values.database.external.existingSecret }} (keys uri, password){{ end }}.
 
-database.managed is off: you're bringing your own Postgres-compatible
-database. Before this release can come up, create the Secret
-{{ .Values.database.secretName | default "forge-db-app" }} in namespace forge yourself, with:
-  uri: a full connection string for forge-api, e.g.
-    postgres://{{ .Values.database.user | default "forge" }}:<password>@{{ .Values.database.host | default "forge-db-rw.forge.svc" }}:{{ .Values.database.port | default 5432 }}/forge?sslmode=require
-  password: just the password (Dex's config needs it as a separate field)
-and make sure a second database named {{ .Values.database.dexDatabase | default "dex" }} already exists on that
-server, owned by {{ .Values.database.user | default "forge" }} -- for Dex's own sessions, separate from
-forge-api's catalog.
+Sign in from the CLI:
+
+  forge context set {{ .Release.Name }} --api {{ include "forge.apiURL" . }} --use
+  forge auth login
+{{- if and (eq .Values.database.mode "bundled") (not .Values.database.bundled.existingSecret) }}
+
+The database's password is in the Secret forge-db, made at the first install
+and read back by every `helm upgrade`. Do not render this chart with a tool
+that cannot read the cluster (Argo CD, helm template): it would make a new
+password the database does not know. Use database.bundled.existingSecret then.
 {{- end }}
-
-Make sure the GitHub App's callback URL is exactly:
-
-  {{ include "forge.dexURL" . }}/dex/callback
-
 {{- if .Values.deploys.enabled }}
 
-deploys.enabled is on: your Argo CD instance also needs a pull credential
-for oci://ghcr.io/{{ include "forge.chartRepo" . }} before any service can
-actually deploy -- Argo CD falls back to an anonymous pull and fails with a
-plain 401 if this is missing or wrong, not a clear error. The same page
-above has the exact Secret shape and the three independent ways to get it
-wrong.
-{{- end }}
-{{- if .Values.webOrigins }}
-
-webOrigins is set: after any later change to this release, Dex only reads
-its config at start -- restart it:
-
-  kubectl -n forge rollout restart deploy/dex
+Deploys write to {{ include "forge.deployRepo" . }}: it must exist, with a main
+branch, and the GitHub App must be installed on it.
 {{- end }}

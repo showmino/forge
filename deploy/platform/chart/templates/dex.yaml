@@ -1,77 +1,99 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: forge
----
+{{- define "forge.dexConfig" -}}
+{{- $db := .Values.database }}
+{{- $dbHost := printf "forge-db.%s.svc" .Release.Namespace }}
+{{- $dbPort := 5432 }}
+{{- $dbUser := "forge" }}
+{{- $dbName := "dex" }}
+{{- $dbSSL := "disable" }}
+{{- if eq $db.mode "cloudnativepg" }}
+{{- $dbHost = printf "forge-db-rw.%s.svc" .Release.Namespace }}
+{{- $dbSSL = "require" }}
+{{- else if eq $db.mode "external" }}
+{{- $dbHost = $db.external.host | required "database.external.host is required with database.mode external" }}
+{{- $dbPort = $db.external.port }}
+{{- $dbUser = $db.external.user }}
+{{- $dbName = $db.external.loginDatabase }}
+{{- $dbSSL = $db.external.sslMode }}
+{{- end -}}
+issuer: {{ include "forge.issuer" . }}
+storage:
+  type: postgres
+  config:
+    host: {{ $dbHost | quote }}
+    port: {{ $dbPort }}
+    database: {{ $dbName | quote }}
+    user: {{ $dbUser | quote }}
+    password: $DEX_DB_PASSWORD
+    ssl:
+      mode: {{ $dbSSL | quote }}
+web:
+  http: 0.0.0.0:5556
+  {{- if .Values.web.enabled }}
+  allowedOrigins: [{{ include "forge.webURL" . | quote }}]
+  {{- end }}
+{{- if .Values.login.theme }}
+# Forge's look on Dex's pages: the ConfigMap dex-theme beside the image's own files.
+frontend:
+  dir: /srv/dex/web
+  theme: forge
+  issuer: Forge
+  logoURL: theme/logo.svg
+{{- end }}
+oauth2:
+  grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
+  skipApprovalScreen: true
+expiry:
+  idTokens: 1h
+staticClients:
+  - id: forge-cli
+    name: Forge CLI
+    public: true
+    redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
+  {{- if .Values.web.enabled }}
+  - id: forge-web
+    name: Forge dashboard
+    public: true
+    redirectURIs: [{{ printf "%s/auth/callback" (include "forge.webURL" .) | quote }}]
+  {{- end }}
+# Only members of the org sign in; groups are "<org>:<team-slug>", and
+# github.adminTeams picks the admins among them.
+connectors:
+  - type: github
+    id: github
+    name: GitHub
+    config:
+      clientID: $GITHUB_CLIENT_ID
+      clientSecret: $GITHUB_CLIENT_SECRET
+      redirectURI: {{ include "forge.issuer" . }}/callback
+      orgs:
+        - name: {{ include "forge.org" . }}
+      teamNameField: slug
+{{- end }}
+
+{{- define "forge.dexTheme" -}}
+{{- range $f := list "styles.css" "header.html" "logo.svg" "favicon.png" "archivo.woff2" "plex-sans-400.woff2" "plex-sans-600.woff2" }}
+{{- $.Files.Get (printf "files/dex-theme/%s" $f) }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: dex-config
-  namespace: forge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    issuer: {{ include "forge.dexURL" . }}/dex
-    storage:
-      type: postgres
-      config:
-        host: {{ .Values.database.host | default "forge-db-rw.forge.svc" | quote }}
-        port: {{ .Values.database.port | default 5432 }}
-        database: {{ .Values.database.dexDatabase | default "dex" | quote }}
-        user: {{ .Values.database.user | default "forge" | quote }}
-        password: $DEX_DB_PASSWORD # from the Secret {{ .Values.database.secretName | default "forge-db-app" }}
-        ssl:
-          mode: require
-    web:
-      http: 0.0.0.0:5556
-      {{- if .Values.webOrigins }}
-      allowedOrigins: [{{ include "forge.webOriginsJSON" . }}]
-      {{- end }}
-    {{- if .Values.dexTheme }}
-    # Forge's look on Dex's pages: the ConfigMap dex-theme beside the image's own files.
-    frontend:
-      dir: /srv/dex/web
-      theme: forge
-      issuer: Forge
-      logoURL: theme/logo.svg
-    {{- end }}
-    oauth2:
-      grantTypes: [authorization_code, refresh_token, "urn:ietf:params:oauth:grant-type:device_code"]
-      skipApprovalScreen: true
-    expiry:
-      idTokens: 1h
-    staticClients:
-      - id: forge-cli
-        name: Forge CLI
-        public: true
-        redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
-      {{- if .Values.webOrigins }}
-      - id: forge-web
-        name: Forge dashboard
-        public: true
-        redirectURIs: [{{ include "forge.webRedirectsJSON" . }}]
-      {{- end }}
-    # Only members of the org log in; groups are "<org>:<team-slug>", and
-    # forge-api's writerGroups picks the admin teams. Dex expands
-    # $GITHUB_CLIENT_* from its environment (the Secret dex-github, created
-    # by hand -- see docs/forge/17-running-your-own-forge.md).
-    connectors:
-      - type: github
-        id: github
-        name: GitHub
-        config:
-          clientID: $GITHUB_CLIENT_ID
-          clientSecret: $GITHUB_CLIENT_SECRET
-          redirectURI: {{ include "forge.dexURL" . }}/dex/callback
-          orgs:
-            - name: {{ include "forge.dexGithubOrg" . }}
-          teamNameField: slug
-{{- if .Values.dexTheme }}
+    {{- include "forge.dexConfig" . | nindent 4 }}
+{{- if .Values.login.theme }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: dex-theme
-  namespace: forge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 data:
   {{- range $f := list "styles.css" "header.html" "logo.svg" }}
   {{ $f }}: |
@@ -83,11 +105,25 @@ binaryData:
   {{- end }}
 {{- end }}
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  selector: {app: dex}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: dex
-  namespace: forge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 spec:
   replicas: 1
   selector:
@@ -95,37 +131,47 @@ spec:
   template:
     metadata:
       labels: {app: dex}
-      {{- if .Values.dexTheme }}
       annotations:
-        # A changed theme restarts Dex: header.html is mounted by subPath, which a ConfigMap update does not reach.
-        {{- $theme := "" }}
-        {{- range $f := list "styles.css" "header.html" "logo.svg" "favicon.png" "archivo.woff2" "plex-sans-400.woff2" "plex-sans-600.woff2" }}
-        {{- $theme = print $theme ($.Files.Get (printf "files/dex-theme/%s" $f)) }}
+        # Dex reads its config only when it starts, and header.html is mounted
+        # by subPath, which a ConfigMap update does not reach.
+        checksum/config: {{ include "forge.dexConfig" . | sha256sum | trunc 16 | quote }}
+        {{- if .Values.login.theme }}
+        checksum/dex-theme: {{ include "forge.dexTheme" . | sha256sum | trunc 16 | quote }}
         {{- end }}
-        checksum/dex-theme: {{ $theme | sha256sum | trunc 16 | quote }}
-      {{- end }}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        # The image's dex user.
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: dex
-          image: ghcr.io/dexidp/dex:v2.41.1
+          image: {{ .Values.login.image | quote }}
           args: [dex, serve, /etc/dex/config.yaml]
           env:
             - name: GITHUB_CLIENT_ID
               valueFrom:
-                secretKeyRef: {name: dex-github, key: client_id}
+                secretKeyRef: {name: {{ .Values.github.existingSecret }}, key: client-id}
             - name: GITHUB_CLIENT_SECRET
               valueFrom:
-                secretKeyRef: {name: dex-github, key: client_secret}
+                secretKeyRef: {name: {{ .Values.github.existingSecret }}, key: client-secret}
             - name: DEX_DB_PASSWORD
               valueFrom:
-                secretKeyRef: {name: {{ .Values.database.secretName | default "forge-db-app" }}, key: password}
+                secretKeyRef: {name: {{ include "forge.dbSecret" . }}, key: password}
           ports:
             - {name: http, containerPort: 5556}
           readinessProbe:
             httpGet: {path: /dex/healthz, port: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: config, mountPath: /etc/dex}
-            {{- if .Values.dexTheme }}
+            - {name: tmp, mountPath: /tmp}
+            {{- if .Values.login.theme }}
             - {name: theme, mountPath: /srv/dex/web/themes/forge}
             - {name: theme, mountPath: /srv/dex/web/templates/header.html, subPath: header.html}
             {{- end }}
@@ -135,7 +181,9 @@ spec:
       volumes:
         - name: config
           configMap: {name: dex-config}
-        {{- if .Values.dexTheme }}
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+        {{- if .Values.login.theme }}
         - name: theme
           configMap: {name: dex-theme}
         {{- end }}

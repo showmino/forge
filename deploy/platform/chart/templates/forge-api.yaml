@@ -1,19 +1,44 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: forge-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+{{- with .Values.previews.pullSecret }}
+imagePullSecrets:
+  - name: {{ . }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  selector: {app: forge-api}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: forge-api
-  namespace: forge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 spec:
   replicas: 1 # operations are in memory; keep one replica
+  strategy: {type: Recreate}
   selector:
     matchLabels: {app: forge-api}
   template:
     metadata:
       labels: {app: forge-api}
     spec:
-      {{- if .Values.previews.enabled }}
       serviceAccountName: forge-api
-      {{- end }}
       securityContext:
         runAsNonRoot: true
         # distroless "nonroot" by number: the kubelet cannot check a user name.
@@ -24,61 +49,69 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       volumes:
         - name: github-app
-          secret: {secretName: forge-github-app, defaultMode: 0440}
+          secret:
+            secretName: {{ .Values.github.existingSecret | required "github.existingSecret is required" }}
+            defaultMode: 0440
+            items:
+              - {key: app-private-key, path: app-private-key}
       containers:
         - name: forge-api
-          image: {{ .Values.image | quote }}
+          image: {{ include "forge.apiImage" . | quote }}
           imagePullPolicy: IfNotPresent
           env:
-            - {name: FORGE_OIDC_ISSUER, value: "{{ include "forge.dexURL" . }}/dex"}
+            - {name: FORGE_OIDC_ISSUER, value: {{ include "forge.issuer" . | quote }}}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
-            {{- if .Values.webOrigins }}
+            {{- if .Values.web.enabled }}
             - {name: FORGE_OIDC_WEB_CLIENT_ID, value: forge-web}
-            - {name: FORGE_CORS_ORIGINS, value: {{ join "," .Values.webOrigins | quote }}}
+            {{- if ne (include "forge.apiHost" .) (include "forge.host" .) }}
+            - {name: FORGE_CORS_ORIGINS, value: {{ include "forge.webURL" . | quote }}}
             {{- end }}
-            - {name: FORGE_WRITER_GROUPS, value: {{ include "forge.writerGroups" . | quote }}}
+            {{- end }}
+            - {name: FORGE_ADMIN_GROUPS, value: {{ include "forge.adminTeams" . | quote }}}
             - name: FORGE_DATABASE_URL
               valueFrom:
-                secretKeyRef: {name: {{ .Values.database.secretName | default "forge-db-app" }}, key: uri}
+                secretKeyRef: {name: {{ include "forge.dbSecret" . }}, key: uri}
             - {name: FORGE_LOG_FORMAT, value: json}
-            - {name: FORGE_GITHUB_APP_ID, value: {{ .Values.githubAppID | required "githubAppID is required" | quote }}}
-            - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/github_app_private_key}
-            - {name: FORGE_GITHUB_ORG, value: {{ .Values.githubOrg | required "githubOrg is required" | quote }}}
+            - {name: FORGE_GITHUB_APP_ID, value: {{ .Values.github.appID | required "github.appID is required" | quote }}}
+            - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/app-private-key}
+            - {name: FORGE_GITHUB_ORG, value: {{ include "forge.org" . | quote }}}
             - {name: FORGE_TEMPLATES_REPO, value: {{ include "forge.templatesRepo" . | quote }}}
-            - {name: FORGE_CLI_REPO, value: {{ include "forge.forgeRepo" . | quote }}}
-            {{- if .Values.imageRegistry }}
-            - {name: FORGE_IMAGE_REGISTRY, value: {{ .Values.imageRegistry | quote }}}
+            {{- with .Values.cliRepo }}
+            - {name: FORGE_CLI_REPO, value: {{ . | quote }}}
+            {{- end }}
+            {{- with .Values.imageRegistry }}
+            - {name: FORGE_IMAGE_REGISTRY, value: {{ . | quote }}}
             {{- end }}
             {{- if .Values.previews.enabled }}
             - {name: FORGE_PREVIEWS, value: "1"}
-            - {name: FORGE_PREVIEW_DOMAIN, value: {{ printf "preview.%s" (include "forge.previewBase" .) | quote }}}
-            - {name: FORGE_PREVIEW_PULL_SECRET, value: {{ printf "forge/%s" (.Values.previews.pullSecret | required "previews.pullSecret is required when previews.enabled") | quote }}}
+            - {name: FORGE_PREVIEW_GATEWAY, value: {{ printf "%s/forge-previews" .Release.Namespace | quote }}}
+            - {name: FORGE_PREVIEW_DOMAIN, value: {{ printf "preview.%s" (.Values.previews.gatewayDomain | required "previews.gatewayDomain is required with previews.enabled") | quote }}}
+            {{- with .Values.previews.pullSecret | required "previews.pullSecret is required with previews.enabled" }}
+            - {name: FORGE_PREVIEW_PULL_SECRET, value: {{ printf "%s/%s" $.Release.Namespace . | quote }}}
+            {{- end }}
             {{- end }}
             {{- if .Values.deploys.enabled }}
             - {name: FORGE_DEPLOYS, value: "1"}
             - {name: FORGE_DEPLOY_REPO, value: {{ include "forge.deployRepo" . | quote }}}
             {{- end }}
             {{- if .Values.clusters.enabled }}
-            {{- if not .Values.previews.enabled }}
-            {{- fail "clusters.enabled needs previews.enabled" }}
-            {{- end }}
             - {name: FORGE_CLUSTERS, value: "1"}
             - {name: FORGE_CLUSTER_NAME, value: {{ .Values.clusters.name | default "default" | quote }}}
-            {{- if .Values.clusters.prometheusURL }}
-            - {name: FORGE_PROMETHEUS_URL, value: {{ .Values.clusters.prometheusURL | quote }}}
+            {{- with .Values.clusters.prometheusURL }}
+            - {name: FORGE_PROMETHEUS_URL, value: {{ . | quote }}}
             {{- end }}
-            {{- if .Values.clusters.grafanaURL }}
-            - {name: FORGE_GRAFANA_URL, value: {{ .Values.clusters.grafanaURL | quote }}}
+            {{- with .Values.clusters.grafanaURL }}
+            - {name: FORGE_GRAFANA_URL, value: {{ . | quote }}}
             {{- end }}
             {{- end }}
-            {{- if .Values.argocdURL }}
-            - {name: FORGE_ARGOCD_URL, value: {{ .Values.argocdURL | quote }}}
+            {{- with .Values.argocdURL }}
+            - {name: FORGE_ARGOCD_URL, value: {{ . | quote }}}
             {{- end }}
-            {{- if or .Values.secretVaults .Values.secretDeniedItems }}
-            - {name: FORGE_SECRET_VAULTS, value: {{ .Values.secretVaults | quote }}}
-            - {name: FORGE_SECRET_DENIED_ITEMS, value: {{ .Values.secretDeniedItems | quote }}}
+            - {name: FORGE_SECRET_BACKEND, value: {{ .Values.secrets.backend | default "onepassword" | quote }}}
+            {{- if or .Values.secrets.vaults .Values.secrets.deniedItems }}
+            - {name: FORGE_SECRET_VAULTS, value: {{ .Values.secrets.vaults | quote }}}
+            - {name: FORGE_SECRET_DENIED_ITEMS, value: {{ .Values.secrets.deniedItems | quote }}}
             {{- end }}
-            - {name: FORGE_SECRET_BACKEND, value: {{ .Values.secretBackend | default "onepassword" | quote }}}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
           ports:
@@ -92,6 +125,4 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           resources:
-            requests: {cpu: 10m, memory: 32Mi}
-            # Template releases are cached in memory (up to 100 MiB each).
-            limits: {memory: 256Mi}
+            {{- toYaml .Values.api.resources | nindent 12 }}

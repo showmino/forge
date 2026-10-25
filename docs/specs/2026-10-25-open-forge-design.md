@@ -115,6 +115,26 @@ Done 2026-10-25: `forge` and `forge-web` are public, Apache-2.0.
 showmino's own k3s install keeps `deploy/k3s` for now; moving it onto the
 chart is a later step.
 
+### The chart as built
+
+- `deploy/platform/chart`, name `forge`; `make platform-chart-test` checks
+  three cases against goldens in CI. A release pushes it next to the deploy
+  chart.
+- The API's paths on the shared host are one per ConnectRPC service
+  (`forge.apiPaths`): an Ingress or HTTPRoute prefix matches whole path
+  segments. `TestChartRoutesEveryService` fails when a service is missing.
+- The dashboard gets `FORGE_API_URL` = the public API address: the browser
+  calls it and the page's CSP names it.
+- The bundled database's password is made once (Helm `lookup`); a tool that
+  renders without the cluster (Argo CD) names a Secret of its own
+  (`database.bundled.existingSecret`).
+- Deploys still need previews (the Gateway the services are reached
+  through) and the namespace `forge` (the deploy chart's routes name
+  `forge/forge-previews`). Lifting both is the open part of the exit gate's
+  step 3.
+- The dashboard image is pinned by the chart (`web.image.tag`): forge-web
+  keeps its own versions.
+
 ## Exit gate
 
 On a cluster that has only an ingress controller (the AKS cluster, after the

@@ -61,6 +61,8 @@ jobs:
   # A separate job so a failure here (or a retry) never touches goreleaser's
   # own release, which cannot simply be re-run once it has already published.
   chart:
+    # The charts name the forge-api image of this release: publish them after it.
+    needs: [release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,3 +78,12 @@ jobs:
           helm package deploy/argocd/chart --version "$version" --app-version "$version" -d /tmp
           owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           helm push "/tmp/forge-chart-$version.tgz" "oci://ghcr.io/$owner"
+      # Forge itself, at the same version: oci://ghcr.io/<owner>/charts/forge.
+      - name: Push the forge chart
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          helm package deploy/platform/chart --version "$version" --app-version "$version" -d /tmp
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          helm push "/tmp/forge-$version.tgz" "oci://ghcr.io/$owner/charts"

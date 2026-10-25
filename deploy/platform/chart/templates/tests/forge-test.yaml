@@ -1,0 +1,34 @@
+{{- if or .Values.ingress.enabled .Values.gateway.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: forge-test
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    # Through the public address: the API answers, and the login serves its
+    # discovery document with the issuer the API trusts.
+    - name: test
+      image: mirror.gcr.io/curlimages/curl:8.16.0
+      command: [sh, -ec]
+      args:
+        - |
+          curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' {{ include "forge.apiURL" . }}/forge.v1.AuthService/GetServerInfo
+          echo
+          curl -fsS {{ include "forge.issuer" . }}/.well-known/openid-configuration | grep -F '"issuer": "{{ include "forge.issuer" . }}"'
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+{{- end }}

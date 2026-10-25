@@ -1,8 +1,12 @@
 {{- if .Values.deploys.enabled }}
 {{- if not .Values.previews.enabled }}
-{{- fail "deploys.enabled needs previews.enabled" }}
+{{- fail "deploys.enabled needs previews.enabled (the Gateway services are reached through)" }}
 {{- end }}
-{{- $chartRev := .Values.deploys.chartRevision | required "deploys.chartRevision is required when deploys.enabled (a published chart version, e.g. 0.21.0, not a commit SHA)" }}
+{{- if ne .Release.Namespace "forge" }}
+{{- fail "deploys.enabled needs the release in the namespace forge: the deploy chart routes through forge/forge-previews" }}
+{{- end }}
+{{- $chartRev := .Values.deploys.chartRevision | default .Chart.AppVersion }}
+{{- $chart := .Values.deploys.chart }}
 # Deploys: Forge's Argo CD objects and forge-api's read access to them.
 # Applications are named <service>-<env> and deploy into the namespace of
 # that name; forge-api refuses a namespace that exists and isn't Forge's.
@@ -19,6 +23,8 @@ kind: AppProject
 metadata:
   name: forge-services
   namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 spec:
   description: {{ printf "Forge services, deployed by forge-api through %s" (include "forge.deployRepo" .) | quote }}
   sourceRepos:
@@ -27,7 +33,7 @@ spec:
     # below (verify this against your own Argo CD version -- production's
     # was checked against v3.5.3; IsSourcePermitted matched it literally
     # there).
-    - {{ printf "oci://%s/%s" (include "forge.chartRegistry" .) (include "forge.chartRepo" .) | quote }}
+    - {{ $chart | quote }}
     - {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
   destinations:
     - {server: https://kubernetes.default.svc, namespace: "*-staging"}
@@ -41,7 +47,7 @@ spec:
     - {group: "", kind: ResourceQuota}
     - {group: "", kind: LimitRange}
     # run.secrets, run.jobs and run.autoscaling (forge.yaml). A secrets
-    # backend other than the default (secretBackend) adds its own operator's
+    # backend other than the default (secrets.backend) adds its own operator's
     # kind here by hand -- this list is static, not conditional on the value.
     - {group: onepassword.com, kind: OnePasswordItem}
     - {group: batch, kind: CronJob}
@@ -59,6 +65,8 @@ kind: ApplicationSet
 metadata:
   name: forge-services
   namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 spec:
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
@@ -81,7 +89,7 @@ spec:
     spec:
       project: forge-services
       sources:
-        - repoURL: {{ printf "oci://%s/%s" (include "forge.chartRegistry" .) (include "forge.chartRepo" .) | quote }}
+        - repoURL: {{ $chart | quote }}
           targetRevision: {{ $chartRev | quote }}
           # Required for an OCI Helm source: with none of path/chart/ref set,
           # Argo CD rejects the spec outright (InvalidSpecError) rather than
@@ -94,7 +102,7 @@ spec:
             valueFiles:
               - '$values/{{`{{ .path.path }}`}}/values.yaml'
             parameters:
-              - {name: secretBackend, value: {{ .Values.secretBackend | default "onepassword" | quote }}}
+              - {name: secretBackend, value: {{ .Values.secrets.backend | default "onepassword" | quote }}}
         - repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
           targetRevision: main
           ref: values
@@ -132,6 +140,8 @@ kind: Role
 metadata:
   name: forge-api-applications
   namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 rules:
   - apiGroups: [argoproj.io]
     resources: [applications]
@@ -142,6 +152,8 @@ kind: RoleBinding
 metadata:
   name: forge-api-applications
   namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
