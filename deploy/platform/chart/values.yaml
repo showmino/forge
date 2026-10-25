@@ -49,6 +49,9 @@ exposure:
   # needs one public address. dexHost/apiHost default to
   # dex.<previews.gatewayDomain> and api.<previews.gatewayDomain>. Use it
   # when public IPs are scarce or cost money (a cloud subscription's quota).
+  # Like cloudLB it is plain HTTP: nothing here terminates TLS. The API's
+  # route turns off the request timeout (operation logs stream), an
+  # extended Gateway API feature that Envoy Gateway and Istio support.
   mode: cloudLB
   dexHost: ""
   apiHost: ""

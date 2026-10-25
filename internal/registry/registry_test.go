@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"encoding/base64"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -148,6 +149,59 @@ func TestExistsAnonymous(t *testing.T) {
 		t.Errorf("present: %v %v", ok, err)
 	}
 }
+
+// A registry that redirects the manifest request (docker.io sends it to
+// www.docker.com, which answers 200 for anything) must not count as found.
+func TestExistsRedirectIsNotFound(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/elsewhere" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/elsewhere", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL, Creds: func(context.Context, string) (string, string, error) { return "", "", nil }}
+	if ok, err := c.Exists(context.Background(), "registry.example/org/app:abc1234"); err == nil || ok {
+		t.Errorf("redirect: %v %v, want an error", ok, err)
+	}
+}
+
+// The login goes only to a token service in the registry's own domain.
+func TestTokenRealmMustBeTheRegistrysDomain(t *testing.T) {
+	t.Parallel()
+	for realm, ok := range map[string]bool{
+		"https://ghcr.io/token":                           true,
+		"https://x.azurecr.io/oauth2/token":               true,
+		"https://auth.registry.example/token":             true,
+		"https://evil.example/token":                      false,
+		"https://10.0.0.1/token":                          false,
+		"https://kubernetes.default.svc/token":            false,
+		"https://registry.example.attacker.example/token": false,
+	} {
+		r := Ref{Repo: "a/b"}
+		switch {
+		case strings.Contains(realm, "ghcr"):
+			r.Host = "ghcr.io"
+		case strings.Contains(realm, "azurecr"):
+			r.Host = "x.azurecr.io"
+		default:
+			r.Host = "registry.example"
+		}
+		c := &Client{HTTP: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"token":"t"}`)), Header: http.Header{}}, nil
+		})}}
+		_, err := c.token(context.Background(), challenge{scheme: "bearer", realm: realm}, r, "u", "p")
+		if (err == nil) != ok {
+			t.Errorf("realm %s for %s: err %v, want allowed=%v", realm, r.Host, err, ok)
+		}
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestParseChallenge(t *testing.T) {
 	t.Parallel()

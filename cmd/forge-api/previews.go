@@ -92,7 +92,8 @@ func validRegistry(r string) bool {
 		return true
 	}
 	host, _, _ := strings.Cut(r, "/")
-	return registryRE.MatchString(r) && strings.ContainsAny(host, ".:")
+	// A dot in the host, as image references need (registry.ParseRef).
+	return registryRE.MatchString(r) && strings.Contains(host, ".")
 }
 
 func positiveDuration(name, v string) (time.Duration, error) {

@@ -1,7 +1,7 @@
 // Package registry checks whether an image exists in an OCI registry
-// (ghcr.io, an Azure Container Registry, Docker Hub, ...), following the
-// registry's own login challenge. Errors never contain credentials or
-// tokens.
+// (ghcr.io, an Azure Container Registry, ...), following the registry's own
+// login challenge. The login goes only to the registry's own domain. Errors
+// never contain credentials or tokens.
 package registry
 
 import (
@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -101,6 +102,7 @@ func (c *Client) Exists(ctx context.Context, image string) (bool, error) {
 	}
 	switch status {
 	case http.StatusOK:
+		// Not a redirect's target: head does not follow redirects.
 		return true, nil
 	case http.StatusNotFound:
 		return false, nil
@@ -119,7 +121,11 @@ func (c *Client) head(ctx context.Context, manifest, auth string) (int, http.Hea
 		req.Header.Set("Authorization", auth)
 	}
 	req.Header.Set("Accept", manifestTypes)
-	resp, err := c.http().Do(req)
+	// A registry answers a manifest itself. A redirect (docker.io's goes to
+	// www.docker.com, which answers 200 for anything) is not an answer.
+	hc := *c.http()
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := hc.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -153,11 +159,12 @@ func parseChallenge(h string) challenge {
 }
 
 // token gets a pull token for r from the challenge's realm. The login goes
-// only to an https realm (or to any realm when BaseURL is set, in tests).
+// only to an https realm in the registry's own domain (any realm when
+// BaseURL is set, in tests).
 func (c *Client) token(ctx context.Context, ch challenge, r Ref, user, pass string) (string, error) {
 	realm, err := url.Parse(ch.realm)
-	if err != nil || realm.Host == "" || (realm.Scheme != "https" && c.BaseURL == "") {
-		return "", fmt.Errorf("registry token for %s: the registry names no https token service", r.Repo)
+	if err != nil || realm.Host == "" || (c.BaseURL == "" && (realm.Scheme != "https" || !sameDomain(realm.Hostname(), r.Host))) {
+		return "", fmt.Errorf("registry token for %s: the registry names no https token service in its own domain", r.Repo)
 	}
 	service := ch.service
 	if service == "" {
@@ -196,6 +203,27 @@ func (c *Client) token(ctx context.Context, ch challenge, r Ref, user, pass stri
 		return "", fmt.Errorf("registry token for %s: unreadable answer", r.Repo)
 	}
 	return out.Token, nil
+}
+
+// sameDomain reports whether host is registry's host or shares its last two
+// labels (auth.registry.example for registry.example).
+func sameDomain(host, registry string) bool {
+	if h, _, err := net.SplitHostPort(registry); err == nil {
+		registry = h
+	}
+	host, registry = strings.ToLower(host), strings.ToLower(registry)
+	if host == registry {
+		return true
+	}
+	last2 := func(s string) string {
+		parts := strings.Split(s, ".")
+		if len(parts) < 2 {
+			return ""
+		}
+		return strings.Join(parts[len(parts)-2:], ".")
+	}
+	d := last2(registry)
+	return d != "" && strings.Contains(d, ".") && last2(host) == d && net.ParseIP(host) == nil
 }
 
 // CredsFromDockerConfig returns the login for host from a

@@ -60,6 +60,7 @@ func TestPreviews(t *testing.T) {
 		"trailing /":    {func() previewFlags { f := ok; f.registry = "acr.example.io/"; return f }(), app, "--image-registry"},
 		"upper case":    {func() previewFlags { f := ok; f.registry = "ACR.example.io"; return f }(), app, "--image-registry"},
 		"no host":       {func() previewFlags { f := ok; f.registry = "team"; return f }(), app, "--image-registry"},
+		"no dot":        {func() previewFlags { f := ok; f.registry = "registry:5000"; return f }(), app, "--image-registry"},
 	} {
 		if _, _, _, err := previews(tc.f, tc.app, cat, ops, "showmino", log, fakeKube); err == nil || !strings.Contains(err.Error(), tc.msg) {
 			t.Errorf("%s: %v, want an error mentioning %q", name, err, tc.msg)

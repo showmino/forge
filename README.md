@@ -553,8 +553,10 @@ forge-api runs with `--image-registry` (`FORGE_IMAGE_REGISTRY`, a host and an
 optional path such as `myregistry.azurecr.io`; the platform chart's
 `imageRegistry`). The pull secret (`--preview-pull-secret`) needs a login for
 that registry: forge-api uses it to check that the image exists, and asks the
-registry where to log in (its `WWW-Authenticate` challenge), so ghcr.io, an
-Azure Container Registry and Docker Hub all work.
+registry where to log in (its `WWW-Authenticate` challenge), so ghcr.io and an
+Azure Container Registry both work. The login only goes to a token service in
+the registry's own domain. Docker Hub does not work (`docker.io` redirects
+image requests to its website).
 
 ### Audit log
 

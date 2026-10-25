@@ -81,7 +81,7 @@ spec:
   infrastructure:
     annotations:
       metallb.universe.tf/loadBalancerIPs: {{ .Values.previews.gatewayIP | required "previews.gatewayIP is required when previews.enabled and exposure.mode is \"lb\"" }}
-      {{- with .Values.previews.gatewayAnnotations }}
+      {{- with omit .Values.previews.gatewayAnnotations "metallb.universe.tf/loadBalancerIPs" }}
       {{- toYaml . | nindent 6 }}
       {{- end }}
   {{- else if .Values.previews.gatewayAnnotations }}
