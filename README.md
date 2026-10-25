@@ -8,8 +8,7 @@ environments, deploys with promotion and rollback, versions and releases, the
 audit log, public addresses and the web dashboard
 ([`showmino/forge-web`](https://github.com/showmino/forge-web)) are built and
 live. Resources (databases) are built and switched off on the cluster;
-TechDocs is designed. [`docs/agents/status.md`](docs/agents/status.md) has the
-detail and [`docs/index.md`](docs/index.md) the design.
+TechDocs is designed. [`docs/index.md`](docs/index.md) has the design.
 
 **Working on Forge**, as a person or as a coding agent: read
 [`AGENTS.md`](AGENTS.md) first. It has the rules (the cluster is production),
@@ -120,7 +119,7 @@ CLI keeps the ID and refresh tokens, as before.
 > This section is for a throwaway single-node k3s of your own. **The
 > `showmino` cluster is production and is not set up this way:** its images
 > come from `ghcr.io`, and every change to it follows the rollout procedure in
-> [`docs/agents/verifying.md`](docs/agents/verifying.md) with the owner's OK.
+> showmino's private ops repo with the owner's OK.
 
 On a single-node k3s with the bundled Traefik ingress, import a local image:
 

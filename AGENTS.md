@@ -27,14 +27,19 @@ on the owner's k3s cluster.
 | File | Read it for |
 | --- | --- |
 | `docs/index.md` | The approved design: commands, auth, API, output and exit codes, the phases and their exit gates. Read the relevant section before designing anything |
-| `docs/agents/status.md` | How far the plan has got: what is built, what is live, what is left, known follow-ups |
-| `docs/agents/verifying.md` | The runbook: what runs on the cluster right now, the render command that is live, how to check each feature |
+| `showmino/forge-ops` `docs/agents/status.md` | How far the plan has got: what is built, what is live, what is left, known follow-ups |
+| `showmino/forge-ops` `docs/agents/verifying.md` | The runbook: what runs on the cluster right now, the render command that is live, how to check each feature |
 | `docs/specs/` | One design per phase or feature, as built |
 | `README.md` | The user-facing documentation |
 
+This repo is public. showmino's own install (`live.env`, the live render)
+and the agents' runbooks are in the private repo `showmino/forge-ops`; keep a
+checkout of it next to this one (`../forge-ops`). Nothing about showmino's
+install goes back into this repo.
+
 `docs/plans/` holds the step-by-step plans of earlier phases. They are history:
 they name files that have since moved (for example `.claude/skills/forge/…`,
-now `docs/agents/…`).
+then `docs/agents/…`, now in `showmino/forge-ops`).
 
 ## Rules
 
@@ -48,13 +53,14 @@ These were set by the owner. They are not suggestions.
   `--dry-run=server`). **Anything that changes the cluster needs the owner's
   explicit OK each time:** applying manifests, restarting a workload,
   promoting a service to production, deleting anything.
-- A rollout follows one procedure, written out in `docs/agents/verifying.md`:
-  what is live is `deploy/k3s/live/forge.yaml` (rendered from
-  `deploy/k3s/live.env` by `render-live.sh`) and there is no drift (Argo CD
+- A rollout follows one procedure, written out in `showmino/forge-ops`
+  `docs/agents/verifying.md`: what is live is forge-ops' `live/forge.yaml`
+  (rendered from its `live.env` by its `render-live.sh`, with this repo's
+  `deploy/k3s/render.sh`) and there is no drift (Argo CD
   shows it Synced; `kubectl diff` on it shows nothing but Argo CD's
   `tracking-id` annotations); change `live.env`, render, read the diff; show it
   to the owner; after the OK, server dry run, then apply; verify; merge the
-  pull request so `main` says what is live. Argo CD shows Forge as the
+  forge-ops pull request so its `main` says what is live. Argo CD shows Forge as the
   application `forge`, with manual sync: never press Sync without the OK.
 - Never write to the production database directly. Migrations run when
   forge-api starts.
@@ -84,10 +90,9 @@ a yes to the next one.
   (`README.md`, `AGENTS.md`, ...): CI does not run for it at all (the owner's
   rule: checks on docs alone only cost time), and it merges once it contains
   the current `main`. Docs elsewhere (test data, templates) run CI as usual.
-  A rollout pull request that only changes `deploy/k3s/live.env` and
-  `deploy/k3s/live/forge.yaml` gets no CI either (the owner's rule,
-  2026-10-16). CI's check that `live/forge.yaml` is the render of `live.env` then does not
-  run: run `sh deploy/k3s/render-live.sh --check` yourself before you push.
+  Rollout pull requests are in `showmino/forge-ops`, which has no CI: run its
+  `sh render-live.sh --check` yourself before you push (the owner's rule,
+  2026-10-16).
   In `forge-web` the
   jobs `image` and `deploy` only run on `main` and show as skipped on a pull
   request; that is expected, and `test` must pass. Any other skip is a stop.
@@ -238,13 +243,15 @@ Knowing this file is not the same as having access.
   cannot reach the cluster, the LAN address of the API, or the App key, and
   you must not try to work around that. Leave rollouts and anything that needs
   the cluster to someone on the owner's machine, and say so in the pull
-  request. `.github/workflows/copilot-setup-steps.yml` installs the toolchain
+  request. You may not see `showmino/forge-ops` either: then work from this
+  repo and say what you could not check. `.github/workflows/copilot-setup-steps.yml` installs the toolchain
   for that environment.
 
 ## Keeping this true
 
 - A change that alters a fact in `AGENTS.md`, `docs/agents/status.md` or
-  `docs/agents/verifying.md` updates that file **in the same pull request**.
+  `docs/agents/verifying.md` (both in `showmino/forge-ops`) updates that file
+  in a pull request **opened together with** the change.
   After a rollout, `verifying.md` gets the new image, the new render command
   and what was checked.
 - A change to what users see also updates `docs/forge/` in

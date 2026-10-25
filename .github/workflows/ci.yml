@@ -10,8 +10,6 @@ on:
     paths-ignore:
       - "docs/**"
       - "*.md"
-      - "deploy/k3s/live.env"
-      - "deploy/k3s/live/forge.yaml"
 
 permissions:
   contents: read
@@ -21,10 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # render-live.sh's dns.yaml-presence guard pulls the published chart
-      # from ghcr.io (live.env sets FORGE_PUBLIC_DOMAINS); GITHUB_TOKEN can
-      # read this repo's own packages even while the package is private.
-      packages: read
     services:
       postgres:
         # Docker Hub's official image through Google's mirror: Docker Hub
@@ -40,9 +34,6 @@ jobs:
       FORGE_TEST_DATABASE_URL: postgres://postgres:forge@localhost:5432/postgres?sslmode=disable
     steps:
       - uses: actions/checkout@v4
-        with:
-          # render-live.sh reads the deploy chart at the revision in live.env.
-          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -53,15 +44,6 @@ jobs:
         run: make chart-test
       - name: Platform chart lint
         run: make platform-chart-lint
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.21.4
-      - name: Log in to ghcr.io for the published (private) chart package
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: The live render is the render of live.env
-        run: sh deploy/k3s/render-live.sh --check
 
   lint:
     runs-on: ubuntu-latest
