@@ -30,3 +30,28 @@ roleRef:
   name: forge-api-clusters
 subjects:
   - {kind: ServiceAccount, name: forge-api, namespace: forge}
+--- #remoteclusters
+# Other clusters: forge-api reads exactly the Argo CD cluster Secrets named in #remoteclusters
+# FORGE_REMOTE_CLUSTERS, and with their credentials those clusters. #remoteclusters
+apiVersion: rbac.authorization.k8s.io/v1 #remoteclusters
+kind: Role #remoteclusters
+metadata: #remoteclusters
+  name: forge-api-remote-clusters #remoteclusters
+  namespace: argocd #remoteclusters
+rules: #remoteclusters
+  - apiGroups: [""] #remoteclusters
+    resources: [secrets] #remoteclusters
+    resourceNames: [${REMOTE_CLUSTERS_YAML}] #remoteclusters
+    verbs: [get] #remoteclusters
+--- #remoteclusters
+apiVersion: rbac.authorization.k8s.io/v1 #remoteclusters
+kind: RoleBinding #remoteclusters
+metadata: #remoteclusters
+  name: forge-api-remote-clusters #remoteclusters
+  namespace: argocd #remoteclusters
+roleRef: #remoteclusters
+  apiGroup: rbac.authorization.k8s.io #remoteclusters
+  kind: Role #remoteclusters
+  name: forge-api-remote-clusters #remoteclusters
+subjects: #remoteclusters
+  - {kind: ServiceAccount, name: forge-api, namespace: forge} #remoteclusters

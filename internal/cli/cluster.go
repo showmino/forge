@@ -14,9 +14,10 @@ import (
 
 func newClusterCmd(f *Factory) *cobra.Command {
 	cmd := group("cluster", "Show how much room the cluster has left (admins)", "clusters")
-	cmd.Long = `The Kubernetes cluster Forge runs on: its nodes, their conditions and how much
-of their CPU and memory is in use, read by the Forge API from Kubernetes and
-metrics-server. Only admins may see it.`
+	cmd.Long = `The Kubernetes clusters Forge knows: the one it runs on and any others its
+API was given (through Argo CD's credentials); their nodes, their conditions
+and how much of their CPU and memory is in use, read by the Forge API from
+Kubernetes and metrics-server. Only admins may see them.`
 	cmd.AddCommand(newClusterListCmd(f), newClusterGetCmd(f))
 	return cmd
 }
@@ -27,7 +28,8 @@ func newClusterListCmd(f *Factory) *cobra.Command {
 		Aliases: []string{"ls"},
 		Short:   "List the clusters with their status and use",
 		Long: `List the clusters with their status and how much of their CPU and memory is
-in use. The figures are over the nodes that take new pods.`,
+in use. The figures are over the nodes that take new pods. A cluster the Forge
+API could not read says Unavailable, and why.`,
 		Example: `  forge cluster list
   forge cluster list -o json | jq '.clusters[].totals'`,
 		Args: noArgs,
@@ -58,7 +60,23 @@ in use. The figures are over the nodes that take new pods.`,
 				})
 				v.Names = append(v.Names, cl.GetName())
 			}
-			return output.Print(f.IO.Out, format, v)
+			if err := output.Print(f.IO.Out, format, v); err != nil {
+				return err
+			}
+			if format == output.Table {
+				for _, cl := range resp.Msg.GetClusters() {
+					if r := cl.GetUnavailableReason(); r != "" {
+						r = strings.Map(func(c rune) rune {
+							if c < 0x20 || c == 0x7f {
+								return -1
+							}
+							return c
+						}, r)
+						f.infof("%s: %s", strings.TrimPrefix(cl.GetName(), "clusters/"), r)
+					}
+				}
+			}
+			return nil
 		},
 	}
 }
@@ -181,6 +199,9 @@ var conditionWords = []struct{ condition, words string }{
 // condition, then the fullest of CPU, memory, disk or a volume from 80% used,
 // else Healthy.
 func clusterStatus(cl *forgev1.Cluster) string {
+	if cl.GetUnavailableReason() != "" {
+		return "Unavailable"
+	}
 	for _, cw := range conditionWords {
 		n := 0
 		for _, node := range cl.GetNodes() {

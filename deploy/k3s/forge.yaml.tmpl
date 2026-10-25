@@ -175,6 +175,7 @@ spec:
             - {name: FORGE_CLUSTER_NAME, value: "${FORGE_CLUSTER_NAME}"} #clusters
             - {name: FORGE_GRAFANA_URL, value: "${FORGE_GRAFANA_URL}"} #grafana
             - {name: FORGE_PROMETHEUS_URL, value: "${FORGE_PROMETHEUS_URL}"} #prometheus
+            - {name: FORGE_REMOTE_CLUSTERS, value: "${FORGE_REMOTE_CLUSTERS}"} #remoteclusters
           volumeMounts: #app
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true} #app
           ports:

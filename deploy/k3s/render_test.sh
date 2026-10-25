@@ -192,7 +192,7 @@ check "bad runner image refused"            sh -c "! FORGE_RESOURCES=1 FORGE_RUN
 check "bad FORGE_RESOURCES refused"         sh -c "! FORGE_RESOURCES=yes FORGE_RUNNER_IMAGE=forge-runner:dev FORGE_DEPLOYS=1 FORGE_DEPLOY_CHART_REVISION=$rev FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 
 # Cluster capacity: off unless FORGE_CLUSTERS=1 (the goldens above are renders without it).
-cl=$(FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME=homelab FORGE_GRAFANA_URL=http://10.150.1.202 FORGE_PROMETHEUS_URL=http://prometheus-prometheus.monitoring.svc:9090 FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+cl=$(FORGE_CLUSTERS=1 FORGE_CLUSTER_NAME=homelab FORGE_GRAFANA_URL=http://10.150.1.202 FORGE_PROMETHEUS_URL=http://prometheus-prometheus.monitoring.svc:9090 FORGE_REMOTE_CLUSTERS=aks-production,lab FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
 cl_nografana=$(FORGE_CLUSTERS=1 FORGE_GITHUB_APP_ID=5239131 FORGE_PREVIEW_IP=10.150.1.222 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
 # clusters_section: everything clusters.yaml.tmpl adds (from its first line to the end).
 clusters_section() { printf '%s\n' "$cl" | awk '/^# Cluster capacity:/ {on=1} on'; }
@@ -202,11 +202,12 @@ clusters_settings() {
   printf '%s\n' "$cl" | grep -qF 'FORGE_CLUSTERS, value: "1"' &&
     printf '%s\n' "$cl" | grep -qF 'FORGE_CLUSTER_NAME, value: "homelab"' &&
     printf '%s\n' "$cl" | grep -qF 'FORGE_GRAFANA_URL, value: "http://10.150.1.202"' &&
-    printf '%s\n' "$cl" | grep -qF 'FORGE_PROMETHEUS_URL, value: "http://prometheus-prometheus.monitoring.svc:9090"'
+    printf '%s\n' "$cl" | grep -qF 'FORGE_PROMETHEUS_URL, value: "http://prometheus-prometheus.monitoring.svc:9090"' &&
+    printf '%s\n' "$cl" | grep -qF 'FORGE_REMOTE_CLUSTERS, value: "aks-production,lab"'
 }
 clusters_default() {
   printf '%s\n' "$cl_nografana" | grep -qF 'FORGE_CLUSTER_NAME, value: "default"' &&
-    ! printf '%s\n' "$cl_nografana" | grep -q -e FORGE_GRAFANA_URL -e FORGE_PROMETHEUS_URL
+    ! printf '%s\n' "$cl_nografana" | grep -q -e FORGE_GRAFANA_URL -e FORGE_PROMETHEUS_URL -e FORGE_REMOTE_CLUSTERS -e forge-api-remote-clusters
 }
 no_clusters() { ! printf '%s\n' "$prev" | grep -q -e FORGE_CLUSTER -e FORGE_GRAFANA -e FORGE_PROMETHEUS -e forge-api-clusters; }
 
@@ -214,7 +215,7 @@ check "clusters: forge-api settings"        clusters_settings
 check "clusters: default name, no Grafana"  clusters_default
 check "clusters: nothing without it"        no_clusters
 check "clusters: RBAC exactly as reviewed"  clusters_exact
-check "clusters: no markers left"           sh -c "! printf '%s' \"\$1\" | grep -q -e '#clusters' -e '#grafana' -e '#prometheus'" _ "$cl"
+check "clusters: no markers left"           sh -c "! printf '%s' \"\$1\" | grep -q -e '#clusters' -e '#grafana' -e '#prometheus' -e '#remoteclusters'" _ "$cl"
 check "clusters: namespaces only with Prometheus" sh -c "! printf '%s' \"\$1\" | awk '/^# Cluster capacity:/ {on=1} on' | grep -qF 'resources: [namespaces]'" _ "$cl_nografana"
 check "clusters: valid YAML for kubectl"    sh -c "printf '%s' \"\$1\" | kubectl apply --dry-run=client -f - >/dev/null" _ "$cl"
 check "clusters need previews"              sh -c "! FORGE_CLUSTERS=1 FORGE_GITHUB_APP_ID=1 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
@@ -224,6 +225,10 @@ check "bad FORGE_GRAFANA_URL refused"       sh -c "! FORGE_CLUSTERS=1 FORGE_GRAF
 check "FORGE_GRAFANA_URL needs clusters"    sh -c "! FORGE_GRAFANA_URL=https://grafana.example.com FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "bad FORGE_PROMETHEUS_URL refused"    sh -c "! FORGE_CLUSTERS=1 FORGE_PROMETHEUS_URL='http://p|x' FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 check "FORGE_PROMETHEUS_URL needs clusters" sh -c "! FORGE_PROMETHEUS_URL=http://prometheus:9090 FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+for bad in 'AKS' 'aks,' ',aks' 'aks,,lab' 'aks lab' 'aks,aks' 'default' 'aks|x'; do
+  check "FORGE_REMOTE_CLUSTERS='$bad' refused" sh -c "! FORGE_CLUSTERS=1 FORGE_REMOTE_CLUSTERS='$bad' FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
+done
+check "FORGE_REMOTE_CLUSTERS needs clusters" sh -c "! FORGE_REMOTE_CLUSTERS=aks FORGE_GITHUB_APP_ID=1 FORGE_PREVIEW_IP=10.150.1.222 sh \"$dir/render.sh\" --lb 10.150.1.220 10.150.1.221 >/dev/null 2>&1"
 
 # Backups of forge-db: off unless FORGE_DB_BACKUP_DEST is set (the goldens above are renders without it).
 bk_dest=https://stminoforgesdcproduction.blob.core.windows.net/forge-db

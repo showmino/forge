@@ -48,17 +48,39 @@ type ClusterOptions struct {
 	Dynamic dynamic.Interface
 	// Prometheus, when set, gives node disk and volume use.
 	Prometheus *Prometheus
-	Log        *slog.Logger
-	Now        func() time.Time
+	// Remotes are other clusters, listed after this one. They get no Grafana
+	// link and no Prometheus.
+	Remotes []RemoteCluster
+	Log     *slog.Logger
+	Now     func() time.Time
+}
+
+// RemoteCluster is a cluster forge-api does not run on and reads with a
+// credential of its own.
+type RemoteCluster struct {
+	// Name is its id in "clusters/{id}".
+	Name string
+	// Connect returns clients for it. It is called on every read, so it can
+	// notice a changed credential; it may keep clients between calls.
+	Connect func(ctx context.Context) (kubernetes.Interface, dynamic.Interface, error)
 }
 
 // Clusters serves ClusterService from the Kubernetes API and metrics-server.
 // A nil *Clusters answers FAILED_PRECONDITION.
 type Clusters struct {
-	o ClusterOptions
+	o       ClusterOptions
+	members []*member
+}
+
+// member is one cluster and its cached figures (or the error of its last read).
+type member struct {
+	name    string
+	local   bool
+	connect func(ctx context.Context) (kubernetes.Interface, dynamic.Interface, error)
 
 	mu      sync.Mutex
 	cached  *forgev1.Cluster
+	err     error
 	fetched time.Time
 }
 
@@ -73,7 +95,14 @@ func NewClusters(o ClusterOptions) *Clusters {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return &Clusters{o: o}
+	c := &Clusters{o: o}
+	c.members = append(c.members, &member{name: o.Name, local: true, connect: func(context.Context) (kubernetes.Interface, dynamic.Interface, error) {
+		return o.Kube, o.Dynamic, nil
+	}})
+	for _, r := range o.Remotes {
+		c.members = append(c.members, &member{name: r.Name, connect: r.Connect})
+	}
+	return c
 }
 
 func (c *Clusters) ListClusters(ctx context.Context, _ *connect.Request[forgev1.ListClustersRequest]) (*connect.Response[forgev1.ListClustersResponse], error) {
@@ -83,11 +112,31 @@ func (c *Clusters) ListClusters(ctx context.Context, _ *connect.Request[forgev1.
 	if c == nil {
 		return nil, errClustersOff()
 	}
-	cl, err := c.cluster(ctx)
-	if err != nil {
-		return nil, err
+	out := make([]*forgev1.Cluster, len(c.members))
+	errs := make([]error, len(c.members))
+	var wg sync.WaitGroup
+	for i, m := range c.members {
+		wg.Go(func() { out[i], errs[i] = c.cluster(ctx, m) })
 	}
-	return connect.NewResponse(&forgev1.ListClustersResponse{Clusters: []*forgev1.Cluster{cl}}), nil
+	wg.Wait()
+	failed := 0
+	for i, err := range errs {
+		if err == nil {
+			continue
+		}
+		failed++
+		msg := err.Error()
+		var ce *connect.Error
+		if errors.As(err, &ce) {
+			msg = ce.Message()
+		}
+		out[i] = &forgev1.Cluster{Name: clusterPrefix + c.members[i].name, UnavailableReason: msg}
+	}
+	// With nothing to show, the reason is the answer.
+	if failed == len(c.members) {
+		return nil, errs[0]
+	}
+	return connect.NewResponse(&forgev1.ListClustersResponse{Clusters: out}), nil
 }
 
 func (c *Clusters) GetCluster(ctx context.Context, req *connect.Request[forgev1.GetClusterRequest]) (*connect.Response[forgev1.GetClusterResponse], error) {
@@ -101,45 +150,60 @@ func (c *Clusters) GetCluster(ctx context.Context, req *connect.Request[forgev1.
 	if id == "" {
 		return nil, invalidArg("name is required: clusters/<name>")
 	}
-	if id != c.o.Name {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("there is no cluster "+clusterPrefix+id+"; this Forge runs on "+clusterPrefix+c.o.Name))
+	var names []string
+	for _, m := range c.members {
+		if m.name == id {
+			cl, err := c.cluster(ctx, m)
+			if err != nil {
+				return nil, err
+			}
+			return connect.NewResponse(&forgev1.GetClusterResponse{Cluster: cl}), nil
+		}
+		names = append(names, clusterPrefix+m.name)
 	}
-	cl, err := c.cluster(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return connect.NewResponse(&forgev1.GetClusterResponse{Cluster: cl}), nil
+	return nil, connect.NewError(connect.CodeNotFound, errors.New("there is no cluster "+clusterPrefix+id+"; this Forge knows "+strings.Join(names, ", ")))
 }
 
 func errClustersOff() error {
 	return connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster capacity is not configured on this Forge API (--clusters)"))
 }
 
-// cluster returns a copy of the cluster's figures, read at most every clustersFresh.
-func (c *Clusters) cluster(ctx context.Context) (*forgev1.Cluster, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.cached == nil || c.o.Now().Sub(c.fetched) >= clustersFresh {
-		cl, err := c.read(ctx)
-		if err != nil {
+// cluster returns a copy of m's figures, read at most every clustersFresh. A
+// remote's failed read is remembered as long, so a cluster that is down does
+// not make every list wait for it; this cluster's is not, so a fixed
+// ClusterRole shows at once.
+func (c *Clusters) cluster(ctx context.Context, m *member) (*forgev1.Cluster, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if (m.cached == nil && m.err == nil) || c.o.Now().Sub(m.fetched) >= clustersFresh {
+		cl, err := c.read(ctx, m)
+		if err != nil && (m.local || ctx.Err() != nil) {
 			return nil, err
 		}
-		c.cached, c.fetched = cl, c.o.Now()
+		m.cached, m.err, m.fetched = cl, err, c.o.Now()
 	}
-	return proto.Clone(c.cached).(*forgev1.Cluster), nil
+	if m.err != nil {
+		return nil, m.err
+	}
+	return proto.Clone(m.cached).(*forgev1.Cluster), nil
 }
 
-func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
+func (c *Clusters) read(ctx context.Context, m *member) (*forgev1.Cluster, error) {
 	ctx, cancel := context.WithTimeout(ctx, clustersTimeout)
 	defer cancel()
-	nodes, err := c.o.Kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	kube, dyn, err := m.connect(ctx)
 	if err != nil {
-		return nil, c.kubeErr(ctx, "nodes", err)
+		c.o.Log.WarnContext(ctx, "connecting to the cluster failed", "cluster", m.name, "error", err)
+		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster "+m.name+": "+err.Error()))
+	}
+	nodes, err := kube.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, c.kubeErr(ctx, m, "nodes", err)
 	}
 	// Pending pods bound to a node count against its pod limit too.
-	pods, err := c.o.Kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "status.phase!=Succeeded,status.phase!=Failed"})
+	pods, err := kube.CoreV1().Pods("").List(ctx, metav1.ListOptions{FieldSelector: "status.phase!=Succeeded,status.phase!=Failed"})
 	if err != nil {
-		return nil, c.kubeErr(ctx, "pods", err)
+		return nil, c.kubeErr(ctx, m, "pods", err)
 	}
 	onNode := map[string]int32{}
 	for i := range pods.Items {
@@ -148,21 +212,30 @@ func (c *Clusters) read(ctx context.Context) (*forgev1.Cluster, error) {
 			onNode[p.Spec.NodeName]++
 		}
 	}
-	usage, metricsOK := c.usage(ctx)
-	disk, volumes, storageOK := c.storage(ctx, nodes.Items)
+	usage, metricsOK := c.usage(ctx, m, dyn)
+	var (
+		disk      map[string]nodeDisk
+		volumes   []*forgev1.Volume
+		storageOK bool
+		grafana   string
+	)
+	if m.local {
+		disk, volumes, storageOK = c.storage(ctx, kube, nodes.Items)
+		grafana = c.o.GrafanaURL
+	}
 
 	out := &forgev1.Cluster{
-		Name:             clusterPrefix + c.o.Name,
-		GrafanaUrl:       c.o.GrafanaURL,
+		Name:             clusterPrefix + m.name,
+		GrafanaUrl:       grafana,
 		Totals:           &forgev1.Capacity{},
 		MetricsAvailable: metricsOK,
 		StorageAvailable: storageOK,
 		Volumes:          volumes,
 	}
-	if v, err := c.o.Kube.Discovery().ServerVersion(); err == nil {
+	if v, err := kube.Discovery().ServerVersion(); err == nil {
 		out.KubernetesVersion = v.GitVersion
 	} else {
-		c.o.Log.WarnContext(ctx, "reading the Kubernetes version failed", "error", err)
+		c.o.Log.WarnContext(ctx, "reading the Kubernetes version failed", "cluster", m.name, "error", err)
 	}
 	var oldest time.Time
 	for i := range nodes.Items {
@@ -224,7 +297,7 @@ type nodeDisk struct{ size, used int64 }
 
 // storage reads node disks and volumes from Prometheus; false when there is
 // none or it did not answer.
-func (c *Clusters) storage(ctx context.Context, nodes []corev1.Node) (map[string]nodeDisk, []*forgev1.Volume, bool) {
+func (c *Clusters) storage(ctx context.Context, kube kubernetes.Interface, nodes []corev1.Node) (map[string]nodeDisk, []*forgev1.Volume, bool) {
 	if c.o.Prometheus == nil {
 		return nil, nil, false
 	}
@@ -286,7 +359,7 @@ func (c *Clusters) storage(ctx context.Context, nodes []corev1.Node) (map[string
 		k := claimOf(s.labels)
 		used[k] = max(used[k], int64(s.value))
 	}
-	owners := c.forgeNamespaces(ctx)
+	owners := c.forgeNamespaces(ctx, kube)
 	volumes := make([]*forgev1.Volume, 0, len(size))
 	for k, sz := range size {
 		v := &forgev1.Volume{Namespace: k.ns, Claim: k.name, CapacityBytes: sz, UsedBytes: used[k]}
@@ -315,8 +388,8 @@ type nsOwner struct{ service, env string }
 
 // forgeNamespaces maps the namespaces Forge made to their service and
 // environment. Without them volumes are still listed, only not tied to a service.
-func (c *Clusters) forgeNamespaces(ctx context.Context) map[string]nsOwner {
-	list, err := c.o.Kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: labelManagedBy + "=forge"})
+func (c *Clusters) forgeNamespaces(ctx context.Context, kube kubernetes.Interface) map[string]nsOwner {
+	list, err := kube.CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: labelManagedBy + "=forge"})
 	if err != nil {
 		c.o.Log.WarnContext(ctx, "listing Forge's namespaces failed", "error", err)
 		return nil
@@ -331,13 +404,13 @@ func (c *Clusters) forgeNamespaces(ctx context.Context) map[string]nsOwner {
 }
 
 // usage reads metrics-server; false when it did not answer.
-func (c *Clusters) usage(ctx context.Context) (map[string]nodeUsage, bool) {
-	if c.o.Dynamic == nil {
+func (c *Clusters) usage(ctx context.Context, m *member, dyn dynamic.Interface) (map[string]nodeUsage, bool) {
+	if dyn == nil {
 		return nil, false
 	}
-	list, err := c.o.Dynamic.Resource(NodeMetrics).List(ctx, metav1.ListOptions{})
+	list, err := dyn.Resource(NodeMetrics).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		c.o.Log.WarnContext(ctx, "reading node metrics from metrics-server failed", "error", err)
+		c.o.Log.WarnContext(ctx, "reading node metrics from metrics-server failed", "cluster", m.name, "error", err)
 		return nil, false
 	}
 	out := make(map[string]nodeUsage, len(list.Items))
@@ -360,10 +433,16 @@ func quantity(v any, milli bool) int64 {
 	return q.Value()
 }
 
-func (c *Clusters) kubeErr(ctx context.Context, what string, err error) error {
-	c.o.Log.WarnContext(ctx, "reading the cluster failed", "resource", what, "error", err)
-	if apierrors.IsForbidden(err) {
-		return connect.NewError(connect.CodeFailedPrecondition, errors.New("forge-api may not read the cluster's "+what+": apply its ClusterRole forge-api-clusters"))
+func (c *Clusters) kubeErr(ctx context.Context, m *member, what string, err error) error {
+	c.o.Log.WarnContext(ctx, "reading the cluster failed", "cluster", m.name, "resource", what, "error", err)
+	if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+		if m.local {
+			return connect.NewError(connect.CodeFailedPrecondition, errors.New("forge-api may not read the cluster's "+what+": apply its ClusterRole forge-api-clusters"))
+		}
+		return connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster "+m.name+" refuses its credential for listing "+what))
+	}
+	if !m.local {
+		return connect.NewError(connect.CodeUnavailable, errors.New("cluster "+m.name+" did not answer when asked for its "+what+"; try again in a moment"))
 	}
 	return connect.NewError(connect.CodeUnavailable, errors.New("the Kubernetes API could not be asked for the cluster's "+what+"; try again in a moment"))
 }

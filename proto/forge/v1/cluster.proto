@@ -4,9 +4,10 @@ package forge.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// ClusterService reports how much room the Kubernetes cluster Forge runs on
-// has left: its nodes, their conditions and their CPU and memory. Only
-// admins may call it. Resource names follow AIP style: "clusters/{cluster}".
+// ClusterService reports how much room the Kubernetes clusters have left:
+// the one Forge runs on and any others its API is given credentials for;
+// their nodes, their conditions and their CPU and memory. Only admins may
+// call it. Resource names follow AIP style: "clusters/{cluster}".
 service ClusterService {
   // ListClusters returns every cluster.
   rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
@@ -40,6 +41,9 @@ message Cluster {
   bool storage_available = 8;
   // The persistent volumes and how full they are, fullest first.
   repeated Volume volumes = 9;
+  // Why the cluster could not be read; then only the name is set. Empty when
+  // it was read. Only in a list: getting such a cluster is an error.
+  string unavailable_reason = 10;
 }
 
 // Volume is a PersistentVolumeClaim with how much of it is in use.
