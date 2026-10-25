@@ -11,7 +11,7 @@ metadata:
   name: forge-db-backup
   namespace: forge
 spec:
-  itemPath: vaults/Kube/items/forge-backup-storage
+  itemPath: vaults/production/items/forge-backup-storage
 ---
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore

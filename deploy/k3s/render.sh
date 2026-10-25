@@ -141,7 +141,7 @@ db_backup_dest=${FORGE_DB_BACKUP_DEST:-}
 db_backup_item=${FORGE_DB_BACKUP_ITEM:-}
 if [ -n "$db_backup_dest$db_backup_item" ]; then
   [ -n "$db_backup_dest" ] || { echo "FORGE_DB_BACKUP_ITEM needs FORGE_DB_BACKUP_DEST, like https://<account>.blob.core.windows.net/<container>" >&2; exit 2; }
-  [ -n "$db_backup_item" ] || { echo "FORGE_DB_BACKUP_DEST needs FORGE_DB_BACKUP_ITEM, a 1Password item like vaults/Kube/items/forge-backup-storage" >&2; exit 2; }
+  [ -n "$db_backup_item" ] || { echo "FORGE_DB_BACKUP_DEST needs FORGE_DB_BACKUP_ITEM, a 1Password item like vaults/production/items/forge-backup-storage" >&2; exit 2; }
   # The character-class guards first: grep anchors per line, not per string.
   case $db_backup_dest in
     *[!a-z0-9.:/-]*|*--*) echo "invalid FORGE_DB_BACKUP_DEST: $db_backup_dest (like https://<account>.blob.core.windows.net/<container>)" >&2; exit 2 ;;
@@ -149,10 +149,10 @@ if [ -n "$db_backup_dest$db_backup_item" ]; then
   printf '%s' "$db_backup_dest" | grep -Eq '^https://[a-z0-9]{3,24}\.blob\.core\.windows\.net/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$' ||
     { echo "invalid FORGE_DB_BACKUP_DEST: $db_backup_dest (like https://<account>.blob.core.windows.net/<container>)" >&2; exit 2; }
   case $db_backup_item in
-    *[!A-Za-z0-9./_-]*) echo "invalid FORGE_DB_BACKUP_ITEM: $db_backup_item (like vaults/Kube/items/forge-backup-storage)" >&2; exit 2 ;;
+    *[!A-Za-z0-9./_-]*) echo "invalid FORGE_DB_BACKUP_ITEM: $db_backup_item (like vaults/production/items/forge-backup-storage)" >&2; exit 2 ;;
   esac
   printf '%s' "$db_backup_item" | grep -Eq '^vaults/[A-Za-z0-9._-]+/items/[A-Za-z0-9._-]+$' ||
-    { echo "invalid FORGE_DB_BACKUP_ITEM: $db_backup_item (like vaults/Kube/items/forge-backup-storage)" >&2; exit 2; }
+    { echo "invalid FORGE_DB_BACKUP_ITEM: $db_backup_item (like vaults/production/items/forge-backup-storage)" >&2; exit 2; }
   backups_marks='s/ *#backups$//'
   nobackups_marks='/#nobackups$/d'
 else

@@ -39,10 +39,12 @@ needs cert-manager, which runs.
 - A SAS token on that container only, through the stored access policy
   `forge` (read, add, create, write, delete, list; HTTPS only), expiring
   2027-10-25: deleting the policy revokes it at once. Rotate it before then.
-- 1Password item `vaults/Kube/items/forge-backup-storage` with exactly the
-  fields `storage-account-name` and `sas-token` (the operator copies every
-  field into the Secret: no account key in it). It goes into
-  `FORGE_SECRET_DENIED_ITEMS`: no service may read it.
+- 1Password item `vaults/production/items/forge-backup-storage` with exactly
+  the fields `storage-account-name` and `sas-token` (the operator copies every
+  field into the Secret: no account key in it). The vault `production` holds
+  only the platform's own credentials and is not in `FORGE_SECRET_VAULTS`, so
+  no service's `run.secrets` can name it. The 1Password Connect server must be
+  given access to that vault.
 - Recommended on the account: blob soft delete (7 days) and a lifecycle rule
   that deletes blobs older than 30 days, as a backstop if Barman's own
   retention ever stops.
@@ -56,7 +58,7 @@ set (lines marked `#backups`):
 apiVersion: onepassword.com/v1
 kind: OnePasswordItem
 metadata: {name: forge-db-backup, namespace: forge}
-spec: {itemPath: "${FORGE_DB_BACKUP_ITEM}"}   # vaults/Kube/items/forge-backup-storage
+spec: {itemPath: "${FORGE_DB_BACKUP_ITEM}"}   # vaults/production/items/forge-backup-storage
 ---
 apiVersion: barmancloud.cnpg.io/v1
 kind: ObjectStore
@@ -100,9 +102,9 @@ write and delete the backups. `render_test.sh` pins the objects in a golden
 and checks that without them the render is unchanged. forge-api is not
 touched; its NetworkPolicy is ingress only.
 
-Because `FORGE_SECRET_VAULTS` is `Kube` today and the item lives there,
-`forge-backup-storage` joins `FORGE_SECRET_DENIED_ITEMS` at once, in a rollout
-of its own (a forge-api setting only), not with the backups.
+The item is in its own vault, `production`, which `FORGE_SECRET_VAULTS`
+(`Kube`) does not list; had it been in a listed vault, render.sh would have
+required it on the deny list.
 
 ### 4. The rollout (needs the owner's OK)
 

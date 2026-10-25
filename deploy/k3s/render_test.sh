@@ -227,7 +227,7 @@ check "FORGE_PROMETHEUS_URL needs clusters" sh -c "! FORGE_PROMETHEUS_URL=http:/
 
 # Backups of forge-db: off unless FORGE_DB_BACKUP_DEST is set (the goldens above are renders without it).
 bk_dest=https://stminoforgesdcproduction.blob.core.windows.net/forge-db
-bk=$(FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/forge-backup-storage sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
+bk=$(FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/production/items/forge-backup-storage sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221)
 # backups_section: what backups.yaml.tmpl adds, to its last line.
 backups_section() { printf '%s\n' "$bk" | awk '/^# Backups of forge-db/ {on=1} on {print} on && /summary: a forge-db volume is more than 80% full$/ {exit}'; }
 backups_exact() { backups_section | cmp -s - "$dir/testdata/backups.golden"; }
