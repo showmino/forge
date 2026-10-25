@@ -165,7 +165,7 @@ spec:
             - {name: FORGE_DEPLOY_REPO, value: showmino/forge-deploys}
             - {name: FORGE_ARGOCD_URL, value: "https://argocd.showmino.com"}
             - {name: FORGE_SECRET_VAULTS, value: "Kube"}
-            - {name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,forge-dex-github,ghcr-secret,arc-runners,argocd-repo-kubernetes,cert-manager,Cloudflare,crossplane-cloudflare,crossplane-github-provider-creds,grafana-admin-credentials,renovate"}
+            - {name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github-app,forge-dex-github,ghcr-secret,arc-runners,argocd-repo-kubernetes,cert-manager,Cloudflare,crossplane-cloudflare,crossplane-github-provider-creds,grafana-admin-credentials,renovate,forge-backup-storage"}
             - {name: FORGE_PUBLIC_DOMAINS, value: "showmino.com=showmino-com,deogratias.cloud=deogratias-cloud,forgegate.io=forgegate-io"}
             - {name: FORGE_PUBLIC_DNS_TUNNEL, value: "production"}
             - {name: FORGE_RESOURCES, value: "1"}
