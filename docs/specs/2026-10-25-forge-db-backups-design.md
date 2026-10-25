@@ -1,6 +1,6 @@
 # forge-db backups: CloudNativePG to Azure Blob, with point-in-time recovery
 
-Status: live on k3s since 2026-10-25 (the plugin is showmino/kubernetes#130, the render forge#141); the restore drill is not done yet. Issue #48.
+Status: live on k3s since 2026-10-25 (the plugin is showmino/kubernetes#130, the render forge#141); the restore drill passed the same night (`verifying.md`). Issue #48.
 
 ## What there is today
 
@@ -185,9 +185,10 @@ then `kubectl -n forge get backups` says it. The SAS token expires
 ## Not checked
 
 - That the SAS token's permissions are enough for Barman's retention to
-  delete old backups (it needs delete and list); the drill will show it.
+  delete old backups (it needs delete and list). The drill used a read-only
+  token and cannot show it; the first prune after 14 days will.
 - The plugin's metric names on v0.15.1, for the backup-age alert.
-- That `barman-cloud` in plugin v0.15.1 supports PostgreSQL 18; the first
-  backup will show it.
+- Checked 2026-10-25: `barman-cloud` in plugin v0.15.1 backs up and restores
+  PostgreSQL 18 (the first backup and the drill).
 - The time zones: the ScheduledBackup runs on the operator's clock, Longhorn's
   jobs on Longhorn's.
