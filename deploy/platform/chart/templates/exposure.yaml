@@ -6,7 +6,16 @@ exposure.mode "cloudLB": a plain LoadBalancer Service with no requested IP;
 point exposure.dexHost/apiHost at whatever address gets assigned,
 after the fact (a cloud provider's own load balancer, or `minikube tunnel`
 for a local proof).
+exposure.mode "gateway": no load balancers of their own; both are routed
+through the previews Gateway (templates/previews.yaml has the listeners).
 */}}
+{{- $gw := eq .Values.exposure.mode "gateway" }}
+{{- if and $gw (not .Values.previews.enabled) }}
+{{- fail "exposure.mode \"gateway\" needs previews.enabled (the Gateway it routes through)" }}
+{{- end }}
+{{- if not (has .Values.exposure.mode (list "lb" "cloudLB" "gateway")) }}
+{{- fail (printf "exposure.mode %q must be lb, cloudLB or gateway" .Values.exposure.mode) }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -17,7 +26,7 @@ metadata:
     metallb.universe.tf/loadBalancerIPs: {{ .Values.exposure.dexIP | required "exposure.dexIP is required when exposure.mode is \"lb\"" }}
   {{- end }}
 spec:
-  type: LoadBalancer
+  type: {{ if $gw }}ClusterIP{{ else }}LoadBalancer{{ end }}
   selector: {app: dex}
   ports:
     - {name: http, port: 80, targetPort: http}
@@ -32,7 +41,38 @@ metadata:
     metallb.universe.tf/loadBalancerIPs: {{ .Values.exposure.apiIP | required "exposure.apiIP is required when exposure.mode is \"lb\"" }}
   {{- end }}
 spec:
-  type: LoadBalancer
+  type: {{ if $gw }}ClusterIP{{ else }}LoadBalancer{{ end }}
   selector: {app: forge-api}
   ports:
     - {name: http, port: 80, targetPort: http}
+{{- if $gw }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dex
+  namespace: forge
+spec:
+  parentRefs:
+    - {name: forge-previews, sectionName: dex}
+  hostnames: [{{ include "forge.dexHost" . | quote }}]
+  rules:
+    - backendRefs:
+        - {name: dex, port: 80}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: forge-api
+  namespace: forge
+spec:
+  parentRefs:
+    - {name: forge-previews, sectionName: api}
+  hostnames: [{{ include "forge.apiHost" . | quote }}]
+  rules:
+    - backendRefs:
+        - {name: forge-api, port: 80}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+{{- end }}

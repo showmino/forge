@@ -36,6 +36,13 @@ func TestPreviews(t *testing.T) {
 	if envs, _, _, err := previews(ok, app, cat, ops, "showmino", log, fakeKube); envs == nil || err != nil {
 		t.Errorf("on: %v %v", envs, err)
 	}
+	for _, r := range []string{"ghcr.io", "acrexample.azurecr.io", "registry.example:5000/team"} {
+		f := ok
+		f.registry = r
+		if envs, _, _, err := previews(f, app, cat, ops, "showmino", log, fakeKube); envs == nil || err != nil {
+			t.Errorf("registry %q: %v %v", r, envs, err)
+		}
+	}
 	for name, tc := range map[string]struct {
 		f   previewFlags
 		app *github.App
@@ -49,6 +56,10 @@ func TestPreviews(t *testing.T) {
 		"bad max":       {func() previewFlags { f := ok; f.max = 0; return f }(), app, "--preview-max"},
 		"bad image t/o": {func() previewFlags { f := ok; f.imageTimeout = "soon"; return f }(), app, "FORGE_PREVIEW_IMAGE_TIMEOUT"},
 		"bad ready t/o": {func() previewFlags { f := ok; f.readyTimeout = "-1m"; return f }(), app, "FORGE_PREVIEW_READY_TIMEOUT"},
+		"scheme":        {func() previewFlags { f := ok; f.registry = "https://acr.example.io"; return f }(), app, "--image-registry"},
+		"trailing /":    {func() previewFlags { f := ok; f.registry = "acr.example.io/"; return f }(), app, "--image-registry"},
+		"upper case":    {func() previewFlags { f := ok; f.registry = "ACR.example.io"; return f }(), app, "--image-registry"},
+		"no host":       {func() previewFlags { f := ok; f.registry = "team"; return f }(), app, "--image-registry"},
 	} {
 		if _, _, _, err := previews(tc.f, tc.app, cat, ops, "showmino", log, fakeKube); err == nil || !strings.Contains(err.Error(), tc.msg) {
 			t.Errorf("%s: %v, want an error mentioning %q", name, err, tc.msg)

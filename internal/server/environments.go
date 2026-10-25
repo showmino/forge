@@ -57,6 +57,10 @@ type EnvOptions struct {
 	Org string
 	// Domain: environment hosts are <environment>.<Domain>.
 	Domain string
+	// Registry is where the services' CI pushes images, as a host and an
+	// optional path ("acr.example.io" or "registry.example/team"); images
+	// are <Registry>/<owner>/<service>:<commit>. "" is ghcr.io.
+	Registry string
 	// Max is how many environments may exist at once (default 10).
 	Max int
 	// Step timeouts: defaults 10m, 5m and 3m.

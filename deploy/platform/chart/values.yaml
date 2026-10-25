@@ -29,6 +29,12 @@ writerGroups: ""
 
 image: "forge-api:dev"
 
+# Where your services' CI pushes their images: a registry host and an
+# optional path, no scheme (for example myregistry.azurecr.io). Deploys and
+# previews run <imageRegistry>/<owner>/<service>:<commit>. Empty is ghcr.io.
+# The pull secret (previews.pullSecret) must hold a login for it.
+imageRegistry: ""
+
 # How Dex and forge-api are reached.
 exposure:
   # "cloudLB": each gets a plain LoadBalancer Service with no requested IP;
@@ -38,6 +44,11 @@ exposure:
   # "lb": MetalLB-style, a specific IP you request up front (dexIP/apiIP);
   # dexHost/apiHost are then derived as dex.<dexIP>.nip.io and
   # forge.<apiIP>.nip.io and don't need to be set.
+  # "gateway": no load balancer of their own. Dex and forge-api are routed
+  # through the previews Gateway (previews.enabled), so the whole platform
+  # needs one public address. dexHost/apiHost default to
+  # dex.<previews.gatewayDomain> and api.<previews.gatewayDomain>. Use it
+  # when public IPs are scarce or cost money (a cloud subscription's quota).
   mode: cloudLB
   dexHost: ""
   apiHost: ""
@@ -58,6 +69,9 @@ templatesRepo: ""
 forgeRepo: ""
 deployRepo: ""
 chartRepo: ""
+# The registry the deploy chart is pulled from (Argo CD needs a login for it
+# if it is private). Empty is ghcr.io.
+chartRegistry: ""
 
 database:
   # true (default): this chart creates the database itself, via
@@ -80,6 +94,18 @@ database:
   # separate from forge-api's "forge" database. Create it yourself if
   # managed is false and it doesn't already exist.
   dexDatabase: dex
+  # Only with managed: true. CloudNativePG plugins on the Cluster, for
+  # example backups with the Barman Cloud plugin:
+  #   plugins:
+  #     - name: barman-cloud.cloudnative-pg.io
+  #       isWALArchiver: true
+  #       parameters: {barmanObjectName: forge-db-backups}
+  plugins: []
+  # Annotations on the database pods' ServiceAccount (forge-db) and labels on
+  # the pods, for example a cloud workload identity that lets the backups
+  # write to a storage account.
+  serviceAccountAnnotations: {}
+  podLabels: {}
 
 # The dashboard's address(es), comma-free list form here (one entry per
 # origin). Adds Dex's forge-web OAuth client and forge-api's CORS list. Each
@@ -115,6 +141,10 @@ previews:
   # The name of an existing GatewayClass (Istio, Envoy Gateway, or any other
   # conformant Gateway API implementation). This chart does not install one.
   gatewayClass: istio
+  # Annotations for the Service your Gateway implementation creates for the
+  # Gateway (spec.infrastructure), for example a cloud's fixed public IP:
+  #   service.beta.kubernetes.io/azure-pip-name: my-ip
+  gatewayAnnotations: {}
 
 deploys:
   enabled: false
@@ -124,3 +154,14 @@ deploys:
   # Changing this re-renders every deployed service; see the warning in the
   # techdocs page about the fleet-wide effect of a chart-revision bump.
   chartRevision: ""
+
+# Cluster capacity: `forge cluster list/get` (admins only) shows this
+# cluster's nodes, CPU and memory (from metrics-server). Needs
+# previews.enabled (forge-api's ServiceAccount).
+clusters:
+  enabled: false
+  # The cluster's name in clusters/<name>.
+  name: default
+  # Optional: Prometheus (adds disk and volumes), and a Grafana to link to.
+  prometheusURL: ""
+  grafanaURL: ""

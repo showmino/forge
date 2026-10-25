@@ -30,7 +30,8 @@ type source struct {
 
 // resolveSource checks service ("services/<id>") and ref (default main),
 // resolves the ref to a commit and reads forge.yaml's run settings there.
-func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service, ref string) (source, error) {
+// registry is where the services' CI pushes images ("" is ghcr.io).
+func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registry, service, ref string) (source, error) {
 	s := source{ref: ref}
 	if s.ref == "" {
 		s.ref = "main"
@@ -74,8 +75,20 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, service
 		s.stagingInternal = mf.StagingInternal()
 		s.run = mf.Run
 	}
-	s.image = "ghcr.io/" + strings.ToLower(s.owner) + "/" + s.serviceID + ":" + shortSHA(s.commit)
+	s.image = imageName(registry, s.owner, s.serviceID, s.commit)
 	return s, nil
+}
+
+// DefaultRegistry is where images are when the platform names no registry.
+const DefaultRegistry = "ghcr.io"
+
+// imageName is the image the services' CI pushes for a commit:
+// <registry>/<owner, lower case>/<service>:<short commit>.
+func imageName(registry, owner, service, commit string) string {
+	if registry == "" {
+		registry = DefaultRegistry
+	}
+	return registry + "/" + strings.ToLower(owner) + "/" + service + ":" + shortSHA(commit)
 }
 
 // waitForImage polls the registry until the image exists, failing fast when

@@ -27,7 +27,7 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	$(HELM) template payments deploy/argocd/chart --namespace payments-production \
 	  -f deploy/argocd/chart/testdata/secret-backend-none.yaml | diff -u deploy/argocd/chart/testdata/secret-backend-none.golden -
 
-platform-chart-lint: ## Lint deploy/platform/chart and check it renders in both exposure modes
+platform-chart-lint: ## Lint deploy/platform/chart and check it renders in each exposure mode
 	$(HELM) lint deploy/platform/chart
 	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
 	  --set exposure.dexHost=dex.example.com --set exposure.apiHost=forge.example.com \
@@ -37,6 +37,14 @@ platform-chart-lint: ## Lint deploy/platform/chart and check it renders in both 
 	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
 	  --set exposure.mode=lb --set exposure.dexIP=10.0.0.1 --set exposure.apiIP=10.0.0.2 \
 	  --set previews.enabled=true --set previews.pullSecret=x --set previews.gatewayIP=10.0.0.3 \
+	  > /dev/null
+	$(HELM) template test deploy/platform/chart --set githubOrg=acme --set githubAppID=1 \
+	  --set exposure.mode=gateway --set imageRegistry=acr.example.io --set chartRegistry=acr.example.io \
+	  --set previews.enabled=true --set previews.pullSecret=x --set previews.gatewayDomain=203.0.113.1.nip.io \
+	  --set previews.gatewayClass=envoy --set previews.gatewayAnnotations.example\\.com/ip=x \
+	  --set deploys.enabled=true --set deploys.chartRevision=0.1.0 \
+	  --set clusters.enabled=true --set clusters.prometheusURL=http://prometheus:9090 \
+	  --set 'database.plugins[0].name=barman-cloud.cloudnative-pg.io' --set database.podLabels.a=b \
 	  > /dev/null
 
 lint: ## Lint Go code and protos

@@ -76,7 +76,7 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err != nil {
 		return nil, err
 	}
-	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, m.GetService(), ref)
+	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, d.o.Registry, m.GetService(), ref)
 	if err != nil {
 		return nil, err
 	}

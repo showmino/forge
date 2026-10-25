@@ -95,7 +95,7 @@ func (e *Environments) plan(ctx context.Context, m *forgev1.CreateEnvironmentReq
 		return p, err
 	}
 	p.ttl = ttl
-	src, err := resolveSource(ctx, e.o.Catalog, e.o.GitHub, e.o.Org, m.GetService(), m.GetRef())
+	src, err := resolveSource(ctx, e.o.Catalog, e.o.GitHub, e.o.Org, e.o.Registry, m.GetService(), m.GetRef())
 	if err != nil {
 		return p, err
 	}

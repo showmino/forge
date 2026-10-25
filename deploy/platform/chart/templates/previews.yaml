@@ -81,8 +81,31 @@ spec:
   infrastructure:
     annotations:
       metallb.universe.tf/loadBalancerIPs: {{ .Values.previews.gatewayIP | required "previews.gatewayIP is required when previews.enabled and exposure.mode is \"lb\"" }}
+      {{- with .Values.previews.gatewayAnnotations }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+  {{- else if .Values.previews.gatewayAnnotations }}
+  infrastructure:
+    annotations:
+      {{- toYaml .Values.previews.gatewayAnnotations | nindent 6 }}
   {{- end }}
   listeners:
+    {{- if eq .Values.exposure.mode "gateway" }}
+    # exposure.mode "gateway": the login and the API, routed from this
+    # namespace only (templates/exposure.yaml).
+    - name: dex
+      protocol: HTTP
+      port: 80
+      hostname: {{ include "forge.dexHost" . | quote }}
+      allowedRoutes:
+        namespaces: {from: Same}
+    - name: api
+      protocol: HTTP
+      port: 80
+      hostname: {{ include "forge.apiHost" . | quote }}
+      allowedRoutes:
+        namespaces: {from: Same}
+    {{- end }}
     - name: http
       protocol: HTTP
       port: 80
@@ -117,4 +140,37 @@ spec:
               app.kubernetes.io/managed-by: forge
               forge.dev/deploy-env: production
     {{- end }}
+{{- if .Values.clusters.enabled }}
+---
+# Cluster capacity (clusters.enabled): exactly the calls
+# internal/server/clusters.go makes, read only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: forge-api-clusters
+rules:
+  - apiGroups: [""]
+    resources: [nodes, pods]
+    verbs: [list]
+  {{- if .Values.clusters.prometheusURL }}
+  # With Prometheus: to tie volumes to their Forge service.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [list]
+  {{- end }}
+  - apiGroups: [metrics.k8s.io]
+    resources: [nodes]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: forge-api-clusters
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: forge-api-clusters
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+{{- end }}
 {{- end }}

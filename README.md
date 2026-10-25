@@ -547,6 +547,15 @@ it again. A GitHub release that cannot be made does not stop the deploy; the
 operation says so and the next deploy of the commit makes it. `--bump` is for
 production: a staging deploy refuses it.
 
+The image a deploy or preview waits for and runs is
+`<registry>/<owner>/<service>:<sha7>`. The registry is `ghcr.io` unless
+forge-api runs with `--image-registry` (`FORGE_IMAGE_REGISTRY`, a host and an
+optional path such as `myregistry.azurecr.io`; the platform chart's
+`imageRegistry`). The pull secret (`--preview-pull-secret`) needs a login for
+that registry: forge-api uses it to check that the image exists, and asks the
+registry where to log in (its `WWW-Authenticate` challenge), so ghcr.io, an
+Azure Container Registry and Docker Hub all work.
+
 ### Audit log
 
 Every write call to the Forge API is recorded, refused calls included, with
