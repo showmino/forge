@@ -636,3 +636,7 @@ artifact to `ghcr.io/showmino/forge-chart` at the same version (no leading
 
 Releases need a `HOMEBREW_TAP_GITHUB_TOKEN` secret with write access to
 `showmino/homebrew-tap`.
+
+## License
+
+Apache License 2.0: see [LICENSE](LICENSE). To report a vulnerability, see [SECURITY.md](SECURITY.md).
