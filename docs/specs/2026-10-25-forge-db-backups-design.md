@@ -1,6 +1,6 @@
 # forge-db backups: CloudNativePG to Azure Blob, with point-in-time recovery
 
-Status: approved 2026-10-25; the plugin (showmino/kubernetes#130) and the render are built, not rolled out. Issue #48.
+Status: live on k3s since 2026-10-25 (the plugin is showmino/kubernetes#130, the render forge#141); the restore drill is not done yet. Issue #48.
 
 ## What there is today
 
