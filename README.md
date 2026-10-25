@@ -18,11 +18,15 @@ the commands and the conventions, and points to the runbook.
 ## Install
 
 Download the archive for your OS from the
-[latest release](https://github.com/showmino/forge/releases/latest) (the repo
-is private, so use `gh release download -R showmino/forge`), put `forge` on
-your `PATH`, then run `forge auth login`. Release builds talk to
-`https://forge-api.showmino.com` unless a context, `FORGE_API_URL` or
-`--api-url` names another API.
+[latest release](https://github.com/showmino/forge/releases/latest), put
+`forge` on your `PATH`, point it at your Forge's API and log in:
+
+```sh
+forge context set mine --api https://forge.example.com --use
+forge auth login
+```
+
+`FORGE_API_URL` or `--api-url` name an API for one command instead.
 
 After that, `forge upgrade` brings the CLI to the API's version on Linux,
 macOS and Windows: the API serves the release's archives at
