@@ -25,7 +25,7 @@ spec:
     - name: barman-cloud.cloudnative-pg.io #backups
       enabled: true #backups
       isWALArchiver: true #backups
-      parameters: {barmanObjectName: forge-db-azure} #backups
+      parameters: {barmanObjectName: forge-db-azure${BACKUP_SERVER_PARAM}} #backups
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Database

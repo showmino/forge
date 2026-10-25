@@ -256,6 +256,13 @@ check "bad FORGE_DB_BACKUP_DEST refused"      refuses 'invalid FORGE_DB_BACKUP_D
 check "short container refused"               refuses 'invalid FORGE_DB_BACKUP_DEST' FORGE_DB_BACKUP_DEST=https://stminoforgesdcproduction.blob.core.windows.net/x FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x
 check "bad FORGE_DB_BACKUP_ITEM refused"      refuses 'invalid FORGE_DB_BACKUP_ITEM' FORGE_DB_BACKUP_DEST=$bk_dest 'FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x|y'
 check "dotted FORGE_DB_BACKUP_ITEM refused"   refuses 'invalid FORGE_DB_BACKUP_ITEM' FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/a/../b
+bk_server() {
+  FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/production/items/forge-backup-storage FORGE_DB_BACKUP_SERVER_NAME=forge-db-r20261025 sh "$dir/render.sh" --lb 10.150.1.220 10.150.1.221 |
+    grep -qF 'parameters: {barmanObjectName: forge-db-azure, serverName: forge-db-r20261025}'
+}
+check "backups under another server name"     bk_server
+check "server name needs backups"             refuses 'needs FORGE_DB_BACKUP_DEST' FORGE_DB_BACKUP_SERVER_NAME=forge-db-r1
+check "bad server name refused"               refuses 'invalid FORGE_DB_BACKUP_SERVER_NAME' FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/x 'FORGE_DB_BACKUP_SERVER_NAME=a}b'
 # shellcheck disable=SC2086 # bk_deploys is a list of assignments on purpose
 check "backup item must be denied to services" refuses 'add it to FORGE_SECRET_DENIED_ITEMS' $bk_deploys FORGE_SECRET_VAULTS=Kube FORGE_SECRET_DENIED_ITEMS=other FORGE_DB_BACKUP_DEST=$bk_dest FORGE_DB_BACKUP_ITEM=vaults/Kube/items/forge-backup-storage
 # shellcheck disable=SC2086

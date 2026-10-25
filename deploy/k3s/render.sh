@@ -164,6 +164,19 @@ else
   backups_marks='/#backups$/d'
   nobackups_marks='s/ *#nobackups$//'
 fi
+# The name forge-db's backups go under in the archive (default the Cluster's
+# name). A database restored from the archive must archive under a new one.
+db_backup_server=${FORGE_DB_BACKUP_SERVER_NAME:-}
+backup_server_param=
+if [ -n "$db_backup_server" ]; then
+  [ -n "$db_backup_dest" ] || { echo "FORGE_DB_BACKUP_SERVER_NAME needs FORGE_DB_BACKUP_DEST" >&2; exit 2; }
+  case $db_backup_server in
+    *[!a-z0-9-]*) echo "invalid FORGE_DB_BACKUP_SERVER_NAME: $db_backup_server (lowercase letters, digits and -, like forge-db-r20261025)" >&2; exit 2 ;;
+  esac
+  printf '%s' "$db_backup_server" | grep -Eq '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' ||
+    { echo "invalid FORGE_DB_BACKUP_SERVER_NAME: $db_backup_server (lowercase letters, digits and -, like forge-db-r20261025)" >&2; exit 2; }
+  backup_server_param=", serverName: $db_backup_server"
+fi
 dex_ip= api_ip=
 
 case ${1:-} in
@@ -661,7 +674,7 @@ fi
   fi
 } | sed -e "$app" -e "$web_marks" -e "$theme_marks" -e "s|\${DEX_THEME_SUM}|$theme_sum|g" -e "$public_marks" -e "$argocd_marks" -e "s|\${FORGE_ARGOCD_URL}|$argocd_url|g" -e "$vaults_marks" -e "s|\${FORGE_SECRET_VAULTS}|$secret_vaults|g" -e "s|\${FORGE_SECRET_DENIED_ITEMS}|$secret_denied|g" -e "$secretbackend_marks" -e "s|\${FORGE_SECRET_BACKEND}|$secret_backend|g" -e "s|\${FORGE_PUBLIC_DOMAINS}|$public_domains|g" -e "s|\${FORGE_PUBLIC_DNS_TUNNEL}|$public_tunnel|g" -e "s|\${WEB_ORIGINS_YAML}|$web_list|g" -e "s|\${WEB_REDIRECTS_YAML}|$web_redirects|g" -e "s|\${FORGE_WEB_ORIGINS}|$web_origins|g" -e "$previews" -e "$previewip_marks" -e "$deploys_marks" -e "$resources_marks" -e "s|\${FORGE_RUNNER_IMAGE}|$runner_image|g" -e "$clusters_marks" -e "$grafana_marks" -e "$prometheus_marks" -e "$remote_marks" -e "s|\${FORGE_REMOTE_CLUSTERS}|$remote_clusters|g" -e "s|\${REMOTE_CLUSTERS_YAML}|$remote_yaml|g" -e "s|\${FORGE_CLUSTER_NAME}|$cluster_name|g" -e "s|\${FORGE_GRAFANA_URL}|$grafana_url|g" -e "s|\${FORGE_PROMETHEUS_URL}|$prometheus_url|g" -e "s|\${DEPLOY_CHART_REVISION}|$chart_rev|g" -e "s|\${PREVIEW_IP}|$preview_ip|g" -e "s|\${PREVIEW_BASE}|$preview_base|g" -e "s|\${GATEWAY_CLASS}|$gateway_class|g" -e "s|\${PULL_SECRET}|$pull_secret|g" -e "s|\${FORGE_GITHUB_APP_ID}|$app_id|g" -e "s|\${FORGE_GITHUB_ORG}|$org|g" \
         -e "s|\${FORGE_TEMPLATES_REPO}|$templates_repo|g" -e "s|\${FORGE_REPO}|$forge_repo|g" -e "s|\${FORGE_DEPLOY_REPO}|$deploy_repo|g" -e "s|\${FORGE_CHART_REPO}|$chart_repo|g" -e "s|\${FORGE_ONEPASSWORD_ITEM}|$onepassword_item|g" -e "s|\${FORGE_DEX_GITHUB_ORG}|$dex_org|g" -e "s|\${FORGE_WRITER_GROUPS}|$writer_groups|g" -e "s|\${FORGE_DEX_ONEPASSWORD_ITEM}|$dex_onepassword_item|g" -e "s|\${DEX_URL}|$dex_url|g" -e "s|\${DEX_HOST}|$dex_host|g" -e "s|\${API_HOST}|$api_host|g" \
-        -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "$backups_marks" -e "$nobackups_marks" -e "s|\${FORGE_DB_BACKUP_DEST}|$db_backup_dest|g" -e "s|\${FORGE_DB_BACKUP_ITEM}|$db_backup_item|g" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
+        -e "s|\${DEX_IP}|$dex_ip|g" -e "s|\${API_IP}|$api_ip|g" -e "s|\${INGRESS_CLASS}|$ingress_class|g" -e "$dbstorage_marks" -e "$backups_marks" -e "$nobackups_marks" -e "s|\${FORGE_DB_BACKUP_DEST}|$db_backup_dest|g" -e "s|\${BACKUP_SERVER_PARAM}|$backup_server_param|g" -e "s|\${FORGE_DB_BACKUP_ITEM}|$db_backup_item|g" -e "s|\${DB_STORAGE_CLASS}|$db_storage_class|g" \
         -e "s|\${FORGE_API_IMAGE}|$image|g" |
   PUBLIC_LISTENERS=$public_listeners awk '/#public-listeners$/ { printf "%s", ENVIRON["PUBLIC_LISTENERS"]; next } { print }'
 # The theme comes last and outside the sed above: its CSS and HTML must
