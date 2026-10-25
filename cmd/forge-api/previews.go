@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,8 +25,10 @@ import (
 type previewFlags struct {
 	on                          bool
 	domain, gateway, pullSecret string
-	max                         int
-	imageTimeout, readyTimeout  string
+	// registry is --image-registry, where the services' CI pushes images.
+	registry                   string
+	max                        int
+	imageTimeout, readyTimeout string
 }
 
 // previews returns the environment service, or nil when previews are off. It
@@ -47,6 +50,8 @@ func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *ser
 		return nil, nil, nil, fmt.Errorf("--preview-pull-secret %q must be namespace/name", f.pullSecret)
 	case f.max < 1:
 		return nil, nil, nil, fmt.Errorf("--preview-max %d must be at least 1", f.max)
+	case !validRegistry(f.registry):
+		return nil, nil, nil, fmt.Errorf("--image-registry %q must be a lower-case registry host with an optional path, such as ghcr.io or myregistry.azurecr.io/team", f.registry)
 	}
 	imageTimeout, err := positiveDuration("FORGE_PREVIEW_IMAGE_TIMEOUT", f.imageTimeout)
 	if err != nil {
@@ -70,10 +75,25 @@ func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *ser
 	}}
 	envs := server.NewEnvironments(server.EnvOptions{
 		Cluster: c, GitHub: &github.Client{Token: app.Token}, Images: images,
-		Catalog: catalog, Operations: ops, Org: org, Domain: f.domain, Max: f.max,
+		Catalog: catalog, Operations: ops, Org: org, Registry: f.registry, Domain: f.domain, Max: f.max,
 		ImageTimeout: imageTimeout, ReadyTimeout: readyTimeout, Log: log,
 	})
 	return envs, c, images, nil
+}
+
+// registryRE is a registry host (with a dot, or a port) and an optional
+// path: "ghcr.io", "acr.example.io", "registry.example:5000/team".
+var registryRE = regexp.MustCompile(`^[a-z0-9-]+(\.[a-z0-9-]+)*(:[0-9]+)?(/[a-z0-9._-]+)*$`)
+
+// validRegistry reports whether r may go in front of "/<owner>/<service>".
+// Empty is ghcr.io.
+func validRegistry(r string) bool {
+	if r == "" {
+		return true
+	}
+	host, _, _ := strings.Cut(r, "/")
+	// A dot in the host, as image references need (registry.ParseRef).
+	return registryRE.MatchString(r) && strings.Contains(host, ".")
 }
 
 func positiveDuration(name, v string) (time.Duration, error) {

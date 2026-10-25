@@ -46,6 +46,9 @@ spec:
             - {name: FORGE_GITHUB_ORG, value: {{ .Values.githubOrg | required "githubOrg is required" | quote }}}
             - {name: FORGE_TEMPLATES_REPO, value: {{ include "forge.templatesRepo" . | quote }}}
             - {name: FORGE_CLI_REPO, value: {{ include "forge.forgeRepo" . | quote }}}
+            {{- if .Values.imageRegistry }}
+            - {name: FORGE_IMAGE_REGISTRY, value: {{ .Values.imageRegistry | quote }}}
+            {{- end }}
             {{- if .Values.previews.enabled }}
             - {name: FORGE_PREVIEWS, value: "1"}
             - {name: FORGE_PREVIEW_DOMAIN, value: {{ printf "preview.%s" (include "forge.previewBase" .) | quote }}}
@@ -54,6 +57,19 @@ spec:
             {{- if .Values.deploys.enabled }}
             - {name: FORGE_DEPLOYS, value: "1"}
             - {name: FORGE_DEPLOY_REPO, value: {{ include "forge.deployRepo" . | quote }}}
+            {{- end }}
+            {{- if .Values.clusters.enabled }}
+            {{- if not .Values.previews.enabled }}
+            {{- fail "clusters.enabled needs previews.enabled" }}
+            {{- end }}
+            - {name: FORGE_CLUSTERS, value: "1"}
+            - {name: FORGE_CLUSTER_NAME, value: {{ .Values.clusters.name | default "default" | quote }}}
+            {{- if .Values.clusters.prometheusURL }}
+            - {name: FORGE_PROMETHEUS_URL, value: {{ .Values.clusters.prometheusURL | quote }}}
+            {{- end }}
+            {{- if .Values.clusters.grafanaURL }}
+            - {name: FORGE_GRAFANA_URL, value: {{ .Values.clusters.grafanaURL | quote }}}
+            {{- end }}
             {{- end }}
             {{- if .Values.argocdURL }}
             - {name: FORGE_ARGOCD_URL, value: {{ .Values.argocdURL | quote }}}

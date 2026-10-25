@@ -42,6 +42,8 @@ type deployFlags struct {
 	secretBackend string
 	// resources says which database a service has, for DATABASE_URL.
 	resources store.ResourceStore
+	// registry is --image-registry, checked with the previews' flags.
+	registry string
 }
 
 // deploys returns the deploy service, or nil when deploys are off. It reuses
@@ -121,6 +123,6 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 		Cluster: cluster, GitHub: gh, Images: images,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
 		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,
-		Org: org, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,
+		Org: org, Registry: f.registry, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,
 	}), nil
 }

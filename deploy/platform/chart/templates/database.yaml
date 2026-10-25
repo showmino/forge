@@ -1,7 +1,8 @@
 {{- if .Values.database.managed }}
 # Forge's database: the service catalog (forge-api) and Dex's logins.
 # CloudNativePG creates the Secret named database.secretName (keys uri,
-# password, ...) for the owner forge. No backups yet: the catalog can be
+# password, ...) for the owner forge. Backups are database.plugins (for
+# example the Barman Cloud plugin); without them the catalog can be
 # re-registered from each repo's forge.yaml, and Dex's data is only
 # sessions.
 apiVersion: postgresql.cnpg.io/v1
@@ -24,6 +25,21 @@ spec:
   resources:
     requests: {cpu: 50m, memory: 256Mi}
     limits: {memory: 512Mi}
+  {{- with .Values.database.plugins }}
+  plugins:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.database.serviceAccountAnnotations }}
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        {{- toYaml . | nindent 8 }}
+  {{- end }}
+  {{- with .Values.database.podLabels }}
+  inheritedMetadata:
+    labels:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Database

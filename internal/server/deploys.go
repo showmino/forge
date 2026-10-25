@@ -63,6 +63,10 @@ type DeployOptions struct {
 	Org string
 	// Domain: hosts are <service>.<env>.<Domain>.
 	Domain string
+	// Registry is where the services' CI pushes images, as a host and an
+	// optional path ("acr.example.io" or "registry.example/team"); images
+	// are <Registry>/<owner>/<service>:<commit>. "" is ghcr.io.
+	Registry string
 	// PublicDomains are the domains services get public addresses under;
 	// the first is the default. Empty means internal addresses only.
 	PublicDomains []PublicDomain

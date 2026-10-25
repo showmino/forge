@@ -27,7 +27,7 @@ spec:
     # below (verify this against your own Argo CD version -- production's
     # was checked against v3.5.3; IsSourcePermitted matched it literally
     # there).
-    - {{ printf "oci://ghcr.io/%s" (include "forge.chartRepo" .) | quote }}
+    - {{ printf "oci://%s/%s" (include "forge.chartRegistry" .) (include "forge.chartRepo" .) | quote }}
     - {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
   destinations:
     - {server: https://kubernetes.default.svc, namespace: "*-staging"}
@@ -81,7 +81,7 @@ spec:
     spec:
       project: forge-services
       sources:
-        - repoURL: {{ printf "oci://ghcr.io/%s" (include "forge.chartRepo" .) | quote }}
+        - repoURL: {{ printf "oci://%s/%s" (include "forge.chartRegistry" .) (include "forge.chartRepo" .) | quote }}
           targetRevision: {{ $chartRev | quote }}
           # Required for an OCI Helm source: with none of path/chart/ref set,
           # Argo CD rejects the spec outright (InvalidSpecError) rather than

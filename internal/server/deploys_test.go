@@ -441,3 +441,37 @@ func TestDeploymentArgoURL(t *testing.T) {
 		t.Errorf("argo_url: %v %v", d, err)
 	}
 }
+
+// With Registry set, a deploy waits for and runs the image from that
+// registry, under the repo's owner, as the services' CI pushes it there.
+func TestStartDeployOtherRegistry(t *testing.T) {
+	t.Parallel()
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		o.Registry = "acrexample.azurecr.io"
+	})
+	f.images.Add("acrexample.azurecr.io/showmino/payments:1a2b3c4")
+	resp, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.GetDeployment().GetImage(); got != "acrexample.azurecr.io/showmino/payments:1a2b3c4" {
+		t.Errorf("image = %q", got)
+	}
+	if op := wait(t, f.ops, resp.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatalf("op: %v", op.GetError())
+	}
+}
+
+func TestImageName(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ registry, want string }{
+		{"", "ghcr.io/acme/app:1a2b3c4"},
+		{"ghcr.io", "ghcr.io/acme/app:1a2b3c4"},
+		{"acrexample.azurecr.io", "acrexample.azurecr.io/acme/app:1a2b3c4"},
+		{"registry.example:5000/team", "registry.example:5000/team/acme/app:1a2b3c4"},
+	} {
+		if got := imageName(c.registry, "Acme", "app", "1a2b3c4d5e6f"); got != c.want {
+			t.Errorf("imageName(%q) = %q, want %q", c.registry, got, c.want)
+		}
+	}
+}

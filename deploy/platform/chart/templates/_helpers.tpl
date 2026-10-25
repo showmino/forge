@@ -26,8 +26,14 @@ Computed defaults, mirroring deploy/k3s/render.sh's own fallback logic.
 {{- (.Values.chartRepo | default (printf "%s/forge-chart" .Values.githubOrg)) | lower -}}
 {{- end -}}
 
+{{- define "forge.chartRegistry" -}}
+{{- .Values.chartRegistry | default "ghcr.io" -}}
+{{- end -}}
+
 {{- define "forge.dexHost" -}}
-{{- if eq .Values.exposure.mode "lb" -}}
+{{- if and (eq .Values.exposure.mode "gateway") (not .Values.exposure.dexHost) -}}
+{{- printf "dex.%s" (include "forge.previewBase" .) -}}
+{{- else if eq .Values.exposure.mode "lb" -}}
 {{- printf "dex.%s.nip.io" (.Values.exposure.dexIP | required "exposure.dexIP is required when exposure.mode is \"lb\"") -}}
 {{- else -}}
 {{- .Values.exposure.dexHost | required "exposure.dexHost is required when exposure.mode is \"cloudLB\"" -}}
@@ -35,7 +41,9 @@ Computed defaults, mirroring deploy/k3s/render.sh's own fallback logic.
 {{- end -}}
 
 {{- define "forge.apiHost" -}}
-{{- if eq .Values.exposure.mode "lb" -}}
+{{- if and (eq .Values.exposure.mode "gateway") (not .Values.exposure.apiHost) -}}
+{{- printf "api.%s" (include "forge.previewBase" .) -}}
+{{- else if eq .Values.exposure.mode "lb" -}}
 {{- printf "forge.%s.nip.io" (.Values.exposure.apiIP | required "exposure.apiIP is required when exposure.mode is \"lb\"") -}}
 {{- else -}}
 {{- .Values.exposure.apiHost | required "exposure.apiHost is required when exposure.mode is \"cloudLB\"" -}}
@@ -54,7 +62,7 @@ Computed defaults, mirroring deploy/k3s/render.sh's own fallback logic.
 {{- if eq .Values.exposure.mode "lb" -}}
 {{- printf "%s.nip.io" (.Values.previews.gatewayIP | required "previews.gatewayIP is required when previews.enabled and exposure.mode is \"lb\"") -}}
 {{- else -}}
-{{- .Values.previews.gatewayDomain | required "previews.gatewayDomain is required when previews.enabled and exposure.mode is \"cloudLB\"" -}}
+{{- .Values.previews.gatewayDomain | required "previews.gatewayDomain is required when previews.enabled and exposure.mode is \"cloudLB\" or \"gateway\"" -}}
 {{- end -}}
 {{- end -}}
 
