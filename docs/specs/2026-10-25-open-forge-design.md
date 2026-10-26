@@ -128,10 +128,12 @@ chart is a later step.
 - The bundled database's password is made once (Helm `lookup`); a tool that
   renders without the cluster (Argo CD) names a Secret of its own
   (`database.bundled.existingSecret`).
-- Deploys still need previews (the Gateway the services are reached
-  through) and the namespace `forge` (the deploy chart's routes name
-  `forge/forge-previews`). Lifting both is the open part of the exit gate's
-  step 3.
+- Deploys need neither previews nor the namespace `forge` (forge#157):
+  forge-api connects to the cluster for deploys alone, and the deploy chart
+  routes through the Gateway the ApplicationSet names, or makes an Ingress
+  (`apps.routing: ingress`), so an ingress controller is enough. Previews
+  still need a Gateway. Internal deploy addresses are still shown as
+  `http://`.
 - The dashboard image is pinned by the chart (`web.image.tag`): forge-web
   keeps its own versions.
 

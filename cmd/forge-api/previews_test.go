@@ -36,6 +36,20 @@ func TestPreviews(t *testing.T) {
 	if envs, _, _, err := previews(ok, app, cat, ops, "showmino", log, fakeKube); envs == nil || err != nil {
 		t.Errorf("on: %v %v", envs, err)
 	}
+	// Deploys without previews: the cluster connection and image checks only.
+	deploysOnly := previewFlags{deploys: true, pullSecret: "forge/mino-ghcr", imageTimeout: "10m", readyTimeout: "5m"}
+	if envs, cluster, images, err := previews(deploysOnly, app, cat, ops, "showmino", log, fakeKube); envs != nil || cluster == nil || images == nil || err != nil {
+		t.Errorf("deploys only: %v %v %v %v", envs, cluster, images, err)
+	}
+	if _, _, _, err := previews(previewFlags{deploys: true, imageTimeout: "10m", readyTimeout: "5m"}, app, cat, ops, "showmino", log, fakeKube); err == nil || !strings.Contains(err.Error(), "--deploys needs --preview-pull-secret") {
+		t.Errorf("deploys without a pull secret: %v", err)
+	}
+	if _, _, _, err := previews(previewFlags{deploys: true, pullSecret: "x", imageTimeout: "10m", readyTimeout: "5m"}, app, cat, ops, "showmino", log, fakeKube); err == nil || !strings.Contains(err.Error(), "namespace/name") {
+		t.Errorf("deploys with a bad pull secret: %v", err)
+	}
+	if _, _, _, err := previews(deploysOnly, nil, cat, ops, "showmino", log, fakeKube); err == nil || !strings.Contains(err.Error(), "--deploys needs the GitHub App") {
+		t.Errorf("deploys without the App: %v", err)
+	}
 	for _, r := range []string{"ghcr.io", "acrexample.azurecr.io", "registry.example:5000/team"} {
 		f := ok
 		f.registry = r

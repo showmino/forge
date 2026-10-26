@@ -23,7 +23,9 @@ import (
 
 // previewFlags are forge-api's preview environment settings.
 type previewFlags struct {
-	on                          bool
+	on bool
+	// deploys is --deploys: they need the cluster connection, previews or not.
+	deploys                     bool
 	domain, gateway, pullSecret string
 	// registry is --image-registry, where the services' CI pushes images.
 	registry                   string
@@ -36,19 +38,25 @@ type previewFlags struct {
 // cluster connects to Kubernetes (kubeClients outside tests).
 func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *server.Operations, org string, log *slog.Logger,
 	cluster func() (kubernetes.Interface, dynamic.Interface, error)) (*server.Environments, *server.Cluster, server.ImageChecker, error) {
-	if !f.on {
+	if !f.on && !f.deploys {
 		return nil, nil, nil, nil
+	}
+	flag := "--previews"
+	if !f.on {
+		flag = "--deploys"
 	}
 	switch {
 	case app == nil:
-		return nil, nil, nil, errors.New("--previews needs the GitHub App (--github-app-id and --github-app-key-file)")
-	case f.domain == "":
+		return nil, nil, nil, fmt.Errorf("%s needs the GitHub App (--github-app-id and --github-app-key-file)", flag)
+	case f.on && f.domain == "":
 		return nil, nil, nil, errors.New("--previews needs --preview-domain (FORGE_PREVIEW_DOMAIN)")
-	case !strings.Contains(f.gateway, "/"):
+	case f.on && !strings.Contains(f.gateway, "/"):
 		return nil, nil, nil, fmt.Errorf("--preview-gateway %q must be namespace/name", f.gateway)
+	case f.pullSecret == "":
+		return nil, nil, nil, fmt.Errorf("%s needs --preview-pull-secret (namespace/name), the Secret that pulls the services' images", flag)
 	case !strings.Contains(f.pullSecret, "/"):
 		return nil, nil, nil, fmt.Errorf("--preview-pull-secret %q must be namespace/name", f.pullSecret)
-	case f.max < 1:
+	case f.on && f.max < 1:
 		return nil, nil, nil, fmt.Errorf("--preview-max %d must be at least 1", f.max)
 	case !validRegistry(f.registry):
 		return nil, nil, nil, fmt.Errorf("--image-registry %q must be a lower-case registry host with an optional path, such as ghcr.io or myregistry.azurecr.io/team", f.registry)
@@ -63,7 +71,7 @@ func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *ser
 	}
 	kube, dyn, err := cluster()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("previews: connect to Kubernetes: %w", err)
+		return nil, nil, nil, fmt.Errorf("%s: connect to Kubernetes: %w", flag, err)
 	}
 	c := &server.Cluster{Kube: kube, Dynamic: dyn, Gateway: f.gateway, PullSecret: f.pullSecret}
 	images := &registry.Client{Creds: func(ctx context.Context, host string) (string, string, error) {
@@ -73,6 +81,9 @@ func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *ser
 		}
 		return registry.CredsFromDockerConfig(data, host)
 	}}
+	if !f.on {
+		return nil, c, images, nil
+	}
 	envs := server.NewEnvironments(server.EnvOptions{
 		Cluster: c, GitHub: &github.Client{Token: app.Token}, Images: images,
 		Catalog: catalog, Operations: ops, Org: org, Registry: f.registry, Domain: f.domain, Max: f.max,

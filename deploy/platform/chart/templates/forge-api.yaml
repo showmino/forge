@@ -5,7 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "forge.labels" . | nindent 4 }}
-{{- with .Values.previews.pullSecret }}
+{{- with .Values.apps.pullSecret }}
 imagePullSecrets:
   - name: {{ . }}
 {{- end }}
@@ -82,17 +82,18 @@ spec:
             {{- with .Values.imageRegistry }}
             - {name: FORGE_IMAGE_REGISTRY, value: {{ . | quote }}}
             {{- end }}
+            {{- if or .Values.previews.enabled .Values.deploys.enabled }}
+            - {name: FORGE_PREVIEW_PULL_SECRET, value: {{ printf "%s/%s" .Release.Namespace (include "forge.pullSecret" .) | quote }}}
+            {{- end }}
             {{- if .Values.previews.enabled }}
             - {name: FORGE_PREVIEWS, value: "1"}
             - {name: FORGE_PREVIEW_GATEWAY, value: {{ printf "%s/forge-previews" .Release.Namespace | quote }}}
-            - {name: FORGE_PREVIEW_DOMAIN, value: {{ printf "preview.%s" (.Values.previews.gatewayDomain | required "previews.gatewayDomain is required with previews.enabled") | quote }}}
-            {{- with .Values.previews.pullSecret | required "previews.pullSecret is required with previews.enabled" }}
-            - {name: FORGE_PREVIEW_PULL_SECRET, value: {{ printf "%s/%s" $.Release.Namespace . | quote }}}
-            {{- end }}
+            - {name: FORGE_PREVIEW_DOMAIN, value: {{ printf "preview.%s" (include "forge.appsDomain" .) | quote }}}
             {{- end }}
             {{- if .Values.deploys.enabled }}
             - {name: FORGE_DEPLOYS, value: "1"}
             - {name: FORGE_DEPLOY_REPO, value: {{ include "forge.deployRepo" . | quote }}}
+            - {name: FORGE_DEPLOY_DOMAIN, value: {{ include "forge.appsDomain" . | quote }}}
             {{- end }}
             {{- if .Values.clusters.enabled }}
             - {name: FORGE_CLUSTERS, value: "1"}

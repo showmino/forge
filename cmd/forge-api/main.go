@@ -75,7 +75,7 @@ func run() error {
 		previewPull    = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
 		previewMax     = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
 
-		deploysOn     = flag.Bool("deploys", env("FORGE_DEPLOYS", "") == "1" || env("FORGE_DEPLOYS", "") == "true", "serve deploys to staging and production through Argo CD (needs --previews)")
+		deploysOn     = flag.Bool("deploys", env("FORGE_DEPLOYS", "") == "1" || env("FORGE_DEPLOYS", "") == "true", "serve deploys to staging and production through Argo CD (needs --preview-pull-secret, and --deploy-domain without --previews)")
 		deployRepo    = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", ""), "GitOps repo (owner/name) Forge commits deploys to; required with --deploys")
 		deployDomain  = flag.String("deploy-domain", env("FORGE_DEPLOY_DOMAIN", ""), "deploy hosts are <service>.<env>.<domain> (default: the preview domain without 'preview.')")
 		publicDomains = flag.String("public-domains", env("FORGE_PUBLIC_DOMAINS", ""), "domains services get public addresses under, each with its DNS zone's name, the default first: example.com=example-com,other.io=other-io (empty: internal addresses only)")
@@ -187,7 +187,7 @@ func run() error {
 		catalog.ManageRepoAccess(&github.Client{Token: app.Token, HTTP: &http.Client{Timeout: 15 * time.Second}}, *githubOrg)
 	}
 	envs, cluster, images, err := previews(previewFlags{
-		on: *previewsOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, registry: *imageRegistry, max: *previewMax,
+		on: *previewsOn, deploys: *deploysOn, domain: *previewDomain, gateway: *previewGateway, pullSecret: *previewPull, registry: *imageRegistry, max: *previewMax,
 		imageTimeout: env("FORGE_PREVIEW_IMAGE_TIMEOUT", "10m"), readyTimeout: env("FORGE_PREVIEW_READY_TIMEOUT", "5m"),
 	}, app, catalog, ops, *githubOrg, log, kubeClients)
 	if err != nil {

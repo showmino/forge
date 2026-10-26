@@ -1,8 +1,9 @@
-{{- if .Values.previews.enabled }}
-{{- $domain := .Values.previews.gatewayDomain | required "previews.gatewayDomain is required with previews.enabled" }}
-# Exactly the calls internal/server/env_cluster.go makes. Kubernetes RBAC
-# cannot limit them to Forge's own namespaces; forge-api enforces that itself
-# (owned() in env_cluster.go).
+{{- $gateway := include "forge.gateway" . }}
+{{- if or .Values.previews.enabled .Values.deploys.enabled }}
+# Exactly the calls internal/server/env_cluster.go makes, for previews and
+# deploys alike (as deploy/k3s grants them). Kubernetes RBAC cannot limit
+# them to Forge's own namespaces; forge-api enforces that itself (owned() in
+# env_cluster.go).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -39,7 +40,8 @@ roleRef:
 subjects:
   - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
 ---
-# forge-api reads the pull secret to copy it into previews and to check images.
+# forge-api reads the pull secret to copy it into services' namespaces and to
+# check images.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -50,7 +52,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [{{ .Values.previews.pullSecret | quote }}]
+    resourceNames: [{{ include "forge.pullSecret" . | quote }}]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -66,9 +68,13 @@ roleRef:
   name: forge-api-pull-secret
 subjects:
   - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
+{{- end }}
+{{- if $gateway }}
+{{- $domain := include "forge.appsDomain" . }}
 ---
-# The Gateway previews (and with deploys, staging and production) are
-# reached through. Point *.preview.<gatewayDomain> at its address.
+# The Gateway previews and deploys are reached through. Point
+# *.preview.<domain>, *.staging.<domain> and *.production.<domain> at its
+# address.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -77,13 +83,14 @@ metadata:
   labels:
     {{- include "forge.labels" . | nindent 4 }}
 spec:
-  gatewayClassName: {{ .Values.previews.gatewayClass | quote }}
-  {{- with .Values.previews.gatewayAnnotations }}
+  gatewayClassName: {{ .Values.apps.gateway.className | quote }}
+  {{- with .Values.apps.gateway.annotations }}
   infrastructure:
     annotations:
       {{- toYaml . | nindent 6 }}
   {{- end }}
   listeners:
+    {{- if .Values.previews.enabled }}
     - name: http
       protocol: HTTP
       port: 80
@@ -94,6 +101,7 @@ spec:
           selector:
             matchLabels:
               app.kubernetes.io/managed-by: forge
+    {{- end }}
     {{- if .Values.deploys.enabled }}
     {{- range $env := list "staging" "production" }}
     - name: {{ $env }}

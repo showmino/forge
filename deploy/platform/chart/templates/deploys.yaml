@@ -1,9 +1,7 @@
 {{- if .Values.deploys.enabled }}
-{{- if not .Values.previews.enabled }}
-{{- fail "deploys.enabled needs previews.enabled (the Gateway services are reached through)" }}
-{{- end }}
-{{- if ne .Release.Namespace "forge" }}
-{{- fail "deploys.enabled needs the release in the namespace forge: the deploy chart routes through forge/forge-previews" }}
+{{- $_ := include "forge.gateway" . }}
+{{- if contains "{{" (toJson .Values.apps.ingress.annotations) }}
+{{- fail "apps.ingress.annotations must not contain {{: Argo CD's ApplicationSet would read it as a template" }}
 {{- end }}
 {{- $chartRev := .Values.deploys.chartRevision | default .Chart.AppVersion }}
 {{- $chart := .Values.deploys.chart }}
@@ -44,6 +42,7 @@ spec:
     - {group: apps, kind: Deployment}
     - {group: "", kind: Service}
     - {group: gateway.networking.k8s.io, kind: HTTPRoute}
+    - {group: networking.k8s.io, kind: Ingress}
     - {group: "", kind: ResourceQuota}
     - {group: "", kind: LimitRange}
     # run.secrets, run.jobs and run.autoscaling (forge.yaml). A secrets
@@ -103,6 +102,16 @@ spec:
               - '$values/{{`{{ .path.path }}`}}/values.yaml'
             parameters:
               - {name: secretBackend, value: {{ .Values.secrets.backend | default "onepassword" | quote }}}
+            # How every service is reached: the platform's choice, not the service's.
+            valuesObject:
+              route:
+                kind: {{ .Values.apps.routing | quote }}
+                gateway: {name: forge-previews, namespace: {{ .Release.Namespace | quote }}}
+                ingress:
+                  className: {{ .Values.apps.ingress.className | quote }}
+                  annotations: {{ .Values.apps.ingress.annotations | toJson }}
+                  tls: {{ .Values.apps.ingress.tls }}
+                  domain: {{ include "forge.appsDomain" . | quote }}
         - repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
           targetRevision: main
           ref: values
@@ -159,5 +168,5 @@ roleRef:
   kind: Role
   name: forge-api-applications
 subjects:
-  - {kind: ServiceAccount, name: forge-api, namespace: forge}
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
 {{- end }}

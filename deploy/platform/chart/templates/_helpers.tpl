@@ -46,6 +46,31 @@
 {{- printf "%s:%s" .Values.api.image.repository (.Values.api.image.tag | default (printf "v%s" .Chart.AppVersion)) -}}
 {{- end -}}
 
+{{- define "forge.appsDomain" -}}
+{{- .Values.apps.domain | required "apps.domain is required with previews or deploys" -}}
+{{- end -}}
+
+{{- define "forge.pullSecret" -}}
+{{- .Values.apps.pullSecret | required "apps.pullSecret is required with previews or deploys: Forge checks images exist with it" -}}
+{{- end -}}
+
+{{/* forge.gateway: "true" when the chart makes the Gateway forge-previews. */}}
+{{- define "forge.gateway" -}}
+{{- range $old := list "pullSecret" "gatewayDomain" "gatewayClass" "gatewayAnnotations" -}}
+{{- if hasKey $.Values.previews $old -}}
+{{- fail (printf "previews.%s moved to apps.* (domain, pullSecret, gateway.className, gateway.annotations)" $old) -}}
+{{- end -}}
+{{- end -}}
+{{- $routing := .Values.apps.routing -}}
+{{- if not (has $routing (list "gateway" "ingress")) -}}
+{{- fail (printf "apps.routing %q must be gateway or ingress" $routing) -}}
+{{- end -}}
+{{- if and .Values.previews.enabled (ne $routing "gateway") -}}
+{{- fail "previews.enabled needs apps.routing gateway: forge-api routes each preview with an HTTPRoute" -}}
+{{- end -}}
+{{- if or .Values.previews.enabled (and .Values.deploys.enabled (eq $routing "gateway")) }}true{{ end -}}
+{{- end -}}
+
 {{- define "forge.labels" -}}
 app.kubernetes.io/part-of: forge
 app.kubernetes.io/managed-by: {{ .Release.Service }}
