@@ -1,0 +1,21 @@
+# Deploys on a cluster with only an ingress controller: no previews, no
+# Gateway, the release in the namespace platform (see the Makefile).
+github:
+  org: acme
+  appID: "123456"
+host: forge.acme.example
+ingress:
+  className: nginx
+  tls:
+    secretName: forge-tls
+apps:
+  domain: apps.acme.example
+  pullSecret: ghcr
+  routing: ingress
+  ingress:
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+    tls: true
+deploys:
+  enabled: true

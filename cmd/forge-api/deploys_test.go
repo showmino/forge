@@ -39,12 +39,13 @@ func TestDeploys(t *testing.T) {
 		msg     string
 	}{
 		"no app":          {ok, nil, cluster, "preview.x.nip.io", "GitHub App"},
-		"no previews":     {ok, app, nil, "", "--previews"},
+		"no cluster":      {ok, app, nil, "", "the cluster connection"},
 		"no repo":         {deployFlags{on: true, repo: "", syncTimeout: "10m", namespaceTimeout: "5m"}, app, cluster, "preview.x.nip.io", "owner/name"},
 		"bad repo":        {deployFlags{on: true, repo: "nope", syncTimeout: "10m", namespaceTimeout: "5m"}, app, cluster, "preview.x.nip.io", "owner/name"},
 		"bad timeout":     {deployFlags{on: true, repo: "a/b", syncTimeout: "soon", namespaceTimeout: "5m"}, app, cluster, "preview.x.nip.io", "FORGE_DEPLOY_SYNC_TIMEOUT"},
 		"bad ns timeout":  {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "soon"}, app, cluster, "preview.x.nip.io", "FORGE_DEPLOY_NAMESPACE_TIMEOUT"},
 		"bad domain":      {ok, app, cluster, "x.nip.io", "--deploy-domain"},
+		"no domain":       {ok, app, cluster, "", "--deploy-domain"},
 		"argocd path":     {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", argoURL: "https://argocd.example.com/x"}, app, cluster, "preview.x.nip.io", "--argocd-url"},
 		"argocd scheme":   {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", argoURL: "javascript:alert(1)"}, app, cluster, "preview.x.nip.io", "--argocd-url"},
 		"bad vault":       {deployFlags{on: true, repo: "a/b", syncTimeout: "10m", namespaceTimeout: "5m", secretVaults: "Apps,My Vault"}, app, cluster, "preview.x.nip.io", "--secret-vaults"},

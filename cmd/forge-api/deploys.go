@@ -59,7 +59,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 		return nil, errors.New("--deploys needs the GitHub App (--github-app-id and --github-app-key-file)")
 	}
 	if cluster == nil {
-		return nil, errors.New("--deploys needs --previews (the cluster connection and image checks)")
+		return nil, errors.New("--deploys needs the cluster connection and image checks")
 	}
 	owner, name, ok := strings.Cut(f.repo, "/")
 	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
@@ -77,7 +77,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	if domain == "" {
 		var found bool
 		if domain, found = strings.CutPrefix(previewDomain, "preview."); !found {
-			return nil, fmt.Errorf("set --deploy-domain: cannot derive it from preview domain %q", previewDomain)
+			return nil, fmt.Errorf("set --deploy-domain (FORGE_DEPLOY_DOMAIN): cannot derive it from preview domain %q", previewDomain)
 		}
 	}
 	public, err := server.ParsePublicDomains(f.publicDomains)

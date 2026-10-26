@@ -7,6 +7,15 @@ replicas: 1
 host: ""
 # The Gateway listener of the route; empty means the environment's own.
 listener: ""
+# How the service is reached, set by the platform (the ApplicationSet), not
+# per service. "gateway": an HTTPRoute on gateway.namespace/gateway.name.
+# "ingress": an Ingress of ingress.className; tls asks for a certificate in
+# the Secret <name>-tls (for example from cert-manager's annotation), and a
+# domain refuses any host outside *.<env>.<domain>.
+route:
+  kind: gateway
+  gateway: {name: forge-previews, namespace: forge}
+  ingress: {className: "", annotations: {}, tls: false, domain: ""}
 # The DNS record of a public address; unset for an internal one.
 #   dns: {name: payments, zone: example-com, tunnel: production}
 dns: null

@@ -1,0 +1,42 @@
+{{- $kind := .Values.route.kind | default "gateway" }}
+{{- if not (has $kind (list "gateway" "ingress")) }}
+{{- fail (printf "route.kind %q must be gateway or ingress" $kind) }}
+{{- end }}
+{{- if eq $kind "ingress" }}
+{{- $i := .Values.route.ingress }}
+{{- $host := required "host" .Values.host }}
+{{- with $i.domain }}
+{{- if not (hasSuffix (printf ".%s.%s" (required "env" $.Values.env) .) $host) }}
+{{- fail (printf "host %q is not under *.%s.%s, the only names an Ingress may claim" $host $.Values.env .) }}
+{{- end }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.name }}
+  {{- with $i.annotations }}
+  annotations:
+    {{- range $k, $v := . }}
+    {{ $k }}: {{ toString $v | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- with $i.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- if $i.tls }}
+  tls:
+    - hosts: [{{ $host | quote }}]
+      secretName: {{ printf "%s-tls" .Values.name }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Values.name }}
+                port: {number: 80}
+{{- end }}

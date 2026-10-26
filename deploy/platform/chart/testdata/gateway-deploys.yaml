@@ -1,0 +1,11 @@
+# Deploys through the chart's Gateway, without previews: a Gateway with only
+# the staging and production listeners.
+github:
+  org: acme
+  appID: "123456"
+host: forge.acme.example
+apps:
+  domain: apps.acme.example
+  pullSecret: ghcr
+deploys:
+  enabled: true

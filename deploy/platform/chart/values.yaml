@@ -151,28 +151,45 @@ secrets:
   vaults: ""
   deniedItems: ""
 
-# Previews: `forge preview` runs a branch in a namespace of its own, under
-# *.preview.<gatewayDomain>. Needs a Gateway API implementation (Istio, Envoy
-# Gateway, ...); the chart makes the Gateway forge-previews.
+# Where your services run, for previews and deploys.
+apps:
+  # A domain you control. Previews are at *.preview.<domain>, deploys at
+  # *.staging.<domain> and *.production.<domain>: point those names at your
+  # Gateway or ingress controller.
+  domain: ""
+  # A dockerconfigjson Secret in the release's namespace that pulls your
+  # services' images. Forge checks an image exists with it and copies it into
+  # each service's namespace.
+  pullSecret: ""
+  # "gateway": the chart makes the Gateway forge-previews (needs a Gateway API
+  # implementation). "ingress": deploys get an Ingress each, so an ingress
+  # controller is enough; previews need "gateway".
+  routing: gateway
+  gateway:
+    # The name of an existing GatewayClass.
+    className: istio
+    # Annotations for the Service your Gateway implementation creates, for
+    # example a cloud's fixed public IP.
+    annotations: {}
+  ingress:
+    className: ""
+    annotations: {}
+    # Ask for a certificate per service in the Secret <service>-tls (with
+    # cert-manager's annotation above), or leave false for your controller's
+    # default certificate. Forge still shows the address as http://.
+    tls: false
+    # Argo CD waits for the controller to publish an address on each
+    # Ingress (status.loadBalancer); a controller that never does makes
+    # every deploy wait for its sync timeout.
+
+# Previews: `forge preview` runs a branch in a namespace of its own.
+# Needs apps.domain, apps.pullSecret and apps.routing "gateway".
 previews:
   enabled: false
-  # A dockerconfigjson Secret in the release's namespace, copied into each
-  # preview to pull your services' images. Required with previews.
-  pullSecret: ""
-  # A domain you control; point *.preview.<gatewayDomain> (and with deploys
-  # *.staging.<gatewayDomain> and *.production.<gatewayDomain>) at the
-  # Gateway's address.
-  gatewayDomain: ""
-  # The name of an existing GatewayClass.
-  gatewayClass: istio
-  # Annotations for the Service your Gateway implementation creates, for
-  # example a cloud's fixed public IP.
-  gatewayAnnotations: {}
 
 # Deploys: `forge deploy` writes to your forge-deploys repo and Argo CD
-# deploys from it. Needs Argo CD in the namespace argocd, previews.enabled
-# (the Gateway the services are reached through) and the release in the
-# namespace forge (the deploy chart routes through forge/forge-previews).
+# deploys from it. Needs Argo CD in the namespace argocd, apps.domain and
+# apps.pullSecret.
 deploys:
   enabled: false
   # Defaults to "<org>/forge-deploys"; an empty repo with a main branch that

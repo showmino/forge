@@ -24,13 +24,15 @@ argocdURL: https://argocd.acme.example
 secrets:
   vaults: Services
   deniedItems: forge-github
+apps:
+  domain: apps.acme.example
+  pullSecret: registry
+  gateway:
+    className: envoy
+    annotations:
+      service.beta.kubernetes.io/azure-pip-name: forge-apps
 previews:
   enabled: true
-  pullSecret: registry
-  gatewayDomain: apps.acme.example
-  gatewayClass: envoy
-  gatewayAnnotations:
-    service.beta.kubernetes.io/azure-pip-name: forge-apps
 deploys:
   enabled: true
 clusters:

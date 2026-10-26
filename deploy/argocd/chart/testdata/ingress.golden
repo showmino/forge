@@ -1,0 +1,103 @@
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: forge
+spec:
+  hard:
+    # Room for the app and, next to it, a database of up to three instances.
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    pods: "15"
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: forge
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {cpu: 500m, memory: 512Mi}
+---
+# Source: forge-chart/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments
+spec:
+  selector: {app: payments}
+  ports:
+    - {name: http, port: 80, targetPort: 9090}
+---
+# Source: forge-chart/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  labels: {app: payments}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: payments}
+  template:
+    metadata:
+      labels: {app: payments}
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: forge-pull
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      # The root filesystem is read-only; /tmp is the one writable path.
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+      containers:
+        - name: payments
+          image: ghcr.io/acme/payments:1a2b3c4
+          ports:
+            - {name: http, containerPort: 9090}
+          env:
+            - {name: PORT, value: "9090"}
+          readinessProbe:
+            httpGet: {path: /ready, port: 9090}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /ready, port: 9090}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+---
+# Source: forge-chart/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: payments
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts: ["payments.staging.apps.acme.example"]
+      secretName: payments-tls
+  rules:
+    - host: "payments.staging.apps.acme.example"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: payments
+                port: {number: 80}

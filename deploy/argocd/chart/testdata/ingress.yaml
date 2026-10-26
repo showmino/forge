@@ -1,0 +1,24 @@
+name: payments
+env: staging
+image: ghcr.io/acme/payments:1a2b3c4
+port: 9090
+health: /ready
+replicas: 1
+host: payments.staging.apps.acme.example
+route:
+  kind: ingress
+  ingress:
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+    tls: true
+    domain: apps.acme.example
+forge:
+  service: services/payments
+  env: staging
+  ref: main
+  commit: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d
+  actor: ana@example.com
+  operation: operations/op_000000000001
+  kind: deploy
+  time: "2026-10-09T12:00:00Z"
