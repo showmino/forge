@@ -45,7 +45,7 @@ prints the pull request's URL. <name> names the branch and the files.`,
 		Example: `  forge create payments --template go-grpc --team billing
   forge create ledger --template go-grpc@v1.0.0 --team billing --owner ana@example.com --set port=9090
   forge create shop --template nextjs --team web --replicas 2 --env LOG_LEVEL=info \
-    --secret stripe=vaults/Kube/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
+    --secret stripe=vaults/Apps/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
   forge create payments --template go-grpc --team billing --dry-run`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

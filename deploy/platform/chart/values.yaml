@@ -1,6 +1,6 @@
 # Forge for your GitHub organization. Required: github.org, github.appID,
 # the Secret github.existingSecret, and host. Everything else has a default.
-# The walkthrough is "Install Forge" in showmino/techdocs (docs/forge/).
+# The walkthrough is "Install Forge" at https://forgegate.io/docs/running-your-own-forge.
 
 github:
   # Your GitHub organization. Only its members can sign in.

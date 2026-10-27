@@ -20,7 +20,8 @@ on the owner's k3s cluster.
 | `showmino/forge-templates` | The templates `forge create` scaffolds from (`go-grpc`, `nextjs`), versioned by repo-wide tags |
 | `showmino/forge-deploys` | The GitOps repo. Only forge-api writes to it; never edit it by hand |
 | `showmino/kubernetes` | The owner's cluster repo (Cloudflare tunnel, DNS records, Argo CD). Open a pull request there; the owner merges |
-| `showmino/techdocs` | The organization's documentation, itself a Forge service. The user documentation of Forge lives in its `docs/forge/` |
+| `showmino/forgegate` | Forge's public site, `https://forgegate.io`, itself a Forge service (public repo). The user documentation of Forge lives in its `docs/` |
+| `showmino/techdocs` | The organization's documentation, itself a Forge service. Its `docs/forge/` has one page on showmino's own install of Forge |
 
 ## Read first
 
@@ -110,21 +111,26 @@ a yes to the next one.
   it merges: a second model or person reading the diff cold. Fix what it
   finds; say what you chose not to fix and why.
 
-### Every feature is documented in techdocs
+### Every feature is documented in forgegate
 
 - Each new feature, and each change to what a feature does (a command, a
-  flag, a forge.yaml field, a dashboard page, an error people will meet), also
-  gets its user documentation in `showmino/techdocs`, under `docs/forge/`
-  (the owner's rule, 2026-10-16). It is part of the same work: open the
-  techdocs pull request alongside the forge, forge-web or forge-templates one,
-  not later.
+  flag, a forge.yaml field, a chart value, a dashboard page, an error people
+  will meet), also gets its user documentation in `showmino/forgegate`, under
+  `docs/` (the owner's rule, 2026-10-16; the docs moved there from
+  `showmino/techdocs` on 2026-10-27). It is part of the same work: open the
+  forgegate pull request alongside the forge, forge-web or forge-templates
+  one, not later.
+- The site is public and written for anyone who runs Forge: `my-org` and
+  `example.com`, never showmino's own addresses, vaults or LAN. What only
+  showmino's install has goes in techdocs' "Forge at showmino" page.
 - Write it for the people who use Forge: what to do and the commands to type,
   checked against the code. Update the page that covers the feature, and
   `16-command-reference.md` when a command or flag changes (it is the output
   of `forge <command> --help`). Run `forge docs lint` on the checkout.
-- A techdocs pull request follows the same merging rules as here. Merging it
-  deploys techdocs to staging; promoting it to production needs the owner's OK
-  like any other promotion.
+- A forgegate pull request follows the same merging rules as here (its CI
+  builds the site, and the build fails on a broken link). Merging it deploys
+  forgegate to staging; promoting it to production needs the owner's OK like
+  any other promotion.
 
 ### Secrets
 
@@ -254,8 +260,8 @@ Knowing this file is not the same as having access.
   in a pull request **opened together with** the change.
   After a rollout, `verifying.md` gets the new image, the new render command
   and what was checked.
-- A change to what users see also updates `docs/forge/` in
-  `showmino/techdocs` (see "Every feature is documented in techdocs" above).
+- A change to what users see also updates `docs/` in `showmino/forgegate`
+  (see "Every feature is documented in forgegate" above).
   `README.md` here stays the reference next to the code.
 - Do not copy these rules into a tool's own file or memory and edit them
   there. If a tool needs a file of its own, make it a pointer to this one.
