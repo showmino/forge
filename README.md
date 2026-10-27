@@ -1,5 +1,7 @@
 # Forge
 
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/forge)](https://artifacthub.io/packages/search?repo=forge)
+
 Forge is an internal developer platform. This repo holds the `forge` CLI, the
 Forge API (`forge-api`) and the Protobuf contract they share.
 
