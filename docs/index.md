@@ -39,7 +39,7 @@ The v1 CLI has twelve command groups; each maps one-to-one to an API resource so
 | Group | Verbs | Example | Phase |
 | --- | --- | --- | --- |
 | `auth` | `login`, `logout`, `status`, `token` | `forge auth login --sso` | 1 |
-| `context` | `list`, `use`, `current`, `set` | `forge context use staging-eu` | 1 |
+| `context` | `list`, `use`, `current`, `set`, `delete` | `forge context use staging-eu` | 1 |
 | `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `delete` | `forge service get payments -o yaml` | 1 |
 | `template` | `list`, `get`, `lint` | `forge template list --tag go` | 2 |
 | `team` | `list` | `forge team list` | 6 |

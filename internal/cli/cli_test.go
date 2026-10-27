@@ -346,6 +346,40 @@ func TestContexts(t *testing.T) {
 		t.Errorf("--context override: %s", r.out)
 	}
 
+	// Deleting a context leaves its sign-in stored and says how to remove it.
+	h.ok("context", "set", "prod-copy", "--api", "https://forge.example.com")
+	if err := h.store.Set("https://forge.example.com", &auth.Credentials{Subject: "someone"}); err != nil {
+		t.Fatal(err)
+	}
+	h.fails(3, "context", "delete", "nope")
+	h.fails(2, "context", "delete")
+	r = h.ok("context", "delete", "prod")
+	if !strings.Contains(r.err, `Deleted context "prod"`) || !strings.Contains(r.err, "forge context use") {
+		t.Errorf("deleting the current context should say so:\n%s", r.err)
+	}
+	if strings.Contains(r.err, "auth logout") {
+		t.Errorf("another context still uses the API, so no logout hint:\n%s", r.err)
+	}
+	r = h.ok("context", "rm", "prod-copy")
+	if !strings.Contains(r.err, "forge auth logout --api-url https://forge.example.com") {
+		t.Errorf("the last context of an API with a stored sign-in should name the logout:\n%s", r.err)
+	}
+	if _, err := h.store.Get("https://forge.example.com"); err != nil {
+		t.Errorf("delete must not remove credentials: %v", err)
+	}
+	h.ok("auth", "logout", "--api-url", "https://forge.example.com") // the hint works without a context
+	if _, err := h.store.Get("https://forge.example.com"); err == nil {
+		t.Error("logout --api-url left the credentials")
+	}
+	r = h.ok("context", "list", "-o", "json")
+	if strings.Contains(r.out, "prod") || !strings.Contains(r.out, `"currentContext": ""`) {
+		t.Errorf("after delete:\n%s", r.out)
+	}
+	r = h.ok("context", "delete", "local")
+	if strings.Contains(r.err, "auth logout") || strings.Contains(r.err, "forge context use") {
+		t.Errorf("no stored sign-in and not current, so no hints:\n%s", r.err)
+	}
+
 	data, err := os.ReadFile(h.env["FORGE_CONFIG"])
 	if err != nil {
 		t.Fatal(err)

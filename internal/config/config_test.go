@@ -160,3 +160,25 @@ func TestSetContext(t *testing.T) {
 		t.Errorf("replace failed: %+v", got)
 	}
 }
+
+func TestDeleteContext(t *testing.T) {
+	t.Parallel()
+	c := sample()
+	if c.DeleteContext("nope") {
+		t.Error("deleting an unknown context reported success")
+	}
+	if !c.DeleteContext("prod") {
+		t.Fatal("prod was not deleted")
+	}
+	if _, ok := c.Context("prod"); ok || len(c.Contexts) != 1 || c.CurrentContext != "staging-eu" {
+		t.Errorf("after deleting prod: %+v", c)
+	}
+	// Deleting the current context leaves none current, which Validate accepts.
+	c.DeleteContext("staging-eu")
+	if c.CurrentContext != "" || len(c.Contexts) != 0 {
+		t.Errorf("after deleting the current context: %+v", c)
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+}

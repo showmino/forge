@@ -616,7 +616,7 @@ never taken from forge.yaml.`,
 		Example: `  forge service delete payments
   forge service delete payments --yes
   forge service delete payments --dry-run`,
-		Args:              exactArgs(1, "service name"),
+		Args:              oneArg("service name"),
 		ValidArgsFunction: f.completeServices,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, err := f.serviceName(args)

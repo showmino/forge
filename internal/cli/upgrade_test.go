@@ -7,6 +7,9 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -97,16 +100,60 @@ func TestUpgrade(t *testing.T) {
 	}
 }
 
-func TestUpgradeNeedsHTTPS(t *testing.T) {
+func TestChecksumsURL(t *testing.T) {
 	t.Parallel()
-	for raw, ok := range map[string]bool{
-		"https://forge-api.showmino.com":   true,
-		"http://127.0.0.1:8080":            true,
-		"http://localhost:8080":            true,
-		"http://forge.10.150.1.221.nip.io": false,
+	const gh = "https://github.com/showmino/forge/releases/download"
+	for _, c := range []struct {
+		api, releases, want string
+		fails               bool
+	}{
+		// Over HTTPS, or on this machine, the API's own checksums are trusted.
+		{api: "https://forge-api.example.com", releases: gh, want: ""},
+		{api: "http://127.0.0.1:8080", releases: gh, want: ""},
+		{api: "http://localhost:8080", releases: gh, want: ""},
+		// Over plain HTTP they come from the release on GitHub.
+		{api: "http://forge.10.150.1.221.nip.io", releases: gh, want: gh + "/v0.2.0/checksums.txt"},
+		{api: "http://forge.10.150.1.221.nip.io", releases: "", fails: true},
+		{api: "ftp://forge.example.com", releases: gh, fails: true},
 	} {
-		if err := trustedAPI(raw); (err == nil) != ok {
-			t.Errorf("%s: %v", raw, err)
+		got, err := checksumsURL(c.api, c.releases, "0.2.0")
+		if (err != nil) != c.fails || got != c.want {
+			t.Errorf("%s (releases %q): got %q, %v", c.api, c.releases, got, err)
+		}
+	}
+}
+
+// Over plain HTTP the archive still comes from the API, but it must match the
+// checksums from GitHub: the API's own list is not used.
+func TestUpgradeChecksChecksumsFromGitHub(t *testing.T) {
+	t.Parallel()
+	name, data := releaseArchive(t, "forge 0.2.0 binary")
+	tampered := func(name string, _ []byte) string {
+		return fmt.Sprintf("%x  %s\n", sha256.Sum256([]byte("tampered")), name)
+	}
+	for _, c := range []struct {
+		api, github func(string, []byte) string
+		ok          bool
+	}{
+		{api: tampered, github: goodSums, ok: true},
+		{api: goodSums, github: tampered, ok: false},
+	} {
+		h := upgradeHarness(t, c.api)
+		gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v0.2.0/checksums.txt" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = fmt.Fprint(w, c.github(name, data))
+		}))
+		t.Cleanup(gh.Close)
+		f := newFactory(Deps{IO: IOStreams{Out: io.Discard, ErrOut: io.Discard}})
+		bin, err := f.downloadCLI(t.Context(), h.api.URL, "0.2.0", gh.URL+"/v0.2.0/checksums.txt")
+		if c.ok && (err != nil || string(bin) != "forge 0.2.0 binary") {
+			t.Errorf("GitHub's checksums match: %q, %v", bin, err)
+		}
+		if !c.ok && (err == nil || !strings.Contains(err.Error(), "checksum")) {
+			t.Errorf("GitHub's checksums do not match, want a refusal: %v", err)
 		}
 	}
 }

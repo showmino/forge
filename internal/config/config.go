@@ -148,3 +148,17 @@ func (c *Config) SetContext(ctx Context) {
 	}
 	c.Contexts[i] = ctx
 }
+
+// DeleteContext removes the named context and reports whether it was there.
+// Deleting the current context leaves no context current.
+func (c *Config) DeleteContext(name string) bool {
+	i := slices.IndexFunc(c.Contexts, func(x Context) bool { return x.Name == name })
+	if i < 0 {
+		return false
+	}
+	c.Contexts = slices.Delete(c.Contexts, i, i+1)
+	if c.CurrentContext == name {
+		c.CurrentContext = ""
+	}
+	return true
+}

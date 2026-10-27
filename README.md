@@ -33,6 +33,8 @@ After that, `forge upgrade` brings the CLI to the API's version on Linux,
 macOS and Windows: the API serves the release's archives at
 `/cli/releases/v<version>/<file>`, so no GitHub access is needed, and the
 download is checked against the release's checksums (`--check` only looks).
+When the API is on plain HTTP (not `localhost`), the checksums come from the
+release on GitHub over HTTPS instead, so that one needs GitHub.
 
 ```
 cmd/forge/          CLI entry point; maps errors to exit codes
