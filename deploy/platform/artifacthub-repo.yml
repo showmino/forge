@@ -1,0 +1,6 @@
+# Artifact Hub's metadata for the chart oci://ghcr.io/showmino/charts/forge.
+# The artifacthub workflow pushes it to the tag "artifacthub.io" of that
+# repository. Artifact Hub reads it from there: a matching repositoryID gives
+# the listing its "Verified publisher" badge.
+# https://artifacthub.io/docs/topics/repositories/#verified-publisher
+repositoryID: 28dd44f4-711e-4216-9aa1-da7d0a0fed8c

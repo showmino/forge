@@ -1,0 +1,33 @@
+name: artifacthub
+
+# Publishes Artifact Hub's metadata file next to the forge chart, as the tag
+# oci://ghcr.io/<owner>/charts/forge:artifacthub.io. It runs when the file
+# changes on main, or by hand.
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/platform/artifacthub-repo.yml
+      - .github/workflows/artifacthub.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write   # push the metadata to ghcr.io
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oras-project/setup-oras@v1
+      - name: Push artifacthub-repo.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          cd deploy/platform
+          oras push "ghcr.io/$owner/charts/forge:artifacthub.io" \
+            --config /dev/null:application/vnd.cncf.artifacthub.config.v1+yaml \
+            artifacthub-repo.yml:application/vnd.cncf.artifacthub.repository-metadata.layer.v1.yaml
