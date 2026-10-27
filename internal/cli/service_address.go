@@ -30,10 +30,10 @@ This moves a public address, and the old one stops working. An address
 that is in use already (it resolves in DNS) is taken over only when named
 with --claim; its visitors then reach this service. You must type the
 service's name to confirm, or pass --yes.`,
-		Example: `  forge service address deogratias
-  forge service address deogratias --host @ --domain deogratias.cloud --dry-run
-  forge service address deogratias --host @ --domain deogratias.cloud --claim deogratias.cloud
-  forge service address deogratias --clear`,
+		Example: `  forge service address website
+  forge service address website --host @ --domain example.com --dry-run
+  forge service address website --host @ --domain example.com --claim example.com
+  forge service address website --clear`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: f.completeServices,
 		RunE: func(cmd *cobra.Command, args []string) error {

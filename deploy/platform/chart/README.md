@@ -19,5 +19,7 @@ helm install forge oci://ghcr.io/showmino/charts/forge -n forge \
 The dashboard is at `/`, the API at `/forge.v1.*` and `/cli/`, the login at
 `/dex`. The GitHub App's callback URL is `https://<host>/dex/callback`.
 
-The walkthrough, with the GitHub App's settings, is "Install Forge" in
-`showmino/techdocs` (`docs/forge/`). `values.yaml` describes every setting.
+The walkthrough, with the GitHub App's settings, is
+[Install Forge](https://forgegate.io/docs/running-your-own-forge), and
+[Chart values](https://forgegate.io/docs/chart-values) lists every setting;
+`values.yaml` has the defaults, with comments.
