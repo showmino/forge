@@ -54,6 +54,10 @@ type Deps struct {
 	DefaultAPIURL string
 	// Executable returns this binary's path, for 'forge upgrade'.
 	Executable func() (string, error)
+	// ReleasesURL is where forge's GitHub releases are downloaded from
+	// (<url>/v<version>/<file>). 'forge upgrade' reads the checksums there
+	// when the API is reached over plain HTTP; empty refuses such an API.
+	ReleasesURL string
 }
 
 // DefaultDeps wires Deps to the real process.
@@ -66,6 +70,7 @@ func DefaultDeps(stdin io.Reader, stdout, stderr io.Writer, inTTY, outTTY bool) 
 		Version:       version.Get().Version,
 		DefaultAPIURL: version.APIURL,
 		Executable:    os.Executable,
+		ReleasesURL:   "https://github.com/showmino/forge/releases/download",
 	}
 }
 

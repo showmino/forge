@@ -32,6 +32,8 @@ type harness struct {
 	issuer string
 	// defaultAPI is the API URL built into the binary; empty for a dev build.
 	defaultAPI string
+	// releasesURL stands in for GitHub's release downloads (Deps.ReleasesURL).
+	releasesURL string
 	// serverVersion is the API's version (default 0.1.0); cliReleases its
 	// release assets; executable the path 'forge upgrade' replaces.
 	serverVersion string
@@ -146,6 +148,7 @@ func (h *harness) run(args ...string) result {
 		Version:       "0.1.0",
 		DefaultAPIURL: h.defaultAPI,
 		Executable:    func() (string, error) { return h.executable, nil },
+		ReleasesURL:   h.releasesURL,
 	}
 	code := Run(context.Background(), d, args)
 	return result{out.String(), errOut.String(), code}
@@ -344,6 +347,40 @@ func TestContexts(t *testing.T) {
 	r = h.ok("context", "current", "-c", "local", "-o", "json")
 	if !strings.Contains(r.out, h.api.URL) {
 		t.Errorf("--context override: %s", r.out)
+	}
+
+	// Deleting a context leaves its sign-in stored and says how to remove it.
+	h.ok("context", "set", "prod-copy", "--api", "https://forge.example.com")
+	if err := h.store.Set("https://forge.example.com", &auth.Credentials{Subject: "someone"}); err != nil {
+		t.Fatal(err)
+	}
+	h.fails(3, "context", "delete", "nope")
+	h.fails(2, "context", "delete")
+	r = h.ok("context", "delete", "prod")
+	if !strings.Contains(r.err, `Deleted context "prod"`) || !strings.Contains(r.err, "forge context use") {
+		t.Errorf("deleting the current context should say so:\n%s", r.err)
+	}
+	if strings.Contains(r.err, "auth logout") {
+		t.Errorf("another context still uses the API, so no logout hint:\n%s", r.err)
+	}
+	r = h.ok("context", "rm", "prod-copy")
+	if !strings.Contains(r.err, "forge auth logout --api-url https://forge.example.com") {
+		t.Errorf("the last context of an API with a stored sign-in should name the logout:\n%s", r.err)
+	}
+	if _, err := h.store.Get("https://forge.example.com"); err != nil {
+		t.Errorf("delete must not remove credentials: %v", err)
+	}
+	h.ok("auth", "logout", "--api-url", "https://forge.example.com") // the hint works without a context
+	if _, err := h.store.Get("https://forge.example.com"); err == nil {
+		t.Error("logout --api-url left the credentials")
+	}
+	r = h.ok("context", "list", "-o", "json")
+	if strings.Contains(r.out, "prod") || !strings.Contains(r.out, `"currentContext": ""`) {
+		t.Errorf("after delete:\n%s", r.out)
+	}
+	r = h.ok("context", "delete", "local")
+	if strings.Contains(r.err, "auth logout") || strings.Contains(r.err, "forge context use") {
+		t.Errorf("no stored sign-in and not current, so no hints:\n%s", r.err)
 	}
 
 	data, err := os.ReadFile(h.env["FORGE_CONFIG"])

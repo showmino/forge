@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,7 +16,7 @@ func newContextCmd(f *Factory) *cobra.Command {
 	cmd.Long = `A context names a Forge installation (its API URL) and a default namespace,
 like a kubeconfig context. The config lives in ~/.config/forge/config.yaml
 (or $XDG_CONFIG_HOME/forge/config.yaml). Credentials are never stored there.`
-	cmd.AddCommand(newContextListCmd(f), newContextUseCmd(f), newContextCurrentCmd(f), newContextSetCmd(f))
+	cmd.AddCommand(newContextListCmd(f), newContextUseCmd(f), newContextCurrentCmd(f), newContextSetCmd(f), newContextDeleteCmd(f))
 	return cmd
 }
 
@@ -72,7 +73,7 @@ func newContextUseCmd(f *Factory) *cobra.Command {
 		Use:               "use <name>",
 		Short:             "Make a context the default",
 		Example:           `  forge context use staging-eu`,
-		Args:              exactArgs(1, "context name"),
+		Args:              oneArg("context name"),
 		ValidArgsFunction: f.completeContexts,
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, path, err := f.Config()
@@ -133,7 +134,7 @@ func newContextSetCmd(f *Factory) *cobra.Command {
 		Short: "Create or update a context",
 		Example: `  forge context set staging-eu --api https://forge.staging.example.com --namespace billing
   forge context set local --api http://localhost:8080 --use`,
-		Args: exactArgs(1, "context name"),
+		Args: oneArg("context name"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, path, err := f.Config()
 			if err != nil {
@@ -173,11 +174,52 @@ func newContextSetCmd(f *Factory) *cobra.Command {
 	return cmd
 }
 
-// exactArgs is cobra.ExactArgs with an exit-code-2 error that names the argument.
-func exactArgs(n int, what string) cobra.PositionalArgs {
+func newContextDeleteCmd(f *Factory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "delete <name>",
+		Aliases: []string{"rm"},
+		Short:   "Remove a context",
+		Long: `Remove a context from the config. A sign-in is stored by API URL, not by
+context, so it stays: end it first with 'forge auth logout --context <name>',
+or afterwards with 'forge auth logout --api-url <url>'.`,
+		Example:           `  forge context delete staging-eu`,
+		Args:              oneArg("context name"),
+		ValidArgsFunction: f.completeContexts,
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, path, err := f.Config()
+			if err != nil {
+				return err
+			}
+			name := args[0]
+			ctx, ok := cfg.Context(name)
+			if !ok {
+				return exitcode.New(exitcode.NotFound, "context %q is not defined", name).WithHint("see 'forge context list'")
+			}
+			wasCurrent := cfg.CurrentContext == name
+			cfg.DeleteContext(name)
+			if err := cfg.Save(path); err != nil {
+				return err
+			}
+			f.infof("Deleted context %q.", name)
+			if wasCurrent {
+				f.infof("No context is current now; pick one with 'forge context use <name>'.")
+			}
+			// Name the stored sign-in only when no other context reaches that API.
+			if !slices.ContainsFunc(cfg.Contexts, func(c config.Context) bool { return c.API == ctx.API }) {
+				if _, err := f.CredentialStore().Get(ctx.API); err == nil {
+					f.infof("A sign-in for %s is still stored; remove it with 'forge auth logout --api-url %s'.", ctx.API, ctx.API)
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// oneArg is cobra.ExactArgs(1) with an exit-code-2 error that names the argument.
+func oneArg(what string) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
-		if len(args) != n {
-			return exitcode.Usagef("%s expects %d argument (%s), got %d", cmd.CommandPath(), n, what, len(args)).
+		if len(args) != 1 {
+			return exitcode.Usagef("%s expects 1 argument (%s), got %d", cmd.CommandPath(), what, len(args)).
 				WithHint("see '" + cmd.CommandPath() + " --help'")
 		}
 		return nil
