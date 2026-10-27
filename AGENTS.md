@@ -125,7 +125,7 @@ a yes to the next one.
   showmino's install has goes in techdocs' "Forge at showmino" page.
 - Write it for the people who use Forge: what to do and the commands to type,
   checked against the code. Update the page that covers the feature, and
-  `16-command-reference.md` when a command or flag changes (it is the output
+  `18-command-reference.md` when a command or flag changes (it is the output
   of `forge <command> --help`). Run `forge docs lint` on the checkout.
 - A forgegate pull request follows the same merging rules as here (its CI
   builds the site, and the build fails on a broken link). Merging it deploys
