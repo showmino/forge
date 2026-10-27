@@ -10,6 +10,7 @@ description: Forge, an internal developer platform, for your GitHub organization
 type: application
 version: 0.27.0
 appVersion: "0.27.0"
-home: https://github.com/showmino/forge
+home: https://forgegate.io
+icon: https://forgegate.io/img/favicon.svg
 sources:
   - https://github.com/showmino/forge
