@@ -182,7 +182,7 @@ apps:
     # Ingress (status.loadBalancer); a controller that never does makes
     # every deploy wait for its sync timeout.
 
-# Previews: `forge preview` runs a branch in a namespace of its own.
+# Previews: `forge env create` runs a branch in a namespace of its own.
 # Needs apps.domain, apps.pullSecret and apps.routing "gateway".
 previews:
   enabled: false
