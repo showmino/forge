@@ -32,6 +32,8 @@ type harness struct {
 	issuer string
 	// defaultAPI is the API URL built into the binary; empty for a dev build.
 	defaultAPI string
+	// releasesURL stands in for GitHub's release downloads (Deps.ReleasesURL).
+	releasesURL string
 	// serverVersion is the API's version (default 0.1.0); cliReleases its
 	// release assets; executable the path 'forge upgrade' replaces.
 	serverVersion string
@@ -146,6 +148,7 @@ func (h *harness) run(args ...string) result {
 		Version:       "0.1.0",
 		DefaultAPIURL: h.defaultAPI,
 		Executable:    func() (string, error) { return h.executable, nil },
+		ReleasesURL:   h.releasesURL,
 	}
 	code := Run(context.Background(), d, args)
 	return result{out.String(), errOut.String(), code}

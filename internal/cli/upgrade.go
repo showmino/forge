@@ -51,7 +51,8 @@ GitHub access is needed. The download is checked against the release's
 checksums before the forge binary is replaced. When the API is reached over
 plain HTTP (not on this machine), anyone on the way could change both, so the
 checksums are read from the release on GitHub over HTTPS instead. An older
-version than this one is only installed with --allow-downgrade.`,
+version than this one is only installed with --allow-downgrade, and never
+from a plain-HTTP API, whose word on its version cannot be checked.`,
 		Example: `  forge upgrade --check
   forge upgrade`,
 		Args: noArgs,
@@ -75,6 +76,10 @@ version than this one is only installed with --allow-downgrade.`,
 			if !releaseVersion.MatchString(want) || !ok {
 				return exitcode.New(exitcode.Unexpected, "the Forge API runs %q, not a release: there is nothing to download", want)
 			}
+			sums, err := checksumsURL(r.APIURL, f.ReleasesURL, want)
+			if err != nil {
+				return err
+			}
 			if want == f.Version {
 				_, err := fmt.Fprintf(f.IO.Out, "forge %s is the server's version: nothing to do\n", want)
 				return err
@@ -92,6 +97,12 @@ version than this one is only installed with --allow-downgrade.`,
 				_, err := fmt.Fprintf(f.IO.Out, "forge %s %s (this is %s); run 'forge upgrade'\n", want, word, f.Version)
 				return err
 			}
+			// Over plain HTTP the version above is only the word of whoever
+			// answered: a genuine but older release may have known flaws.
+			if older && sums != "" {
+				return exitcode.Usagef("the Forge API says it runs %s, older than this forge (%s); over plain HTTP that is not trusted for a downgrade", want, f.Version).
+					WithHint("downgrade through the API's HTTPS address, or install that release from GitHub by hand")
+			}
 			if older && !allowDowngrade {
 				return exitcode.Usagef("the Forge API runs %s, older than this forge (%s)", want, f.Version).
 					WithHint("pass --allow-downgrade to install it anyway")
@@ -105,10 +116,6 @@ version than this one is only installed with --allow-downgrade.`,
 			}
 			if strings.Contains(filepath.ToSlash(exe), "/Caskroom/") || strings.Contains(filepath.ToSlash(exe), "/Cellar/") {
 				return exitcode.Usagef("%s is managed by Homebrew", exe).WithHint("run 'brew upgrade forge'")
-			}
-			sums, err := checksumsURL(r.APIURL, f.ReleasesURL, want)
-			if err != nil {
-				return err
 			}
 			if sums != "" {
 				f.infof("%s is plain HTTP: checking the download against %s", r.APIURL, sums)
@@ -164,10 +171,16 @@ func (f *Factory) downloadCLI(ctx context.Context, apiURL, version, sumsURL stri
 	if runtime.GOOS == "windows" {
 		archive = strings.TrimSuffix(archive, ".tar.gz") + ".zip"
 	}
-	if sumsURL == "" {
+	elsewhere := sumsURL != ""
+	if !elsewhere {
 		sumsURL = base + "checksums.txt"
 	}
 	sums, err := f.fetch(ctx, sumsURL, maxChecksums)
+	var ee *exitcode.Error
+	if elsewhere && errors.As(err, &ee) && ee.Code == exitcode.NotFound {
+		return nil, exitcode.New(exitcode.NotFound, "release v%s is not published at %s", version, sumsURL).
+			WithHint("the API serves a forge that is not released there; upgrade through the API's HTTPS address")
+	}
 	if err != nil {
 		return nil, err
 	}
