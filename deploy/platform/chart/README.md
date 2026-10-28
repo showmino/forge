@@ -21,7 +21,8 @@ kubectl -n forge create secret generic forge-github \
   --from-file=app-private-key=my-app.private-key.pem \
   --from-literal=client-id=<the App's client ID> \
   --from-literal=client-secret=<a client secret of the App>
-# The database's user "forge" and its password, which you set on the server.
+# The database user "forge"'s password, which you set on the server.
+password='<the password of the user forge>'
 kubectl -n forge create secret generic forge-database \
   --from-literal=password="$password" \
   --from-literal=uri="postgres://forge:$password@db.example.com:5432/forge?sslmode=require"
@@ -59,14 +60,22 @@ spec:
 The dashboard is at `/`, the API at `/forge.v1.*` and `/cli/`, the login at
 `/dex`. The GitHub App's callback URL is `https://<host>/dex/callback`.
 
-**From a chart before 0.32.0** with `database.mode: bundled` or
-`cloudnativepg`: the chart refuses those values, so nothing is removed until
-you change them. Copy the data to your own server first (`pg_dump` of
-`forge` and `dex`, `pg_restore` as the owner), and keep the old database out
-of the next sync's prune (annotate it
-`argocd.argoproj.io/sync-options: Prune=false`). Then set `database.*` and
-sync. With `database.mode: external`, move `database.external.*` to
-`database.*`.
+**From a chart before 0.32.0**, which ran the database itself
+(`database.mode: bundled`, the default, or `cloudnativepg`): 0.32.0 refuses
+those values or asks for `database.host`, so nothing is removed until you
+change them. The sync after that change deletes the old database's objects,
+so first:
+
+1. Copy the data to your own server: `pg_dump` of `forge` and `dex`,
+   `pg_restore --no-owner --role=forge`.
+2. Keep the old database: annotate its objects (the StatefulSet `forge-db`
+   and the Secret `forge-db`, or the CloudNativePG `Cluster` `forge-db`, whose
+   deletion also deletes its volumes) with
+   `argocd.argoproj.io/sync-options: Prune=false,Delete=false` under Argo CD,
+   or `helm.sh/resource-policy=keep` under `helm upgrade`.
+3. Set `database.*` and sync. Delete the old database once Forge works.
+
+With `database.mode: external`, move `database.external.*` to `database.*`.
 
 The walkthrough, with the GitHub App's settings, is
 [Install Forge](https://forgegate.io/docs/running-your-own-forge), and

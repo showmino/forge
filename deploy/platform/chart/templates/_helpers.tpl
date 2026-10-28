@@ -222,14 +222,16 @@ Values of the modes that are gone fail here, before anything renders.
 */}}
 {{- define "forge.dbSecret" -}}
 {{- $db := .Values.database -}}
+{{- $moved := "https://forgegate.io/docs/running-your-own-forge#from-a-chart-before-0320" -}}
+{{- /* Keys of the old modes count only with a value: --reuse-values can leave them null. */ -}}
 {{- range $old := list "bundled" "cloudnativepg" -}}
-{{- if or (hasKey $db $old) (eq (toString $db.mode) $old) -}}
-{{- fail (printf "database.%s is gone (chart 0.32.0): Forge no longer runs its own database, so that removing Forge's namespace or Application cannot remove its data. Run PostgreSQL outside Forge's release and set database.existingSecret and database.host; https://forgegate.io/docs/running-your-own-forge shows how" $old) -}}
+{{- if or (and (hasKey $db $old) (not (kindIs "invalid" (index $db $old)))) (eq (toString (get $db "mode")) $old) -}}
+{{- fail (printf "database.%s is gone (chart 0.32.0): Forge no longer runs its own database, so that removing Forge's namespace or Application cannot remove its data. Copy the data to a PostgreSQL outside Forge's release and keep the old database from being deleted before you switch: %s" $old $moved) -}}
 {{- end -}}
 {{- end -}}
-{{- if or (hasKey $db "external") (hasKey $db "mode") -}}
+{{- if or (and (hasKey $db "external") (not (kindIs "invalid" (index $db "external")))) (and (hasKey $db "mode") (not (kindIs "invalid" (index $db "mode")))) -}}
 {{- fail "database.mode and database.external are gone (chart 0.32.0): database.external.* is now database.* (existingSecret, host, port, user, loginDatabase, sslMode)" -}}
 {{- end -}}
-{{- $_ := $db.host | required "database.host is required: Forge's PostgreSQL server, which you run outside Forge's release (https://forgegate.io/docs/running-your-own-forge)" -}}
+{{- $_ := $db.host | required (printf "database.host is required: Forge's PostgreSQL server, which you run outside Forge's release. Upgrading from a chart before 0.32.0 that ran the database itself (the default)? Copy the data first, or Forge starts on an empty database: %s" $moved) -}}
 {{- $db.existingSecret | required "database.existingSecret is required: a Secret with \"uri\" (the API's connection string) and \"password\" (the login's)" -}}
 {{- end -}}
