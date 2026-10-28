@@ -34,7 +34,8 @@ data:
         user: "forge"
         password: $DEX_DB_PASSWORD
         ssl:
-          mode: "require"
+          mode: "verify-full"
+          caFile: /etc/forge/database-ca/ca.crt
     web:
       http: 0.0.0.0:5556
       allowedOrigins: ["https://forge.acme.example", "https://dash.acme.example"]
@@ -611,7 +612,7 @@ spec:
       annotations:
         # Dex reads its config only when it starts, and header.html is mounted
         # by subPath, which a ConfigMap update does not reach.
-        checksum/config: "14bb5e4f5ba8253f"
+        checksum/config: "a27740584fd58060"
         checksum/dex-theme: "3d16ff97441ff85c"
     spec:
       automountServiceAccountToken: false
@@ -646,6 +647,7 @@ spec:
           volumeMounts:
             - {name: config, mountPath: /etc/dex}
             - {name: tmp, mountPath: /tmp}
+            - {name: database-ca, mountPath: /etc/forge/database-ca, readOnly: true}
             - {name: theme, mountPath: /srv/dex/web/themes/forge}
             - {name: theme, mountPath: /srv/dex/web/templates/header.html, subPath: header.html}
           resources:
@@ -656,6 +658,11 @@ spec:
           configMap: {name: dex-config}
         - name: tmp
           emptyDir: {sizeLimit: 16Mi}
+        - name: database-ca
+          secret:
+            secretName: forge-db-ca
+            items:
+              - {key: ca.crt, path: ca.crt}
         - name: theme
           configMap: {name: dex-theme}
 ---
@@ -694,6 +701,11 @@ spec:
             defaultMode: 0440
             items:
               - {key: app-private-key, path: app-private-key}
+        - name: database-ca
+          secret:
+            secretName: forge-db-ca
+            items:
+              - {key: ca.crt, path: ca.crt}
       containers:
         - name: forge-api
           image: "ghcr.io/showmino/forge-api:v0.27.0"
@@ -707,6 +719,9 @@ spec:
             - name: FORGE_DATABASE_URL
               valueFrom:
                 secretKeyRef: {name: forge-database, key: uri}
+            # The CA that signed the database server's certificate, for
+            # sslmode=verify-full (or verify-ca) in the Secret's uri.
+            - {name: PGSSLROOTCERT, value: /etc/forge/database-ca/ca.crt}
             - {name: FORGE_LOG_FORMAT, value: json}
             - {name: FORGE_GITHUB_APP_ID, value: "123456"}
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/app-private-key}
@@ -730,6 +745,7 @@ spec:
             - {name: FORGE_SECRET_DENIED_ITEMS, value: "forge-github"}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
+            - {name: database-ca, mountPath: /etc/forge/database-ca, readOnly: true}
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:

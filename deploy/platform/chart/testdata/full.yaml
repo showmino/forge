@@ -10,6 +10,8 @@ ingress:
 database:
   existingSecret: forge-database
   host: forge-db-rw.databases.svc
+  sslMode: verify-full
+  caSecret: forge-db-ca
 imageRegistry: acr.acme.example
 argocdURL: https://argocd.acme.example
 secrets:

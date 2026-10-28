@@ -1,0 +1,4 @@
+# want: database.bundled is gone
+# A chart before 0.32.0 that ran its own database.
+database:
+  mode: bundled

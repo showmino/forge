@@ -12,6 +12,9 @@ storage:
     password: $DEX_DB_PASSWORD
     ssl:
       mode: {{ $db.sslMode | quote }}
+      {{- if $db.caSecret }}
+      caFile: /etc/forge/database-ca/ca.crt
+      {{- end }}
 web:
   http: 0.0.0.0:5556
   {{- with include "forge.webOrigins" . }}
@@ -157,6 +160,9 @@ spec:
           volumeMounts:
             - {name: config, mountPath: /etc/dex}
             - {name: tmp, mountPath: /tmp}
+            {{- if .Values.database.caSecret }}
+            - {name: database-ca, mountPath: /etc/forge/database-ca, readOnly: true}
+            {{- end }}
             {{- if .Values.login.theme }}
             - {name: theme, mountPath: /srv/dex/web/themes/forge}
             - {name: theme, mountPath: /srv/dex/web/templates/header.html, subPath: header.html}
@@ -169,6 +175,13 @@ spec:
           configMap: {name: dex-config}
         - name: tmp
           emptyDir: {sizeLimit: 16Mi}
+        {{- with .Values.database.caSecret }}
+        - name: database-ca
+          secret:
+            secretName: {{ . }}
+            items:
+              - {key: ca.crt, path: ca.crt}
+        {{- end }}
         {{- if .Values.login.theme }}
         - name: theme
           configMap: {name: dex-theme}

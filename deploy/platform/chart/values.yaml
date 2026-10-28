@@ -127,7 +127,16 @@ database:
   port: 5432
   user: forge
   loginDatabase: dex
+  # The login's sslmode: disable, require (encrypted, the certificate is not
+  # checked), verify-ca or verify-full (checked against caSecret's CA, or the
+  # system's trusted roots without it). The API takes its sslmode from "uri";
+  # use the same.
   sslMode: require
+  # A Secret in Forge's namespace with "ca.crt": the CA that signed the
+  # server's certificate, when the system's roots don't (a private CA, such
+  # as CloudNativePG's own). The API gets it as PGSSLROOTCERT, the login as its
+  # caFile.
+  caSecret: ""
 
 # Where your services' CI pushes their images: a registry host and an
 # optional path, no scheme. Deploys and previews run

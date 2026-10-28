@@ -1,0 +1,5 @@
+# want: database.mode and database.external are gone
+database:
+  mode: external
+  external:
+    host: db.example.com

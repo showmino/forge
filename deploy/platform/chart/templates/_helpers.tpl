@@ -233,5 +233,8 @@ Values of the modes that are gone fail here, before anything renders.
 {{- fail "database.mode and database.external are gone (chart 0.32.0): database.external.* is now database.* (existingSecret, host, port, user, loginDatabase, sslMode)" -}}
 {{- end -}}
 {{- $_ := $db.host | required (printf "database.host is required: Forge's PostgreSQL server, which you run outside Forge's release. Upgrading from a chart before 0.32.0 that ran the database itself (the default)? Copy the data first, or Forge starts on an empty database: %s" $moved) -}}
+{{- if not (has $db.sslMode (list "disable" "require" "verify-ca" "verify-full")) -}}
+{{- fail (printf "database.sslMode %q must be disable, require, verify-ca or verify-full" (toString $db.sslMode)) -}}
+{{- end -}}
 {{- $db.existingSecret | required "database.existingSecret is required: a Secret with \"uri\" (the API's connection string) and \"password\" (the login's)" -}}
 {{- end -}}

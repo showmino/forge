@@ -63,6 +63,13 @@ spec:
             defaultMode: 0440
             items:
               - {key: {{ .Values.github.keys.appPrivateKey }}, path: app-private-key}
+        {{- with .Values.database.caSecret }}
+        - name: database-ca
+          secret:
+            secretName: {{ . }}
+            items:
+              - {key: ca.crt, path: ca.crt}
+        {{- end }}
       containers:
         - name: forge-api
           image: {{ include "forge.apiImage" . | quote }}
@@ -80,6 +87,11 @@ spec:
             - name: FORGE_DATABASE_URL
               valueFrom:
                 secretKeyRef: {name: {{ include "forge.dbSecret" . }}, key: uri}
+            {{- if .Values.database.caSecret }}
+            # The CA that signed the database server's certificate, for
+            # sslmode=verify-full (or verify-ca) in the Secret's uri.
+            - {name: PGSSLROOTCERT, value: /etc/forge/database-ca/ca.crt}
+            {{- end }}
             - {name: FORGE_LOG_FORMAT, value: json}
             - {name: FORGE_GITHUB_APP_ID, value: {{ .Values.github.appID | required "github.appID is required" | quote }}}
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/app-private-key}
@@ -137,6 +149,9 @@ spec:
             {{- end }}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
+            {{- if .Values.database.caSecret }}
+            - {name: database-ca, mountPath: /etc/forge/database-ca, readOnly: true}
+            {{- end }}
           ports:
             - {name: http, containerPort: 8080}
             {{- if .Values.resources.enabled }}

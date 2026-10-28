@@ -38,6 +38,14 @@ platform-chart-test: ## Lint deploy/platform/chart and compare its renders with 
 	  $(HELM) template forge $(PLATFORM_CHART) --namespace $$(case $$t in ingress-deploys) echo platform;; *) echo forge;; esac) -f $(PLATFORM_CHART)/testdata/$$t.yaml \
 	    | diff -u $(PLATFORM_CHART)/testdata/$$t.golden - || exit 1; \
 	done
+	@# Each testdata/fail/*.yaml, on top of minimal.yaml, must fail with the
+	@# message on its "# want:" line.
+	for f in $(PLATFORM_CHART)/testdata/fail/*.yaml; do \
+	  want=$$(sed -n 's/^# want: //p' $$f); \
+	  if out=$$($(HELM) template forge $(PLATFORM_CHART) --namespace forge -f $(PLATFORM_CHART)/testdata/minimal.yaml -f $$f 2>&1); then \
+	    echo "$$f: rendered, want an error with: $$want"; exit 1; fi; \
+	  case "$$out" in *"$$want"*) ;; *) echo "$$f: want an error with \"$$want\", got: $$out"; exit 1;; esac; \
+	done
 
 platform-chart-golden: ## Rewrite deploy/platform/chart's goldens after an intended change
 	for t in $(PLATFORM_CASES); do \
@@ -67,10 +75,10 @@ db: ## Start a local PostgreSQL on :55432 for the store tests (FORGE_TEST_DATABA
 	docker run -d --name forge-test-db -p 55432:5432 -e POSTGRES_PASSWORD=forge mirror.gcr.io/library/postgres:18
 
 api: build ## Run forge-api against local Dex, accepting the web dashboard on localhost:3000
-	$(BIN)/forge-api --oidc-issuer http://localhost:5556/dex --oidc-web-client-id forge-web --cors-origins http://localhost:3000
+	$(BIN)/forge-api --in-memory --oidc-issuer http://localhost:5556/dex --oidc-web-client-id forge-web --cors-origins http://localhost:3000
 
 api-dev: build ## Run forge-api without an identity provider (token "dev")
-	$(BIN)/forge-api --insecure-dev-token
+	$(BIN)/forge-api --in-memory --insecure-dev-token
 
 image: ## Build the forge-api image for k3s (then: docker save forge-api:dev | sudo k3s ctr images import -)
 	docker build -t forge-api:dev .
