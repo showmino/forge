@@ -32,11 +32,14 @@ them.
 | Resources (databases for services) and the runner | `FORGE_RESOURCES`, `FORGE_RUNNER_IMAGE`; the `forge-runner` namespace, its RBAC, admission policy, runner Service, NetworkPolicy | `resources.enabled`, `resources.runnerImage`, the same objects |
 | Public addresses | `FORGE_PUBLIC_DOMAINS`, `FORGE_PUBLIC_DNS_TUNNEL`; one public listener per domain on the previews Gateway; the DNS record kind in the services' AppProject | `apps.publicDomains`, `apps.dnsTunnel`, the listeners and the kind |
 | Other clusters to deploy to | `FORGE_REMOTE_CLUSTERS`; a Role to read Argo CD's cluster Secrets | `clusters.remote`, the Role |
-| Who may write | `FORGE_WRITER_GROUPS` | `github.writerTeams` beside `adminTeams` |
-| More kinds a service may deploy | CronJob, ScaledObject in the AppProject | `deploys.extraKinds` |
 | The API also on a load balancer IP (MetalLB), for the old API name | the API's Service of type LoadBalancer with a fixed IP, which the Cloudflare tunnel routes `forge-api.showmino.com` to | `api.service` (`type`, `annotations`), beside the one host's routes |
-| The login's GitHub client in a Secret of its own | a second 1Password item | `login.existingSecret` (default: `github.existingSecret`) |
+| GitHub credentials in two Secrets, with a vault's field names | two 1Password items (`github_app_private_key`; `client_id`, `client_secret`) | `login.existingSecret`, `github.keys` |
+| Forge's own host on the services' Gateway | (none: the dashboard was a Forge service) | `gateway.appsGateway`: the routes attach to `forge-previews`, which gets an exact-host listener per Forge host |
 | Pinned versions | `FORGE_API_IMAGE`, `FORGE_DEPLOY_CHART_REVISION` | `api.image.tag`, `deploys.chartRevision` (exist) |
+
+Not needed after all: who may write (`FORGE_WRITER_GROUPS` is the older
+name of `FORGE_ADMIN_GROUPS`, which the chart sets from `github.adminTeams`),
+and the CronJob and ScaledObject kinds (the chart's AppProject has them).
 
 Each change is off or empty by default, renders exactly as before when
 unset, and gets a case in `make platform-chart-test`. The user docs
@@ -58,6 +61,11 @@ deployments. The chart's HTTPRoutes attach to that Gateway with
 `gateway.parentRefs`; the listener (or the namespace `forge`) is made to
 accept them. A route for one exact host wins over the wildcard, so the switch
 moves the address from `forge-web` to the chart without a DNS change.
+
+The DNS record of `forge.showmino.com` is today the `forge-web` service's
+(a public address, so a `CloudflareRecordsApplication` its deploy writes).
+Before that service is deleted, the record moves to the kubernetes repo,
+with the extra manifests, or deleting the service takes the address down.
 
 ## Order
 
