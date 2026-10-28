@@ -33,8 +33,9 @@ on the owner's k3s cluster.
 | `docs/specs/` | One design per phase or feature, as built |
 | `README.md` | The user-facing documentation |
 
-This repo is public. showmino's own install (`live.env`, the live render)
-and the agents' runbooks are in the private repo `showmino/forge-ops`; keep a
+This repo is public. showmino's own install is in the private repo
+`showmino/kubernetes` (`gitops/apps/forge.yaml`), and the agents' runbooks
+in the private repo `showmino/forge-ops`; keep a
 checkout of it next to this one (`../forge-ops`). Nothing about showmino's
 install goes back into this repo.
 
@@ -55,14 +56,15 @@ These were set by the owner. They are not suggestions.
   explicit OK each time:** applying manifests, restarting a workload,
   promoting a service to production, deleting anything.
 - A rollout follows one procedure, written out in `showmino/forge-ops`
-  `docs/agents/verifying.md`: what is live is forge-ops' `live/forge.yaml`
-  (rendered from its `live.env` by its `render-live.sh`, with this repo's
-  `deploy/k3s/render.sh`) and there is no drift (Argo CD
-  shows it Synced; `kubectl diff` on it shows nothing but Argo CD's
-  `tracking-id` annotations); change `live.env`, render, read the diff; show it
-  to the owner; after the OK, server dry run, then apply; verify; merge the
-  forge-ops pull request so its `main` says what is live. Argo CD shows Forge as the
-  application `forge`, with manual sync: never press Sync without the OK.
+  `docs/agents/verifying.md`. What is live is the Argo CD Application `forge`
+  in `showmino/kubernetes` (`gitops/apps/forge.yaml`: the public `forge`
+  chart at a fixed version, showmino's values inline, plus
+  `apps/forge/production/`), synced automatically. A rollout is a pull request
+  there: change the version or the values, render the chart with them
+  (`helm template`), read `kubectl diff` and a `kubectl apply --dry-run=server`
+  of it, and put what changes in the pull request. The owner merges in
+  `showmino/kubernetes`; the merge is the rollout. Then verify. Never press
+  Sync or apply by hand.
 - Never write to the production database directly. Migrations run when
   forge-api starts.
 - A reviewer or subagent you start gets no cluster access: tell it to run no
@@ -91,9 +93,8 @@ a yes to the next one.
   (`README.md`, `AGENTS.md`, ...): CI does not run for it at all (the owner's
   rule: checks on docs alone only cost time), and it merges once it contains
   the current `main`. Docs elsewhere (test data, templates) run CI as usual.
-  Rollout pull requests are in `showmino/forge-ops`, which has no CI: run its
-  `sh render-live.sh --check` yourself before you push (the owner's rule,
-  2026-10-16).
+  Rollout pull requests are in `showmino/kubernetes`, and the owner merges
+  them there.
   In `forge-web` the
   jobs `image` and `deploy` only run on `main` and show as skipped on a pull
   request; that is expected, and `test` must pass. Any other skip is a stop.
