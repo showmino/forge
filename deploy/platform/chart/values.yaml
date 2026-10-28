@@ -14,6 +14,12 @@ github:
   # The App needs the organization permission Members: read, or the login
   # sees no teams and nobody is an admin.
   existingSecret: forge-github
+  # The key names in that Secret, if yours are named otherwise (for example
+  # by a secrets operator that keeps a vault's field names).
+  keys:
+    appPrivateKey: app-private-key
+    clientID: client-id
+    clientSecret: client-secret
   # The GitHub teams whose members are admins, comma separated, as
   # "<org>:<team-slug>". Defaults to "<org>:platform-engineering". Everyone
   # else who signs in can read, and change the services of their own teams.
@@ -52,6 +58,10 @@ gateway:
   enabled: false
   # For example: [{name: my-gateway, namespace: gateway-system}]
   parentRefs: []
+  # true: the routes attach to this chart's own Gateway forge-previews
+  # (apps.routing gateway, with previews or deploys on), which then gets a
+  # listener of its own for each of Forge's hosts; parentRefs is not needed.
+  appsGateway: false
 
 api:
   image:
@@ -61,6 +71,12 @@ api:
   # A host of its own for the API (optional; the dashboard then calls it
   # across origins, which the chart allows).
   host: ""
+  # The API's Service. LoadBalancer gives the API an address of its own too,
+  # beside the routes above, for example a fixed IP that an older API name
+  # still points at (MetalLB: metallb.universe.tf/loadBalancerIPs).
+  service:
+    type: ClusterIP
+    annotations: {}
   resources:
     requests: {cpu: 10m, memory: 32Mi}
     # Template releases are cached in memory (up to 100 MiB each).
@@ -83,6 +99,9 @@ login:
   host: ""
   # Dex's pages in Forge's look (files/dex-theme). false keeps Dex's own.
   theme: true
+  # A Secret of its own for the login's GitHub client, with the keys
+  # github.keys.clientID and clientSecret. Empty: github.existingSecret.
+  existingSecret: ""
 
 database:
   # "bundled": one PostgreSQL pod with a volume, in this release. Its password
@@ -181,6 +200,16 @@ apps:
     # Argo CD waits for the controller to publish an address on each
     # Ingress (status.loadBalancer); a controller that never does makes
     # every deploy wait for its sync timeout.
+  # Public addresses: a service may set its address under one of these
+  # domains (`forge create --domain`, run.domain in forge.yaml). Each is
+  # {domain, zone}: zone names the DNS zone for the DNS record Forge writes
+  # with each such deployment (a kro CloudflareRecordsApplication). The
+  # chart's Gateway gets a listener per domain and its root. Needs deploys and
+  # apps.routing gateway; send the domains' hosts to the Gateway (a tunnel or
+  # DNS). The first domain is the default.
+  publicDomains: []
+  # The tunnel the DNS records point at.
+  dnsTunnel: production
 
 # Previews: `forge env create` runs a branch in a namespace of its own.
 # Needs apps.domain, apps.pullSecret and apps.routing "gateway".
@@ -200,6 +229,17 @@ deploys:
   # Empty: this chart's appVersion. Changing it redeploys every service.
   chartRevision: ""
 
+# Resources: `forge resource` plans and applies a service's databases
+# (CloudNativePG clusters, the operator must be installed) with OpenTofu Jobs
+# in the namespace <release namespace>-runner. Needs deploys.
+resources:
+  enabled: false
+  runner:
+    image:
+      repository: ghcr.io/showmino/forge-runner
+      # Empty: v<appVersion>.
+      tag: ""
+
 # Cluster capacity: `forge cluster list/get` (admins) shows this cluster's
 # nodes, CPU and memory, from metrics-server.
 clusters:
@@ -208,3 +248,6 @@ clusters:
   # Optional: Prometheus (adds disk and volumes), and a Grafana to link to.
   prometheusURL: ""
   grafanaURL: ""
+  # Other clusters services may deploy to: the names of Argo CD's cluster
+  # Secrets in the namespace argocd. forge-api reads exactly those.
+  remote: []

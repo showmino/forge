@@ -51,6 +51,10 @@ spec:
     - {group: onepassword.com, kind: OnePasswordItem}
     - {group: batch, kind: CronJob}
     - {group: keda.sh, kind: ScaledObject}
+    {{- if .Values.apps.publicDomains }}
+    # The DNS record of a public address (apps.publicDomains).
+    - {group: kro.run, kind: CloudflareRecordsApplication}
+    {{- end }}
     # Not deployed by the chart: Argo CD leaves out of an application's tree
     # every kind its project does not allow, so without these the UI shows a
     # Deployment (or CronJob, or ScaledObject) with nothing under it.

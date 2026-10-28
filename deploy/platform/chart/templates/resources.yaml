@@ -1,0 +1,190 @@
+{{- if .Values.resources.enabled }}
+{{- if not .Values.deploys.enabled }}
+{{- fail "resources.enabled needs deploys.enabled: a database belongs to a deployed service" }}
+{{- end }}
+{{- $ns := .Release.Namespace }}
+{{- $runner := include "forge.runnerNamespace" . }}
+# Resources: what `forge resource` needs on the cluster.
+#   - the namespace the runner Jobs run in, and the runner's service account;
+#   - what a runner may do: manage CloudNativePG clusters, and only in the
+#     namespaces of Forge's services;
+#   - what forge-api may do: start, watch and stop the runner Jobs, keep each
+#     run's token in a Secret next to its Job, and read a database's health;
+#   - the runner API of forge-api, reachable from the runner Jobs only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: forge-runner
+  namespace: {{ $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+---
+# Exactly what the OpenTofu module makes (deploy/runner/module/main.tf), plus
+# reading resource definitions: the Kubernetes provider looks the Cluster
+# kind up among them before it plans.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $runner }}
+subjects:
+  - {kind: ServiceAccount, name: forge-runner, namespace: {{ $runner }}}
+---
+# RBAC cannot say "only in the namespaces of Forge's services"; this policy
+# does. It binds the runner alone: every other caller is untouched.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ printf "%s-namespaces" $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [postgresql.cnpg.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [clusters]
+  matchConditions:
+    - name: is-the-forge-runner
+      expression: {{ printf "request.userInfo.username == \"system:serviceaccount:%s:forge-runner\"" $runner | quote }}
+  validations:
+    - expression: >-
+        has(namespaceObject.metadata.labels) &&
+        "app.kubernetes.io/managed-by" in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels["app.kubernetes.io/managed-by"] == "forge" &&
+        "forge.dev/deploy-env" in namespaceObject.metadata.labels
+      message: the Forge runner may change databases only in the staging or production namespace of a Forge service
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ printf "%s-namespaces" $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  policyName: {{ printf "%s-namespaces" $runner }}
+  validationActions: [Deny]
+---
+# Exactly the calls internal/server/job_launcher.go makes, in this namespace only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-runs
+  namespace: {{ $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [create, get, delete]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, update, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-runs
+  namespace: {{ $runner }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-runs
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ $ns }}}
+---
+# forge-api reads a database's health for `forge resource list` and `get`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-forge-api-resources" $ns }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-forge-api-resources" $ns }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-forge-api-resources" $ns }}
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ $ns }}}
+---
+# The runner API: inside the cluster only. No Ingress or route points at it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: forge-api-runner
+  namespace: {{ $ns }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  selector: {app: forge-api}
+  ports:
+    - {name: runner, port: 8081, targetPort: runner}
+---
+# The public API stays open to everyone; the runner API only to the runner Jobs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: forge-api
+  namespace: {{ $ns }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {app: forge-api}
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - {protocol: TCP, port: 8080}
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $runner }}}
+      ports:
+        - {protocol: TCP, port: 8081}
+{{- end }}

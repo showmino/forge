@@ -2,6 +2,9 @@
 {{- fail "set either ingress.enabled or gateway.enabled, not both" }}
 {{- end }}
 {{- $routes := include "forge.routes" . | fromYaml }}
+{{- if and .Values.gateway.enabled .Values.gateway.appsGateway (not (include "forge.gateway" .)) }}
+{{- fail "gateway.appsGateway needs the chart's Gateway: previews, or deploys with apps.routing gateway" }}
+{{- end }}
 {{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -53,7 +56,11 @@ metadata:
     {{- include "forge.labels" $ | nindent 4 }}
 spec:
   parentRefs:
-    {{- toYaml ($.Values.gateway.parentRefs | required "gateway.parentRefs is required with gateway.enabled") | nindent 4 }}
+    {{- if $.Values.gateway.appsGateway }}
+    - {name: forge-previews, namespace: {{ $.Release.Namespace }}, sectionName: {{ include "forge.hostListener" $host }}}
+    {{- else }}
+    {{- toYaml ($.Values.gateway.parentRefs | required "gateway.parentRefs is required with gateway.enabled (or gateway.appsGateway)") | nindent 4 }}
+    {{- end }}
   hostnames: [{{ $host | quote }}]
   rules:
     {{- range $paths }}

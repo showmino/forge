@@ -17,7 +17,16 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "forge.labels" . | nindent 4 }}
+  {{- with .Values.api.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
+  {{- with .Values.api.service.type }}
+  {{- if ne . "ClusterIP" }}
+  type: {{ . }}
+  {{- end }}
+  {{- end }}
   selector: {app: forge-api}
   ports:
     - {name: http, port: 80, targetPort: http}
@@ -53,7 +62,7 @@ spec:
             secretName: {{ .Values.github.existingSecret | required "github.existingSecret is required" }}
             defaultMode: 0440
             items:
-              - {key: app-private-key, path: app-private-key}
+              - {key: {{ .Values.github.keys.appPrivateKey }}, path: app-private-key}
       containers:
         - name: forge-api
           image: {{ include "forge.apiImage" . | quote }}
@@ -104,6 +113,19 @@ spec:
             {{- with .Values.clusters.grafanaURL }}
             - {name: FORGE_GRAFANA_URL, value: {{ . | quote }}}
             {{- end }}
+            {{- with .Values.clusters.remote }}
+            - {name: FORGE_REMOTE_CLUSTERS, value: {{ join "," . | quote }}}
+            {{- end }}
+            {{- end }}
+            {{- with include "forge.publicDomains" . }}
+            - {name: FORGE_PUBLIC_DOMAINS, value: {{ . | quote }}}
+            - {name: FORGE_PUBLIC_DNS_TUNNEL, value: {{ $.Values.apps.dnsTunnel | default "production" | quote }}}
+            {{- end }}
+            {{- if .Values.resources.enabled }}
+            - {name: FORGE_RESOURCES, value: "1"}
+            - {name: FORGE_RUNNER_IMAGE, value: {{ include "forge.runnerImage" . | quote }}}
+            - {name: FORGE_RUNNER_NAMESPACE, value: {{ include "forge.runnerNamespace" . | quote }}}
+            - {name: FORGE_RUNNER_API_URL, value: {{ printf "http://forge-api-runner.%s.svc:8081" .Release.Namespace | quote }}}
             {{- end }}
             {{- with .Values.argocdURL }}
             - {name: FORGE_ARGOCD_URL, value: {{ . | quote }}}
@@ -117,6 +139,9 @@ spec:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
           ports:
             - {name: http, containerPort: 8080}
+            {{- if .Values.resources.enabled }}
+            - {name: runner, containerPort: 8081}
+            {{- end }}
           readinessProbe:
             httpGet: {path: /healthz, port: http}
           livenessProbe:

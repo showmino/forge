@@ -71,6 +71,50 @@
 {{- if or .Values.previews.enabled (and .Values.deploys.enabled (eq $routing "gateway")) }}true{{ end -}}
 {{- end -}}
 
+{{/* forge.hostListener: the Gateway listener of one of Forge's hosts. */}}
+{{- define "forge.hostListener" -}}
+{{- printf "forge-%s" (. | sha256sum | trunc 8) -}}
+{{- end -}}
+
+{{- define "forge.runnerImage" -}}
+{{- $r := .Values.resources.runner.image -}}
+{{- printf "%s:%s" $r.repository ($r.tag | default (printf "v%s" .Chart.AppVersion)) -}}
+{{- end -}}
+
+{{- define "forge.runnerNamespace" -}}
+{{- printf "%s-runner" .Release.Namespace -}}
+{{- end -}}
+
+{{/*
+forge.publicDomains: apps.publicDomains as forge-api reads it,
+"<domain>=<zone>,...", after the checks forge-api makes (ParsePublicDomains),
+so that what renders also starts. Empty without public domains.
+*/}}
+{{- define "forge.publicDomains" -}}
+{{- $items := list -}}
+{{- $seen := dict -}}
+{{- range .Values.apps.publicDomains -}}
+{{- if not (regexMatch `^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$` (.domain | default "")) -}}
+{{- fail (printf "apps.publicDomains: %q is not a domain such as example.com" (.domain | default "")) -}}
+{{- end -}}
+{{- if or (not (regexMatch "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$" (.zone | default ""))) (hasSuffix "-root" (.zone | default "")) -}}
+{{- fail (printf "apps.publicDomains: the zone of %s must be a name such as example-com, not ending in -root" .domain) -}}
+{{- end -}}
+{{- if hasKey $seen .domain -}}
+{{- fail (printf "apps.publicDomains: %s is listed twice" .domain) -}}
+{{- end -}}
+{{- $_ := set $seen .domain true -}}
+{{- $items = append $items (printf "%s=%s" .domain .zone) -}}
+{{- end -}}
+{{- if and $items (not .Values.deploys.enabled) -}}
+{{- fail "apps.publicDomains needs deploys.enabled" -}}
+{{- end -}}
+{{- if and $items (ne .Values.apps.routing "gateway") -}}
+{{- fail "apps.publicDomains needs apps.routing gateway: each domain is a listener on the chart's Gateway" -}}
+{{- end -}}
+{{- join "," $items -}}
+{{- end -}}
+
 {{- define "forge.labels" -}}
 app.kubernetes.io/part-of: forge
 app.kubernetes.io/managed-by: {{ .Release.Service }}

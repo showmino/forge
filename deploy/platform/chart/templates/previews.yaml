@@ -68,6 +68,40 @@ roleRef:
   name: forge-api-pull-secret
 subjects:
   - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
+{{- with .Values.clusters.remote }}
+---
+# Other clusters (clusters.remote): forge-api reads exactly these Argo CD
+# cluster Secrets, and with their credentials those clusters.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-api-remote-clusters
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: {{ toJson . }}
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-api-remote-clusters
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-api-remote-clusters
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ $.Release.Namespace }}}
+{{- end }}
+{{- end }}
+{{- if and .Values.clusters.remote (not .Values.clusters.enabled) }}
+{{- fail "clusters.remote needs clusters.enabled" }}
 {{- end }}
 {{- if $gateway }}
 {{- $domain := include "forge.appsDomain" . }}
@@ -115,6 +149,38 @@ spec:
             matchLabels:
               app.kubernetes.io/managed-by: forge
               forge.dev/deploy-env: {{ $env }}
+    {{- end }}
+    {{- end }}
+    {{- range $d := .Values.apps.publicDomains }}
+    {{- /* Public addresses: one listener per domain and one for its root
+    (*.<domain> does not match the domain itself), each taking routes only
+    from the namespace of a Forge deployment, never a preview. */}}
+    {{- range $l := list (list (printf "public-%s" $d.zone) (printf "*.%s" $d.domain)) (list (printf "public-%s-root" $d.zone) $d.domain) }}
+    - name: {{ index $l 0 }}
+      protocol: HTTP
+      port: 80
+      hostname: {{ index $l 1 | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/managed-by: forge
+            matchExpressions:
+              - {key: forge.dev/deploy-env, operator: Exists}
+    {{- end }}
+    {{- end }}
+    {{- if and $.Values.gateway.enabled $.Values.gateway.appsGateway }}
+    {{- /* Forge's own hosts (gateway.appsGateway): an exact host wins over a
+    public domain's wildcard, and only this namespace's routes attach. */}}
+    {{- range $host, $_ := include "forge.routes" $ | fromYaml }}
+    - name: {{ include "forge.hostListener" $host }}
+      protocol: HTTP
+      port: 80
+      hostname: {{ $host | quote }}
+      allowedRoutes:
+        namespaces:
+          from: Same
     {{- end }}
     {{- end }}
 {{- end }}
