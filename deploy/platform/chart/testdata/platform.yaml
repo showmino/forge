@@ -42,6 +42,7 @@ previews:
 deploys:
   enabled: true
   chartRevision: 0.21.0
+  excludedNamespaces: [docs-staging]
 resources:
   enabled: true
 clusters:

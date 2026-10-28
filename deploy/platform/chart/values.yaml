@@ -228,6 +228,9 @@ deploys:
   chart: oci://ghcr.io/showmino/forge-chart
   # Empty: this chart's appVersion. Changing it redeploys every service.
   chartRevision: ""
+  # Existing namespaces named like *-staging or *-production that are not
+  # Forge's: Argo CD never deploys a service into them.
+  excludedNamespaces: []
 
 # Resources: `forge resource` plans and applies a service's databases
 # (CloudNativePG clusters, the operator must be installed) with OpenTofu Jobs
