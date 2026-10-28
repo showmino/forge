@@ -1,0 +1,3 @@
+# want: is not an origin
+web:
+  origins: [https://Forge.example.com]

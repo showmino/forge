@@ -29,7 +29,11 @@ kubectl -n forge create secret generic forge-database \
 ```
 
 The password goes into `uri` URL-escaped, if it has characters such as
-`@ : / ? # %`.
+`@ : / ? # %`. To check the server's certificate, use `sslmode=verify-full` in
+`uri` and `database.sslMode: verify-full`, and, for a private CA, put it in a
+Secret (key `ca.crt`) named by `database.caSecret`. What the database needs
+(version, permissions, network, backups) is in
+[Install Forge](https://forgegate.io/docs/running-your-own-forge#what-forge-needs-from-it).
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1

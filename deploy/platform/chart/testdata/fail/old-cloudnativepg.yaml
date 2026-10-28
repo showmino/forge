@@ -1,0 +1,4 @@
+# want: database.cloudnativepg is gone
+database:
+  cloudnativepg:
+    instances: 2

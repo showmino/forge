@@ -22,12 +22,48 @@ var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 func TestOpenStoreMemory(t *testing.T) {
 	t.Parallel()
-	s, err := openStore(context.Background(), "", quiet)
+	s, err := openStore(context.Background(), "", true, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := s.(*store.Memory); !ok {
-		t.Fatalf("no URL: got %T, want *store.Memory", s)
+		t.Fatalf("--in-memory: got %T, want *store.Memory", s)
+	}
+}
+
+// Without a database URL forge-api does not start: it never falls back to a
+// catalog that is lost on restart unless --in-memory says so.
+func TestOpenStoreNeedsADatabase(t *testing.T) {
+	t.Parallel()
+	_, err := openStore(context.Background(), "", false, quiet)
+	if err == nil {
+		t.Fatal("no URL and no --in-memory: want an error")
+	}
+	for _, want := range []string{"--database-url", "FORGE_DATABASE_URL", "--in-memory"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
+	}
+}
+
+// A database that does not answer is retried, then reported; neither the
+// error nor the log lines show the password.
+func TestOpenStoreUnreachableHidesPassword(t *testing.T) {
+	t.Parallel()
+	var logs strings.Builder
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	// Port 1 on loopback: nothing listens, the connection is refused at once.
+	_, err := openStore(ctx, "postgres://forge:s3cret-pw@127.0.0.1:1/forge?sslmode=disable&connect_timeout=1", false, log)
+	if err == nil {
+		t.Fatal("want an error for a database that does not answer")
+	}
+	if !strings.Contains(logs.String(), "waiting for the database") {
+		t.Errorf("no retry was logged: %s", logs.String())
+	}
+	if strings.Contains(err.Error()+logs.String(), "s3cret-pw") {
+		t.Fatalf("the password was shown:\nerror: %v\nlog: %s", err, logs.String())
 	}
 }
 
@@ -63,7 +99,7 @@ func TestCatalogSurvivesRestart(t *testing.T) {
 		Service: &forgev1.Service{OwnerTeam: "billing", RepoUrl: "https://github.com/showmino/payments"},
 	}
 
-	first, err := openStore(ctx, url, quiet)
+	first, err := openStore(ctx, url, false, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +109,7 @@ func TestCatalogSurvivesRestart(t *testing.T) {
 	}
 	first.Close()
 
-	second, err := openStore(ctx, url, quiet) // a restart: connects and migrates again
+	second, err := openStore(ctx, url, false, quiet) // a restart: connects and migrates again
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +128,7 @@ func TestCatalogSurvivesRestart(t *testing.T) {
 func TestOpenStoreBadURLDoesNotRetry(t *testing.T) {
 	t.Parallel()
 	start := time.Now()
-	_, err := openStore(context.Background(), "postgres://u:p@h:notaport/db", quiet)
+	_, err := openStore(context.Background(), "postgres://u:p@h:notaport/db", false, quiet)
 	if err == nil {
 		t.Fatal("want an error for an invalid URL")
 	}
@@ -102,6 +138,9 @@ func TestOpenStoreBadURLDoesNotRetry(t *testing.T) {
 	if strings.Contains(err.Error(), ":p@") {
 		t.Fatalf("error leaks the password: %v", err)
 	}
+	if !strings.Contains(err.Error(), "database URL") {
+		t.Errorf("error %q does not say the URL is the problem", err)
+	}
 }
 
 func TestOpenStoreStopsOnCancel(t *testing.T) {
@@ -109,7 +148,7 @@ func TestOpenStoreStopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := openStore(ctx, "postgres://u:p@127.0.0.1:1/db?connect_timeout=1", quiet)
+	_, err := openStore(ctx, "postgres://u:p@127.0.0.1:1/db?connect_timeout=1", false, quiet)
 	if err == nil {
 		t.Fatal("want an error")
 	}

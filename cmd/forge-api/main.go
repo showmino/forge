@@ -1,4 +1,4 @@
-// Command forge-api is the Forge API server: the service catalog (in PostgreSQL with --database-url, else in memory),
+// Command forge-api is the Forge API server: the service catalog (in PostgreSQL at --database-url, or in memory with --in-memory),
 // templates and new services, operations and preview environments. Callers
 // authenticate with OIDC ID tokens from the configured issuer (Dex locally).
 package main
@@ -54,7 +54,8 @@ func run() error {
 		clientID     = flag.String("oidc-client-id", env("FORGE_OIDC_CLIENT_ID", "forge-cli"), "OIDC client ID the CLI uses; tokens must carry it as audience")
 		admins       = flag.String("admin-groups", env("FORGE_ADMIN_GROUPS", ""), "comma-separated groups that may do everything on every service (empty = the writer groups); a service's owner team may work on that service")
 		writers      = flag.String("writer-groups", env("FORGE_WRITER_GROUPS", ""), "older name of --admin-groups, used when that is empty")
-		dbURL        = flag.String("database-url", "", "PostgreSQL URL for the service catalog, or FORGE_DATABASE_URL (empty = in memory, lost on restart)")
+		dbURL        = flag.String("database-url", "", "PostgreSQL URL Forge keeps its data in (required, or FORGE_DATABASE_URL; see --in-memory)")
+		inMemory     = flag.Bool("in-memory", env("FORGE_IN_MEMORY", "") == "1" || env("FORGE_IN_MEMORY", "") == "true", "DEVELOPMENT ONLY: run without a database; everything is lost when forge-api stops (or FORGE_IN_MEMORY=1)")
 		minClient    = flag.String("min-client-version", env("FORGE_MIN_CLIENT_VERSION", "0.1.0"), "oldest CLI version accepted")
 		webClientID  = flag.String("oidc-web-client-id", env("FORGE_OIDC_WEB_CLIENT_ID", ""), "OIDC client ID of the web dashboard; tokens issued to it are accepted too (empty: only the CLI's)")
 		corsOrigins  = flag.String("cors-origins", env("FORGE_CORS_ORIGINS", ""), "comma-separated origins of the web dashboard that may call the API from a browser, for example https://forge.example.com (empty: none)")
@@ -174,7 +175,7 @@ func run() error {
 	if app == nil {
 		log.Info("creating services is off; set --github-app-id and --github-app-key-file")
 	}
-	st, err := openStore(ctx, *dbURL, log)
+	st, err := openStore(ctx, *dbURL, *inMemory, log)
 	if err != nil {
 		return err
 	}

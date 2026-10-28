@@ -80,9 +80,11 @@ bin/forge auth login               # open the URL, log in as admin@example.com /
 bin/forge auth status
 ```
 
-The API keeps the catalog in memory unless it gets `--database-url` (or
-`FORGE_DATABASE_URL`). `make db` starts a local PostgreSQL on port 55432 for
-that and for the store tests:
+The API keeps its data in PostgreSQL at `--database-url` (or
+`FORGE_DATABASE_URL`) and does not start without it. `make api` and
+`make api-dev` pass `--in-memory` (`FORGE_IN_MEMORY=1`) instead: for
+development only, everything is lost when forge-api stops. `make db` starts a
+local PostgreSQL on port 55432 for a real database and for the store tests:
 `FORGE_TEST_DATABASE_URL='postgres://postgres:forge@localhost:55432/postgres?sslmode=disable' make test`.
 
 The CLI asks the API which issuer and client ID to use (`AuthService.GetServerInfo`)
@@ -579,8 +581,8 @@ forge audit list --actor ana@example.com --failed
 forge audit get 1234
 ```
 
-Events live in PostgreSQL (`forge-db`) when forge-api has `--database-url`
-(or `FORGE_DATABASE_URL`); otherwise in memory.
+Events live in Forge's PostgreSQL (`--database-url`), or in memory with
+`--in-memory`.
 
 ### Cluster capacity
 

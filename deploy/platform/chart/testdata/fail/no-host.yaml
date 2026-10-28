@@ -1,0 +1,4 @@
+# want: database.host is required
+# A fresh install with no database named.
+database:
+  host: ""

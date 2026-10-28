@@ -1,0 +1,3 @@
+# want: must be disable, require, verify-ca or verify-full
+database:
+  sslMode: prefer
