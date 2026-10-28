@@ -1251,97 +1251,97 @@ metadata:
     helm.sh/chart: forge-0.27.0
 spec:
   parentRefs:
-    - {name: forge-previews, namespace: forge, sectionName: forge-f68f8f78}
+    - {group: gateway.networking.k8s.io, kind: Gateway, name: forge-previews, namespace: forge, sectionName: forge-f68f8f78}
   hostnames: ["forge.acme.example"]
   rules:
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.AuditService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.AuthService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.ClusterService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.DeployService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.DocsService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.EnvironmentService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.OperationService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.ResourceService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.ServiceCatalogService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.TeamService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /forge.v1.TemplateService}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /cli}
       backendRefs:
-        - {name: forge-api, port: 80}
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
         request: "0s"
     - matches:
         - path: {type: PathPrefix, value: /dex}
       backendRefs:
-        - {name: dex, port: 80}
+        - {group: "", kind: Service, name: dex, port: 80, weight: 1}
 ---
 # Source: forge/templates/resources.yaml
 # RBAC cannot say "only in the namespaces of Forge's services"; this policy

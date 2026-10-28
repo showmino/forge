@@ -64,11 +64,16 @@ metadata:
   labels:
     {{- include "forge.labels" $ | nindent 4 }}
 spec:
+  {{- /* The refs carry the defaults the API server fills in (group, kind,
+  weight), so the live route equals this one and Argo CD does not report it
+  OutOfSync when it syncs with server-side apply. */}}
   parentRefs:
     {{- if $.Values.gateway.appsGateway }}
-    - {name: forge-previews, namespace: {{ $.Release.Namespace }}, sectionName: {{ include "forge.hostListener" $host }}}
+    - {group: gateway.networking.k8s.io, kind: Gateway, name: forge-previews, namespace: {{ $.Release.Namespace }}, sectionName: {{ include "forge.hostListener" $host }}}
     {{- else }}
-    {{- toYaml ($.Values.gateway.parentRefs | required "gateway.parentRefs is required with gateway.enabled (or gateway.appsGateway)") | nindent 4 }}
+    {{- range ($.Values.gateway.parentRefs | required "gateway.parentRefs is required with gateway.enabled (or gateway.appsGateway)") }}
+    - {{ mergeOverwrite (dict "group" "gateway.networking.k8s.io" "kind" "Gateway") . | toJson }}
+    {{- end }}
     {{- end }}
   hostnames: [{{ $host | quote }}]
   rules:
@@ -76,7 +81,7 @@ spec:
     - matches:
         - path: {type: PathPrefix, value: {{ .path }}}
       backendRefs:
-        - {name: {{ .service }}, port: {{ .port }}}
+        - {group: "", kind: Service, name: {{ .service }}, port: {{ .port }}, weight: 1}
       {{- if eq .service "forge-api" }}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
