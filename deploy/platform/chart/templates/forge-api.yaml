@@ -91,6 +91,9 @@ spec:
             # The CA that signed the database server's certificate, for
             # sslmode=verify-full (or verify-ca) in the Secret's uri.
             - {name: PGSSLROOTCERT, value: /etc/forge/database-ca/ca.crt}
+            # Used only when the uri has no sslmode, which would mean
+            # "prefer": encrypted if possible, the CA not checked.
+            - {name: PGSSLMODE, value: {{ .Values.database.sslMode | quote }}}
             {{- end }}
             - {name: FORGE_LOG_FORMAT, value: json}
             - {name: FORGE_GITHUB_APP_ID, value: {{ .Values.github.appID | required "github.appID is required" | quote }}}

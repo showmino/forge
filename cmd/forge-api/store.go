@@ -29,7 +29,7 @@ func openStore(ctx context.Context, url string, inMemory bool, log *slog.Logger)
 		return store.NewMemory(), nil
 	}
 	if inMemory {
-		return nil, errors.New("--in-memory and --database-url are both set: pick one")
+		return nil, errors.New("--in-memory (FORGE_IN_MEMORY) and --database-url (FORGE_DATABASE_URL) are both set: pick one")
 	}
 	var (
 		pg  *store.Postgres

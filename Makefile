@@ -42,6 +42,7 @@ platform-chart-test: ## Lint deploy/platform/chart and compare its renders with 
 	@# message on its "# want:" line.
 	for f in $(PLATFORM_CHART)/testdata/fail/*.yaml; do \
 	  want=$$(sed -n 's/^# want: //p' $$f); \
+	  [ -n "$$want" ] || { echo "$$f: no \"# want:\" line"; exit 1; }; \
 	  if out=$$($(HELM) template forge $(PLATFORM_CHART) --namespace forge -f $(PLATFORM_CHART)/testdata/minimal.yaml -f $$f 2>&1); then \
 	    echo "$$f: rendered, want an error with: $$want"; exit 1; fi; \
 	  case "$$out" in *"$$want"*) ;; *) echo "$$f: want an error with \"$$want\", got: $$out"; exit 1;; esac; \

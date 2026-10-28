@@ -127,10 +127,11 @@ database:
   port: 5432
   user: forge
   loginDatabase: dex
-  # The login's sslmode: disable, require (encrypted, the certificate is not
-  # checked), verify-ca or verify-full (checked against caSecret's CA, or the
-  # system's trusted roots without it). The API takes its sslmode from "uri";
-  # use the same.
+  # The login's sslmode: disable, require (encrypted; the certificate is
+  # checked only against caSecret's CA when that is set), verify-ca or
+  # verify-full (checked against caSecret's CA, or the system's trusted roots
+  # without it). The API takes its sslmode from "uri"; use the same. With
+  # caSecret, a uri without sslmode gets this one.
   sslMode: require
   # A Secret in Forge's namespace with "ca.crt": the CA that signed the
   # server's certificate, when the system's roots don't (a private CA, such
