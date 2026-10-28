@@ -153,10 +153,10 @@ spec:
           env:
             - name: GITHUB_CLIENT_ID
               valueFrom:
-                secretKeyRef: {name: {{ .Values.github.existingSecret }}, key: client-id}
+                secretKeyRef: {name: {{ .Values.login.existingSecret | default .Values.github.existingSecret }}, key: {{ .Values.github.keys.clientID }}}
             - name: GITHUB_CLIENT_SECRET
               valueFrom:
-                secretKeyRef: {name: {{ .Values.github.existingSecret }}, key: client-secret}
+                secretKeyRef: {name: {{ .Values.login.existingSecret | default .Values.github.existingSecret }}, key: {{ .Values.github.keys.clientSecret }}}
             - name: DEX_DB_PASSWORD
               valueFrom:
                 secretKeyRef: {name: {{ include "forge.dbSecret" . }}, key: password}

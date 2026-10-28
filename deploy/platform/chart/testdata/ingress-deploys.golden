@@ -976,7 +976,7 @@ spec:
 # Applications are named <service>-<env> and deploy into the namespace of
 # that name; forge-api refuses a namespace that exists and isn't Forge's.
 # Existing namespaces named like *-staging or *-production that are not
-# Forge's must be listed below as "!<name>" deny destinations.
+# Forge's go in deploys.excludedNamespaces, as "!<name>" deny destinations.
 #
 # The double-brace expressions you'll see below (name, releaseName,
 # valueFiles, namespace, the forge.dev/* labels) are Argo CD ApplicationSet's

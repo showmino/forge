@@ -30,7 +30,7 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/ingress.yaml | diff -u deploy/argocd/chart/testdata/ingress.golden -
 
 PLATFORM_CHART := deploy/platform/chart
-PLATFORM_CASES := minimal gateway full ingress-deploys gateway-deploys
+PLATFORM_CASES := minimal gateway full ingress-deploys gateway-deploys platform
 # The bundled database's password is new on every render without a cluster.
 REDACT := sed -E 's/^(  (password|uri): ).*/\1REDACTED/'
 

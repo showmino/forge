@@ -9,7 +9,7 @@
 # Applications are named <service>-<env> and deploy into the namespace of
 # that name; forge-api refuses a namespace that exists and isn't Forge's.
 # Existing namespaces named like *-staging or *-production that are not
-# Forge's must be listed below as "!<name>" deny destinations.
+# Forge's go in deploys.excludedNamespaces, as "!<name>" deny destinations.
 #
 # The double-brace expressions you'll see below (name, releaseName,
 # valueFiles, namespace, the forge.dev/* labels) are Argo CD ApplicationSet's
@@ -34,6 +34,12 @@ spec:
     - {{ $chart | quote }}
     - {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
   destinations:
+    {{- range .Values.deploys.excludedNamespaces }}
+    {{- if not (regexMatch `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$` .) }}
+    {{- fail (printf "deploys.excludedNamespaces: %q is not a namespace name" .) }}
+    {{- end }}
+    - {server: https://kubernetes.default.svc, namespace: {{ printf "!%s" . | quote }}}
+    {{- end }}
     - {server: https://kubernetes.default.svc, namespace: "*-staging"}
     - {server: https://kubernetes.default.svc, namespace: "*-production"}
   clusterResourceWhitelist:
@@ -51,6 +57,10 @@ spec:
     - {group: onepassword.com, kind: OnePasswordItem}
     - {group: batch, kind: CronJob}
     - {group: keda.sh, kind: ScaledObject}
+    {{- if .Values.apps.publicDomains }}
+    # The DNS record of a public address (apps.publicDomains).
+    - {group: kro.run, kind: CloudflareRecordsApplication}
+    {{- end }}
     # Not deployed by the chart: Argo CD leaves out of an application's tree
     # every kind its project does not allow, so without these the UI shows a
     # Deployment (or CronJob, or ScaledObject) with nothing under it.
