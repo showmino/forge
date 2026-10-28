@@ -1,7 +1,8 @@
 # An install on its own cluster with everything on: one host on the chart's
 # Gateway, the API also on a fixed load balancer IP, public domains,
 # resources, another cluster, GitHub credentials in two Secrets with their
-# own key names, the dashboard's sign-in kept elsewhere.
+# own key names, the dashboard's sign-in kept elsewhere, and the dashboard
+# not the chart's: it runs as a Forge service, in staging and production.
 github:
   org: acme
   appID: "123456"
@@ -26,6 +27,9 @@ api:
       metallb.universe.tf/loadBalancerIPs: 10.0.0.21
 login:
   existingSecret: dex-github
+web:
+  enabled: false
+  origins: [https://forge.acme.example, https://forge-staging.acme.example]
 database:
   mode: cloudnativepg
   cloudnativepg:

@@ -28,8 +28,8 @@ storage:
       mode: {{ $dbSSL | quote }}
 web:
   http: 0.0.0.0:5556
-  {{- if .Values.web.enabled }}
-  allowedOrigins: [{{ include "forge.webURL" . | quote }}]
+  {{- with include "forge.webOrigins" . }}
+  allowedOrigins: [{{ range $i, $o := splitList "\n" . }}{{ if $i }}, {{ end }}{{ $o | quote }}{{ end }}]
   {{- end }}
 {{- if .Values.login.theme }}
 # Forge's look on Dex's pages: the ConfigMap dex-theme beside the image's own files.
@@ -49,11 +49,11 @@ staticClients:
     name: Forge CLI
     public: true
     redirectURIs: [/device/callback, http://127.0.0.1:8085/callback]
-  {{- if .Values.web.enabled }}
+  {{- with include "forge.webOrigins" . }}
   - id: forge-web
     name: Forge dashboard
     public: true
-    redirectURIs: [{{ printf "%s/auth/callback" (include "forge.webURL" .) | quote }}]
+    redirectURIs: [{{ range $i, $o := splitList "\n" . }}{{ if $i }}, {{ end }}{{ printf "%s/auth/callback" $o | quote }}{{ end }}]
   {{- end }}
 # Only members of the org sign in; groups are "<org>:<team-slug>", and
 # github.adminTeams picks the admins among them.

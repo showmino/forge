@@ -39,3 +39,6 @@ clusters:
   enabled: true
   name: production
   prometheusURL: http://prometheus.monitoring:9090
+web:
+  # A second dashboard besides the chart's.
+  origins: [https://dash.acme.example]
