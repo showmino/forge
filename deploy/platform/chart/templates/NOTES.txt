@@ -8,7 +8,10 @@ The GitHub App's callback URL must be exactly:
   {{ include "forge.issuer" . }}/callback
 
 Pods that don't start usually miss the Secret {{ .Values.github.existingSecret }}
-(keys app-private-key, client-id, client-secret){{ if eq .Values.database.mode "external" }} or {{ .Values.database.external.existingSecret }} (keys uri, password){{ end }}.
+{{- $k := .Values.github.keys }}
+{{- if .Values.login.existingSecret }} (key {{ $k.appPrivateKey }}) or {{ .Values.login.existingSecret }} (keys {{ $k.clientID }}, {{ $k.clientSecret }})
+{{- else }} (keys {{ $k.appPrivateKey }}, {{ $k.clientID }}, {{ $k.clientSecret }})
+{{- end }}{{ if eq .Values.database.mode "external" }} or {{ .Values.database.external.existingSecret }} (keys uri, password){{ end }}.
 
 Sign in from the CLI:
 

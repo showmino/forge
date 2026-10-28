@@ -5,6 +5,15 @@
 {{- if and .Values.gateway.enabled .Values.gateway.appsGateway (not (include "forge.gateway" .)) }}
 {{- fail "gateway.appsGateway needs the chart's Gateway: previews, or deploys with apps.routing gateway" }}
 {{- end }}
+{{- if and .Values.gateway.enabled .Values.gateway.appsGateway }}
+{{- range $host, $_ := $routes }}
+{{- range $.Values.apps.publicDomains }}
+{{- if eq $host .domain }}
+{{- fail (printf "%s is both one of Forge's hosts and a public domain's root: the Gateway would have two listeners for it. Put Forge on a host under it, such as forge.%s" $host $host) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress

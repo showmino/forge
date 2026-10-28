@@ -68,37 +68,6 @@ roleRef:
   name: forge-api-pull-secret
 subjects:
   - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
-{{- with .Values.clusters.remote }}
----
-# Other clusters (clusters.remote): forge-api reads exactly these Argo CD
-# cluster Secrets, and with their credentials those clusters.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: forge-api-remote-clusters
-  namespace: argocd
-  labels:
-    {{- include "forge.labels" $ | nindent 4 }}
-rules:
-  - apiGroups: [""]
-    resources: [secrets]
-    resourceNames: {{ toJson . }}
-    verbs: [get]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: forge-api-remote-clusters
-  namespace: argocd
-  labels:
-    {{- include "forge.labels" $ | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: forge-api-remote-clusters
-subjects:
-  - {kind: ServiceAccount, name: forge-api, namespace: {{ $.Release.Namespace }}}
-{{- end }}
 {{- end }}
 {{- if and .Values.clusters.remote (not .Values.clusters.enabled) }}
 {{- fail "clusters.remote needs clusters.enabled" }}
@@ -220,4 +189,45 @@ roleRef:
   name: {{ printf "%s-forge-api-clusters" .Release.Namespace }}
 subjects:
   - {kind: ServiceAccount, name: forge-api, namespace: {{ .Release.Namespace }}}
+{{- with .Values.clusters.remote }}
+{{- $seen := dict ($.Values.clusters.name | default "default") true }}
+{{- range . }}
+{{- if not (regexMatch `^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$` .) }}
+{{- fail (printf "clusters.remote: %q is not an Argo CD cluster Secret name (a lowercase DNS label of at most 40 characters)" .) }}
+{{- end }}
+{{- if hasKey $seen . }}
+{{- fail (printf "clusters.remote: %s is named twice, or is clusters.name" .) }}
+{{- end }}
+{{- $_ := set $seen . true }}
+{{- end }}
+---
+# Other clusters (clusters.remote): forge-api reads exactly these Argo CD
+# cluster Secrets, and with their credentials those clusters.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ printf "%s-forge-api-remote-clusters" $.Release.Namespace }}
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: {{ toJson . }}
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ printf "%s-forge-api-remote-clusters" $.Release.Namespace }}
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ printf "%s-forge-api-remote-clusters" $.Release.Namespace }}
+subjects:
+  - {kind: ServiceAccount, name: forge-api, namespace: {{ $.Release.Namespace }}}
+{{- end }}
 {{- end }}

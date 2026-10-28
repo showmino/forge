@@ -109,6 +109,9 @@ so that what renders also starts. Empty without public domains.
 {{- if and $items (not .Values.deploys.enabled) -}}
 {{- fail "apps.publicDomains needs deploys.enabled" -}}
 {{- end -}}
+{{- if and $items (not (regexMatch `^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$` (.Values.apps.dnsTunnel | default "production"))) -}}
+{{- fail (printf "apps.dnsTunnel: %q is not a name such as production" .Values.apps.dnsTunnel) -}}
+{{- end -}}
 {{- if and $items (ne .Values.apps.routing "gateway") -}}
 {{- fail "apps.publicDomains needs apps.routing gateway: each domain is a listener on the chart's Gateway" -}}
 {{- end -}}
