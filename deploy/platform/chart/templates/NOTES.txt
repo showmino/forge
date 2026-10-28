@@ -1,4 +1,4 @@
-Forge is starting at {{ include "forge.webURL" . }}.
+{{ if .Values.web.enabled }}Forge is starting at {{ include "forge.webURL" . }}.{{ else }}Forge's API is starting at {{ include "forge.apiURL" . }} (the dashboard runs elsewhere).{{ end }}
 
   kubectl -n {{ .Release.Namespace }} get pods
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

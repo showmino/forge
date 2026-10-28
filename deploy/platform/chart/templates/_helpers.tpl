@@ -22,6 +22,56 @@
 {{- printf "%s://%s" (include "forge.scheme" .) (include "forge.host" .) -}}
 {{- end -}}
 
+{{/*
+forge.webOrigins: every dashboard that signs in to Forge, one per line: the
+chart's own (web.enabled) and web.origins. Each is https://host or
+http://host[:port], lower case, with no path. Empty: no dashboard.
+*/}}
+{{- define "forge.webOrigins" -}}
+{{- $origins := list -}}
+{{- if .Values.web.enabled -}}
+{{- if ne (include "forge.host" .) (lower (include "forge.host" .)) -}}
+{{- fail (printf "host %q must be lower case: browsers send it so, and Dex and the API compare it as text" (include "forge.host" .)) -}}
+{{- end -}}
+{{- $origins = append $origins (include "forge.webURL" .) -}}
+{{- end -}}
+{{- range .Values.web.origins -}}
+{{- /* The checks forge-api makes (server.ParseOrigins), so that what renders also starts. */ -}}
+{{- if not (regexMatch `^https?://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[1-9][0-9]{0,4})?$` (toString .)) -}}
+{{- fail (printf "web.origins: %q is not an origin such as https://forge.example.com (lower case, no path or trailing slash)" (toString .)) -}}
+{{- end -}}
+{{- $port := regexFind `:[0-9]+$` . | trimPrefix ":" -}}
+{{- if and $port (gt (atoi $port) 65535) -}}
+{{- fail (printf "web.origins: %q: the port must be at most 65535" .) -}}
+{{- end -}}
+{{- if or (regexMatch `^http://.*:80$` .) (regexMatch `^https://.*:443$` .) -}}
+{{- fail (printf "web.origins: %q: leave out the scheme's own port, as a browser does" .) -}}
+{{- end -}}
+{{- if not (has . $origins) -}}
+{{- $origins = append $origins . -}}
+{{- end -}}
+{{- end -}}
+{{- join "\n" $origins -}}
+{{- end -}}
+
+{{/*
+forge.corsOrigins: the dashboards that call the API from another origin,
+comma-separated. The chart's own dashboard needs none when it shares the
+API's host; one in web.origins may call the API at any of its addresses.
+*/}}
+{{- define "forge.corsOrigins" -}}
+{{- $origins := list -}}
+{{- if and .Values.web.enabled (ne (include "forge.apiHost" .) (include "forge.host" .)) -}}
+{{- $origins = append $origins (include "forge.webURL" .) -}}
+{{- end -}}
+{{- range .Values.web.origins -}}
+{{- if not (has . $origins) -}}
+{{- $origins = append $origins . -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $origins -}}
+{{- end -}}
+
 {{- define "forge.apiURL" -}}
 {{- printf "%s://%s" (include "forge.scheme" .) (include "forge.apiHost" .) -}}
 {{- end -}}

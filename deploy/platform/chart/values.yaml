@@ -83,7 +83,14 @@ api:
     limits: {memory: 256Mi}
 
 web:
+  # The dashboard, on host. Turn it off when the dashboard runs elsewhere,
+  # for example as a Forge service, and name its addresses in origins.
   enabled: true
+  # Addresses of other dashboards that sign in to Forge and call its API
+  # from a browser, such as a forge-web service in staging and production:
+  # https://host, no path. Each becomes a Dex redirect URI
+  # (<origin>/auth/callback), an allowed origin of Dex and of the API.
+  origins: []
   image:
     repository: ghcr.io/showmino/forge-web
     tag: v0.1.34

@@ -37,7 +37,7 @@ data:
           mode: "require"
     web:
       http: 0.0.0.0:5556
-      allowedOrigins: ["https://forge.acme.example"]
+      allowedOrigins: ["https://forge.acme.example", "https://dash.acme.example"]
     # Forge's look on Dex's pages: the ConfigMap dex-theme beside the image's own files.
     frontend:
       dir: /srv/dex/web
@@ -57,7 +57,7 @@ data:
       - id: forge-web
         name: Forge dashboard
         public: true
-        redirectURIs: ["https://forge.acme.example/auth/callback"]
+        redirectURIs: ["https://forge.acme.example/auth/callback", "https://dash.acme.example/auth/callback"]
     # Only members of the org sign in; groups are "<org>:<team-slug>", and
     # github.adminTeams picks the admins among them.
     connectors:
@@ -611,7 +611,7 @@ spec:
       annotations:
         # Dex reads its config only when it starts, and header.html is mounted
         # by subPath, which a ConfigMap update does not reach.
-        checksum/config: "86b7da0a5972a2a0"
+        checksum/config: "0e75b9e7268024e7"
         checksum/dex-theme: "3d16ff97441ff85c"
     spec:
       automountServiceAccountToken: false
@@ -702,6 +702,7 @@ spec:
             - {name: FORGE_OIDC_ISSUER, value: "https://forge.acme.example/dex"}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
             - {name: FORGE_OIDC_WEB_CLIENT_ID, value: forge-web}
+            - {name: FORGE_CORS_ORIGINS, value: "https://dash.acme.example"}
             - {name: FORGE_ADMIN_GROUPS, value: "acme:platform-engineering"}
             - name: FORGE_DATABASE_URL
               valueFrom:

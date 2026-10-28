@@ -70,10 +70,10 @@ spec:
           env:
             - {name: FORGE_OIDC_ISSUER, value: {{ include "forge.issuer" . | quote }}}
             - {name: FORGE_OIDC_CLIENT_ID, value: forge-cli}
-            {{- if .Values.web.enabled }}
+            {{- if include "forge.webOrigins" . }}
             - {name: FORGE_OIDC_WEB_CLIENT_ID, value: forge-web}
-            {{- if ne (include "forge.apiHost" .) (include "forge.host" .) }}
-            - {name: FORGE_CORS_ORIGINS, value: {{ include "forge.webURL" . | quote }}}
+            {{- with include "forge.corsOrigins" . }}
+            - {name: FORGE_CORS_ORIGINS, value: {{ . | quote }}}
             {{- end }}
             {{- end }}
             - {name: FORGE_ADMIN_GROUPS, value: {{ include "forge.adminTeams" . | quote }}}
