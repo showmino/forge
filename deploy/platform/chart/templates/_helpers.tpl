@@ -214,12 +214,22 @@ both made from it.
 {{- toYaml $routes -}}
 {{- end -}}
 
+{{/*
+forge.dbSecret: the Secret of Forge's database ("uri" for the API, "password"
+for the login). Forge runs no database of its own: it lives outside this
+release, so that removing Forge's namespace or Application never removes it.
+Values of the modes that are gone fail here, before anything renders.
+*/}}
 {{- define "forge.dbSecret" -}}
-{{- if eq .Values.database.mode "external" -}}
-{{- .Values.database.external.existingSecret | required "database.external.existingSecret is required with database.mode external" -}}
-{{- else if eq .Values.database.mode "cloudnativepg" -}}
-forge-db-app
-{{- else -}}
-{{- .Values.database.bundled.existingSecret | default "forge-db" -}}
+{{- $db := .Values.database -}}
+{{- range $old := list "bundled" "cloudnativepg" -}}
+{{- if or (hasKey $db $old) (eq (toString $db.mode) $old) -}}
+{{- fail (printf "database.%s is gone (chart 0.32.0): Forge no longer runs its own database, so that removing Forge's namespace or Application cannot remove its data. Run PostgreSQL outside Forge's release and set database.existingSecret and database.host; https://forgegate.io/docs/running-your-own-forge shows how" $old) -}}
 {{- end -}}
+{{- end -}}
+{{- if or (hasKey $db "external") (hasKey $db "mode") -}}
+{{- fail "database.mode and database.external are gone (chart 0.32.0): database.external.* is now database.* (existingSecret, host, port, user, loginDatabase, sslMode)" -}}
+{{- end -}}
+{{- $_ := $db.host | required "database.host is required: Forge's PostgreSQL server, which you run outside Forge's release (https://forgegate.io/docs/running-your-own-forge)" -}}
+{{- $db.existingSecret | required "database.existingSecret is required: a Secret with \"uri\" (the API's connection string) and \"password\" (the login's)" -}}
 {{- end -}}

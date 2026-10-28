@@ -1,4 +1,5 @@
-# The least an install needs: one host through an Ingress, the bundled database.
+# The least an install needs: one host through an Ingress, and a database of
+# its own outside the release.
 github:
   org: acme
   appID: "123456"
@@ -9,3 +10,6 @@ ingress:
     cert-manager.io/cluster-issuer: letsencrypt
   tls:
     secretName: forge-tls
+database:
+  existingSecret: forge-database
+  host: forge-db-rw.databases.svc

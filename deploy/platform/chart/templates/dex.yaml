@@ -1,31 +1,17 @@
 {{- define "forge.dexConfig" -}}
 {{- $db := .Values.database }}
-{{- $dbHost := printf "forge-db.%s.svc" .Release.Namespace }}
-{{- $dbPort := 5432 }}
-{{- $dbUser := "forge" }}
-{{- $dbName := "dex" }}
-{{- $dbSSL := "disable" }}
-{{- if eq $db.mode "cloudnativepg" }}
-{{- $dbHost = printf "forge-db-rw.%s.svc" .Release.Namespace }}
-{{- $dbSSL = "require" }}
-{{- else if eq $db.mode "external" }}
-{{- $dbHost = $db.external.host | required "database.external.host is required with database.mode external" }}
-{{- $dbPort = $db.external.port }}
-{{- $dbUser = $db.external.user }}
-{{- $dbName = $db.external.loginDatabase }}
-{{- $dbSSL = $db.external.sslMode }}
-{{- end -}}
+{{- $_ := include "forge.dbSecret" . -}}
 issuer: {{ include "forge.issuer" . }}
 storage:
   type: postgres
   config:
-    host: {{ $dbHost | quote }}
-    port: {{ $dbPort }}
-    database: {{ $dbName | quote }}
-    user: {{ $dbUser | quote }}
+    host: {{ $db.host | quote }}
+    port: {{ $db.port }}
+    database: {{ $db.loginDatabase | quote }}
+    user: {{ $db.user | quote }}
     password: $DEX_DB_PASSWORD
     ssl:
-      mode: {{ $dbSSL | quote }}
+      mode: {{ $db.sslMode | quote }}
 web:
   http: 0.0.0.0:5556
   {{- with include "forge.webOrigins" . }}

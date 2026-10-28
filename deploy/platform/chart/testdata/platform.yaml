@@ -31,9 +31,8 @@ web:
   enabled: false
   origins: [https://forge.acme.example, https://forge-staging.acme.example]
 database:
-  mode: cloudnativepg
-  cloudnativepg:
-    storageClass: longhorn-retain
+  existingSecret: forge-database
+  host: forge-db-production-rw.databases.svc
 apps:
   domain: apps.acme.example
   pullSecret: registry

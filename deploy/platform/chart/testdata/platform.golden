@@ -80,7 +80,7 @@ data:
     storage:
       type: postgres
       config:
-        host: "forge-db-rw.forge.svc"
+        host: "forge-db-production-rw.databases.svc"
         port: 5432
         database: "dex"
         user: "forge"
@@ -807,7 +807,7 @@ spec:
       annotations:
         # Dex reads its config only when it starts, and header.html is mounted
         # by subPath, which a ConfigMap update does not reach.
-        checksum/config: "fc5d90dbc31ec003"
+        checksum/config: "717d0a2276668e75"
         checksum/dex-theme: "3d16ff97441ff85c"
     spec:
       automountServiceAccountToken: false
@@ -830,7 +830,7 @@ spec:
                 secretKeyRef: {name: dex-github, key: client_secret}
             - name: DEX_DB_PASSWORD
               valueFrom:
-                secretKeyRef: {name: forge-db-app, key: password}
+                secretKeyRef: {name: forge-database, key: password}
           ports:
             - {name: http, containerPort: 5556}
           readinessProbe:
@@ -902,7 +902,7 @@ spec:
             - {name: FORGE_ADMIN_GROUPS, value: "acme:platform"}
             - name: FORGE_DATABASE_URL
               valueFrom:
-                secretKeyRef: {name: forge-db-app, key: uri}
+                secretKeyRef: {name: forge-database, key: uri}
             - {name: FORGE_LOG_FORMAT, value: json}
             - {name: FORGE_GITHUB_APP_ID, value: "123456"}
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/app-private-key}
@@ -1092,48 +1092,6 @@ spec:
           kind: Deployment
           jqPathExpressions:
             - 'select(.metadata.annotations["forge.dev/autoscaled"] == "true") | .spec.replicas'
----
-# Source: forge/templates/database.yaml
-# CloudNativePG creates the Secret forge-db-app (keys uri, password, ...) for
-# the owner forge. Backups are cloudnativepg.plugins.
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: forge-db
-  namespace: forge
-  labels:
-    app.kubernetes.io/part-of: forge
-    app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: forge-0.27.0
-spec:
-  instances: 2
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
-  storage:
-    size: "5Gi"
-    storageClass: "longhorn-retain"
-  bootstrap:
-    initdb:
-      database: forge
-      owner: forge
-  resources:
-    requests: {cpu: 50m, memory: 256Mi}
-    limits: {memory: 512Mi}
----
-# Source: forge/templates/database.yaml
-apiVersion: postgresql.cnpg.io/v1
-kind: Database
-metadata:
-  name: forge-db-dex
-  namespace: forge
-  labels:
-    app.kubernetes.io/part-of: forge
-    app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: forge-0.27.0
-spec:
-  name: dex
-  owner: forge
-  cluster:
-    name: forge-db
 ---
 # Source: forge/templates/previews.yaml
 # The Gateway previews and deploys are reached through. Point

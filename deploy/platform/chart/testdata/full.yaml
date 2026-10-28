@@ -1,5 +1,5 @@
-# Every feature: CloudNativePG with backups, previews, deploys, cluster
-# capacity, run.secrets from 1Password.
+# Every feature: an Ingress, previews, deploys, cluster capacity, run.secrets
+# from 1Password, and a database of its own outside the release.
 github:
   org: acme
   appID: "123456"
@@ -8,17 +8,8 @@ ingress:
   tls:
     secretName: forge-tls
 database:
-  mode: cloudnativepg
-  cloudnativepg:
-    storageClass: longhorn-retain
-    plugins:
-      - name: barman-cloud.cloudnative-pg.io
-        isWALArchiver: true
-        parameters: {barmanObjectName: forge-db-backups}
-    serviceAccountAnnotations:
-      azure.workload.identity/client-id: 00000000-0000-0000-0000-000000000000
-    podLabels:
-      azure.workload.identity/use: "true"
+  existingSecret: forge-database
+  host: forge-db-rw.databases.svc
 imageRegistry: acr.acme.example
 argocdURL: https://argocd.acme.example
 secrets:

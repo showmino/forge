@@ -9,3 +9,6 @@ apps:
   pullSecret: ghcr
 deploys:
   enabled: true
+database:
+  existingSecret: forge-database
+  host: forge-db-rw.databases.svc
