@@ -20,9 +20,7 @@ gateway:
   parentRefs:
     - {name: public, namespace: gateway-system}
 database:
-  mode: external
-  external:
-    existingSecret: acme-db
-    host: db.acme.example
-    user: forge_app
-    loginDatabase: forge_login
+  existingSecret: acme-db
+  host: db.acme.example
+  user: forge_app
+  loginDatabase: forge_login

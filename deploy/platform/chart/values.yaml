@@ -110,51 +110,24 @@ login:
   # github.keys.clientID and clientSecret. Empty: github.existingSecret.
   existingSecret: ""
 
+# Forge's PostgreSQL, which you run: the chart runs no database of its own.
+# Keep it outside Forge's namespace and its Argo CD Application (another
+# namespace, a CloudNativePG Cluster of its own Application, or a managed
+# server), so that removing Forge never removes its data, and back it up.
+# Two databases on it, owned by one user: one for the API (named in "uri")
+# and loginDatabase for the login's sessions. Create both first.
 database:
-  # "bundled": one PostgreSQL pod with a volume, in this release. Its password
-  # is generated once into the Secret forge-db, which an uninstall keeps.
-  # No backups: use "cloudnativepg" or "external" for data you can't lose.
-  # "external": a PostgreSQL server of yours (see external below).
-  # "cloudnativepg": a CloudNativePG Cluster (the operator must be installed),
-  # with backups through its plugins.
-  mode: bundled
-  bundled:
-    image: mirror.gcr.io/library/postgres:18
-    size: 5Gi
-    # Empty: the cluster's default StorageClass.
-    storageClass: ""
-    # Empty: the chart makes the Secret forge-db once, and reads it back on
-    # every upgrade. A tool that renders without access to the cluster (Argo
-    # CD, helm template) would make a new password each time: name a Secret of
-    # yours instead, with "password" and "uri"
-    # (postgres://forge:<password>@forge-db.<namespace>.svc:5432/forge?sslmode=disable).
-    existingSecret: ""
-  external:
-    # A Secret you create, with "uri" (the API's connection string, for
-    # example postgres://forge:<password>@db.example.com:5432/forge?sslmode=require)
-    # and "password" (the same password: the login needs it on its own).
-    existingSecret: ""
-    # For the login, which keeps its sessions in a second database on the
-    # same server, owned by the same user. Create that database first.
-    host: ""
-    port: 5432
-    user: forge
-    loginDatabase: dex
-    sslMode: require
-  cloudnativepg:
-    instances: 2
-    size: 5Gi
-    storageClass: ""
-    # CloudNativePG plugins on the Cluster, for example backups with the
-    # Barman Cloud plugin:
-    #   - name: barman-cloud.cloudnative-pg.io
-    #     isWALArchiver: true
-    #     parameters: {barmanObjectName: forge-db-backups}
-    plugins: []
-    # Annotations on the database pods' ServiceAccount (a workload identity
-    # for the backups) and labels on the pods.
-    serviceAccountAnnotations: {}
-    podLabels: {}
+  # A Secret in Forge's namespace with "uri" (the API's connection string,
+  # for example postgres://forge:<password>@db.example.com:5432/forge?sslmode=require,
+  # the password URL-escaped) and "password" (the same password: the login
+  # needs it on its own).
+  existingSecret: ""
+  # The server, for the login (the API reads "uri").
+  host: ""
+  port: 5432
+  user: forge
+  loginDatabase: dex
+  sslMode: require
 
 # Where your services' CI pushes their images: a registry host and an
 # optional path, no scheme. Deploys and previews run

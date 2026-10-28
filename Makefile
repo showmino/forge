@@ -31,19 +31,17 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 
 PLATFORM_CHART := deploy/platform/chart
 PLATFORM_CASES := minimal gateway full ingress-deploys gateway-deploys platform
-# The bundled database's password is new on every render without a cluster.
-REDACT := sed -E 's/^(  (password|uri): ).*/\1REDACTED/'
 
 platform-chart-test: ## Lint deploy/platform/chart and compare its renders with their goldens
 	$(HELM) lint $(PLATFORM_CHART) -f $(PLATFORM_CHART)/testdata/minimal.yaml
 	for t in $(PLATFORM_CASES); do \
-	  $(HELM) template forge $(PLATFORM_CHART) --namespace $$(case $$t in ingress-deploys) echo platform;; *) echo forge;; esac) -f $(PLATFORM_CHART)/testdata/$$t.yaml | $(REDACT) \
+	  $(HELM) template forge $(PLATFORM_CHART) --namespace $$(case $$t in ingress-deploys) echo platform;; *) echo forge;; esac) -f $(PLATFORM_CHART)/testdata/$$t.yaml \
 	    | diff -u $(PLATFORM_CHART)/testdata/$$t.golden - || exit 1; \
 	done
 
 platform-chart-golden: ## Rewrite deploy/platform/chart's goldens after an intended change
 	for t in $(PLATFORM_CASES); do \
-	  $(HELM) template forge $(PLATFORM_CHART) --namespace $$(case $$t in ingress-deploys) echo platform;; *) echo forge;; esac) -f $(PLATFORM_CHART)/testdata/$$t.yaml | $(REDACT) \
+	  $(HELM) template forge $(PLATFORM_CHART) --namespace $$(case $$t in ingress-deploys) echo platform;; *) echo forge;; esac) -f $(PLATFORM_CHART)/testdata/$$t.yaml \
 	    > $(PLATFORM_CHART)/testdata/$$t.golden || exit 1; \
 	done
 

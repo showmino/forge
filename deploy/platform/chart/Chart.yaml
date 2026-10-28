@@ -1,6 +1,6 @@
 apiVersion: v2
-# Forge itself: the API, the dashboard, the login and a database, for a
-# GitHub organization of your own. Not the chart a Forge service is deployed
+# Forge itself: the API, the dashboard and the login, for a GitHub
+# organization of your own, on a PostgreSQL you run. Not the chart a Forge service is deployed
 # with (deploy/argocd/chart). A vX.Y.Z tag publishes it as
 # oci://ghcr.io/showmino/charts/forge with version and appVersion X.Y.Z;
 # appVersion picks the forge-api image and the deploy chart.

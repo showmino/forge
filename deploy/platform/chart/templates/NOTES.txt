@@ -11,19 +11,12 @@ Pods that don't start usually miss the Secret {{ .Values.github.existingSecret }
 {{- $k := .Values.github.keys }}
 {{- if .Values.login.existingSecret }} (key {{ $k.appPrivateKey }}) or {{ .Values.login.existingSecret }} (keys {{ $k.clientID }}, {{ $k.clientSecret }})
 {{- else }} (keys {{ $k.appPrivateKey }}, {{ $k.clientID }}, {{ $k.clientSecret }})
-{{- end }}{{ if eq .Values.database.mode "external" }} or {{ .Values.database.external.existingSecret }} (keys uri, password){{ end }}.
+{{- end }} or {{ .Values.database.existingSecret }} (keys uri, password).
 
 Sign in from the CLI:
 
   forge context set {{ .Release.Name }} --api {{ include "forge.apiURL" . }} --use
   forge auth login
-{{- if and (eq .Values.database.mode "bundled") (not .Values.database.bundled.existingSecret) }}
-
-The database's password is in the Secret forge-db, made at the first install
-and read back by every `helm upgrade`. Do not render this chart with a tool
-that cannot read the cluster (Argo CD, helm template): it would make a new
-password the database does not know. Use database.bundled.existingSecret then.
-{{- end }}
 {{- if .Values.deploys.enabled }}
 
 Deploys write to {{ include "forge.deployRepo" . }}: it must exist, with a main
