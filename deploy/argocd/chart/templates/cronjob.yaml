@@ -32,6 +32,10 @@ spec:
           volumes:
             - name: tmp
               emptyDir: {sizeLimit: 256Mi}
+            {{- range $i, $p := $.Values.writable }}
+            - name: writable-{{ $i }}
+              emptyDir: {sizeLimit: 256Mi}
+            {{- end }}
           containers:
             - name: {{ .name }}
               image: {{ required "image" $.Values.image }}
@@ -51,4 +55,7 @@ spec:
                 capabilities: {drop: [ALL]}
               volumeMounts:
                 - {name: tmp, mountPath: /tmp}
+                {{- range $i, $p := $.Values.writable }}
+                - {name: writable-{{ $i }}, mountPath: {{ $p | quote }}}
+                {{- end }}
 {{- end }}

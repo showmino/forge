@@ -93,7 +93,7 @@ func imageManifest(id string, req *forgev1.CreateServiceRequest, image string, d
 		return nil, nil, err
 	}
 	run := runFromProto(ro)
-	run.Image, run.Port, run.Health = image, int(ro.GetPort()), ro.GetHealth()
+	run.Image, run.Port, run.Health, run.Writable = image, int(ro.GetPort()), ro.GetHealth(), ro.GetWritable()
 	switch {
 	case ro.GetNetworkOnly():
 		run.Domain = manifest.DomainNone

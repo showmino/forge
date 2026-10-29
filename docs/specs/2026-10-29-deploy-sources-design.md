@@ -58,6 +58,14 @@ Run an image someone else built: `nginx:1.27`, `ghcr.io/acme/tool:2.3`.
   the tag (`1.28`), plus a Forge release candidate number as today.
 - **Registries:** public images, and private ones the install's pull secret
   can read. More credentials per team: later.
+- **Non-root:** every service runs with `runAsNonRoot` and a read-only
+  root filesystem, as Forge's own images do. A create or deploy reads the
+  image's `USER` from the registry and refuses root, or a user named rather
+  than numbered (Kubernetes cannot check it), with a message that names a
+  non-root image. `run.writable` lists folders an image writes besides
+  `/tmp`; each gets an empty folder. (Owner's choice, 2026-10-29, after
+  `nginx:1.27` failed with "container has runAsNonRoot and image will run as
+  root".)
 - **Policy:** `policy/images.rego` refuses `:latest` and images outside
   the allowed registries (`--allowed-registries`, the chart value
   `allowedRegistries`; empty means any).

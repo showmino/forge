@@ -22,6 +22,7 @@ jobs:
     schedule: "0 3 * * *"
     command: [node, scripts/cleanup.js]
 autoscaling: {min: 2, max: 6}
+writable: [/var/cache/app, /var/run]
 forge:
   service: services/payments
   env: production

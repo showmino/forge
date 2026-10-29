@@ -350,6 +350,12 @@ repo, which runs an image someone else built (`nginx:1.27`,
 `ghcr.io/acme/tool:2.3`): its `forge.yaml`, with `run.image`, lives in the
 deploy repo at `services/<name>/forge.yaml`, and `--port` and `--health` say
 where the image listens and what is probed (every run option may be set).
+Every service runs as a non-root user with a read-only root filesystem, so
+the image must name a non-root user by number (its `USER`): forge-api reads
+it from the registry and refuses a root image, or one whose user is a name,
+before anything is written (use `nginxinc/nginx-unprivileged`, not `nginx`).
+`--writable` (`run.writable` in `forge.yaml`) names folders it writes besides
+`/tmp`, up to 8, each an empty folder, such as `/var/cache/nginx`.
 forge then deploys it to staging and watches the deploy (`--deploy=false`
 does not). A deploy pins the tag to its digest, so promoting moves exactly
 what staging ran; the version is the tag. `forge deploy start <name> --env

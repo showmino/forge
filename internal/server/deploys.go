@@ -224,6 +224,7 @@ type deployValues struct {
 	Vars        map[string]string   `yaml:"vars,omitempty"`
 	Secrets     []manifest.Secret   `yaml:"secrets,omitempty"`
 	Jobs        []manifest.Job      `yaml:"jobs,omitempty"`
+	Writable    []string            `yaml:"writable,omitempty"`
 	Autoscaling *deployAutoscaling  `yaml:"autoscaling,omitempty"`
 	Forge       deployRecord        `yaml:"forge"`
 }
@@ -240,7 +241,7 @@ func (v *deployValues) setOptions(r *manifest.Run) {
 	if r == nil {
 		return
 	}
-	v.Resources, v.Vars, v.Secrets, v.Jobs = r.Resources, r.Env, r.Secrets, r.Jobs
+	v.Resources, v.Vars, v.Secrets, v.Jobs, v.Writable = r.Resources, r.Env, r.Secrets, r.Jobs, r.Writable
 	v.Forge.Replicas = r.Replicas
 	if r.Autoscaling != nil {
 		v.Forge.AutoscaleMax = r.Autoscaling.Max

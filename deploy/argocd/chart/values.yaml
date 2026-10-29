@@ -34,5 +34,8 @@ secrets: []
 secretBackend: onepassword
 # Cron jobs: [{name: cleanup, schedule: "0 3 * * *", command: [node, cleanup.js]}]
 jobs: []
+# Folders the app writes besides /tmp (run.writable): each gets an empty
+# folder, since the root filesystem is read-only. [/var/cache/nginx]
+writable: []
 # Production only: {min: 2, max: 6}; KEDA then sets the replica count.
 autoscaling: null

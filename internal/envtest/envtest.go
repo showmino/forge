@@ -115,6 +115,35 @@ type Images struct {
 	// digests are the digests AddDigest gave images, by name and by
 	// <host>/<repo>@<digest>.
 	digests map[string]string
+	// users are the users SetUser gave images, by digest.
+	users map[string]string
+}
+
+// SetUser makes the image with digest run as user ("" is root, as an image
+// without a USER). An image SetUser did not name runs as 65532, a non-root
+// user, so that tests about something else need not name one.
+func (i *Images) SetUser(digest, user string) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.users == nil {
+		i.users = map[string]string{}
+	}
+	i.users[digest] = user
+}
+
+// User answers like a registry for image (host/repo@digest or a name
+// AddDigest gave): the user SetUser gave its digest.
+func (i *Images) User(_ context.Context, image string) (string, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	d, ok := i.digests[image]
+	if !ok {
+		return "", fmt.Errorf("%s: %w", image, registry.ErrNotFound)
+	}
+	if u, ok := i.users[d]; ok {
+		return u, nil
+	}
+	return "65532", nil
 }
 
 // AddDigest makes image (in full, host/repo:tag) exist with digest.

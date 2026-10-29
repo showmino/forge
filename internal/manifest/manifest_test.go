@@ -138,6 +138,16 @@ func TestRun(t *testing.T) {
 			t.Errorf("accepted %q: %v", bad, err)
 		}
 	}
+	// run.writable: folders the app writes besides /tmp, each an empty folder.
+	if w, err := Parse([]byte(base + "run:\n  writable: [/var/cache/nginx, /var/run]\n")); err != nil || strings.Join(w.Run.Writable, ",") != "/var/cache/nginx,/var/run" {
+		t.Errorf("run.writable: %v %v", w, err)
+	}
+	for _, bad := range []string{"[var/cache]", "[/]", "[/tmp]", "[/tmp/x]", "[/a/../b]", "[/a/]", "[/a, /a]", "[/a, /a/b]", "[\"/a b\"]",
+		"[/a1, /a2, /a3, /a4, /a5, /a6, /a7, /a8, /a9]"} {
+		if _, err := Parse([]byte(base + "run:\n  writable: " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "run.writable") {
+			t.Errorf("accepted run.writable %s: %v", bad, err)
+		}
+	}
 	out, err := (&Manifest{APIVersion: APIVersion, Service: Service{Name: "a", Team: "b"}, Run: &Run{Port: 9090, Health: "/ready"}}).Marshal()
 	if err != nil || !strings.Contains(string(out), "run:\n  port: 9090\n  health: /ready\n") {
 		t.Errorf("marshal: %s %v", out, err)

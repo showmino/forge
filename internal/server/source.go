@@ -32,6 +32,14 @@ type source struct {
 	imageOnly string
 }
 
+// writable is forge.yaml's run.writable, nil without a run section.
+func (s source) writable() []string {
+	if s.run == nil {
+		return nil
+	}
+	return s.run.Writable
+}
+
 // resolveSource checks service ("services/<id>") and ref (default main),
 // resolves the ref to a commit and reads forge.yaml's run settings there.
 // registry is where the services' CI pushes images ("" is ghcr.io).

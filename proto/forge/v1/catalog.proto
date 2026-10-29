@@ -209,6 +209,10 @@ message RunOptions {
   // template sets its own.
   int32 port = 10;
   string health = 11;
+  // Folders the app writes besides /tmp, as the root filesystem is
+  // read-only: forge.yaml's run.writable, such as /var/cache/nginx. Only
+  // with an image; a template's forge.yaml sets its own.
+  repeated string writable = 12;
 }
 
 // RunResources are the app container's requests and limits, as Kubernetes
