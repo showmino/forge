@@ -141,6 +141,11 @@ func validWritable(paths []string) error {
 		if p == "/tmp" || strings.HasPrefix(p, "/tmp/") {
 			return fmt.Errorf("run.writable %q: /tmp is writable already", p)
 		}
+		for _, sys := range []string{"/proc", "/dev", "/sys", "/var/run/secrets", "/run/secrets"} {
+			if p == sys || strings.HasPrefix(p, sys+"/") {
+				return fmt.Errorf("run.writable %q: %s belongs to Kubernetes, and cannot be a folder of the app's", p, sys)
+			}
+		}
 		for _, q := range paths[:i] {
 			if p == q || strings.HasPrefix(p, q+"/") || strings.HasPrefix(q, p+"/") {
 				return fmt.Errorf("run.writable names %q and %q: name each folder once, and not one inside another", q, p)

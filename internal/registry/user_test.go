@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -70,6 +71,10 @@ func userRegistry(t *testing.T, badConfig bool) *Client {
 		}
 	})
 	mux.HandleFunc("GET /cdn/{digest}", func(w http.ResponseWriter, r *http.Request) {
+		// The login stays with the registry: a redirect's target never gets it.
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("the blob's redirect target got the login")
+		}
 		_, _ = w.Write([]byte(served[r.PathValue("digest")]))
 	})
 	srv = httptest.NewServer(mux)
@@ -93,10 +98,66 @@ func TestUser(t *testing.T) {
 	}
 }
 
+// A blob that redirects from https to plain http is refused, and the login
+// and the redirect's signed address never show up.
+func TestUserRefusesARedirectOffHTTPS(t *testing.T) {
+	t.Parallel()
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("plain http was asked for %s (Authorization %q)", r.URL.Path, r.Header.Get("Authorization"))
+	}))
+	t.Cleanup(plain.Close)
+	cfg := `{"config":{"User":"101"}}`
+	man := `{"config":{"digest":"` + digestOf(cfg) + `"}}`
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /token", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"token":"t0k"}`)) })
+	mux.HandleFunc("/v2/acme/tool/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer t0k" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+srv.URL+`/token"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Docker-Content-Digest", digestOf(man))
+		_, _ = w.Write([]byte(man))
+	})
+	mux.HandleFunc("GET /v2/acme/tool/blobs/{digest}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/blob?sig=s3cr3t", http.StatusTemporaryRedirect)
+	})
+	srv = httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	_, err := c.User(context.Background(), "ghcr.io/acme/tool:1")
+	if err == nil || strings.Contains(err.Error(), "s3cr3t") || strings.Contains(err.Error(), "t0k") {
+		t.Errorf("a redirect to http: %v", err)
+	}
+}
+
+// A manifest that is not the one its digest names is refused.
+func TestUserChecksTheManifestDigest(t *testing.T) {
+	t.Parallel()
+	cfg := `{"config":{"User":"101"}}`
+	man := `{"config":{"digest":"` + digestOf(cfg) + `"}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/manifests/"):
+			w.Header().Set("Docker-Content-Digest", digestOf(man+" "))
+			_, _ = w.Write([]byte(man))
+		default:
+			_, _ = w.Write([]byte(cfg))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL}
+	_, err := c.User(context.Background(), "ghcr.io/acme/tool:1")
+	if !errors.Is(err, ErrBadImage) || !strings.Contains(err.Error(), "manifest does not match") {
+		t.Errorf("a manifest that is not its digest: %v", err)
+	}
+}
+
 func TestUserChecksTheConfigDigest(t *testing.T) {
 	t.Parallel()
 	c := userRegistry(t, true)
-	if _, err := c.User(context.Background(), "docker.io/nginxinc/nginx-unprivileged:1.27"); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if _, err := c.User(context.Background(), "docker.io/nginxinc/nginx-unprivileged:1.27"); !errors.Is(err, ErrBadImage) || !strings.Contains(err.Error(), "does not match") {
 		t.Errorf("a config that is not its digest: %v", err)
 	}
 }

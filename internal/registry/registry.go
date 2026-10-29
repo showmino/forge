@@ -431,10 +431,18 @@ func CredsFromDockerConfig(data []byte, host string) (string, string, error) {
 	return user, pass, nil
 }
 
+// ErrBadImage marks a problem with the image itself (a manifest or config
+// that is unreadable, too large or not what its digest names): asking again
+// will not help.
+var ErrBadImage = errors.New("bad image")
+
+// maxDocument is the most a manifest or config may hold.
+const maxDocument = 4 << 20
+
 // User returns the user image runs as: its config's User ("101", "101:101",
 // "nginx"; "" when the image names none, which is root). For a
 // multi-platform image it reads the linux/amd64 image, or the first linux
-// one. The config is checked against its digest.
+// one. Every manifest and the config are checked against their digests.
 func (c *Client) User(ctx context.Context, image string) (string, error) {
 	r, err := ParseRef(image)
 	if err != nil {
@@ -450,10 +458,9 @@ func (c *Client) User(ctx context.Context, image string) (string, error) {
 	}
 	ref := hdr.Get("Docker-Content-Digest")
 	if !digestRE.MatchString(ref) {
-		ref = r.Reference()
+		return "", fmt.Errorf("%s: the registry named no sha256 digest for it: %w", image, ErrBadImage)
 	}
 	var m struct {
-		MediaType string `json:"mediaType"`
 		Manifests []struct {
 			Digest   string `json:"digest"`
 			Platform struct {
@@ -470,9 +477,12 @@ func (c *Client) User(ctx context.Context, image string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if !matches(data, ref) {
+			return "", fmt.Errorf("%s: its manifest does not match its digest: %w", image, ErrBadImage)
+		}
 		m.Manifests, m.Config.Digest = nil, ""
 		if err := json.Unmarshal(data, &m); err != nil {
-			return "", fmt.Errorf("%s: unreadable manifest", image)
+			return "", fmt.Errorf("%s: unreadable manifest: %w", image, ErrBadImage)
 		}
 		if len(m.Manifests) == 0 {
 			break
@@ -485,19 +495,18 @@ func (c *Client) User(ctx context.Context, image string) (string, error) {
 			}
 		}
 		if !digestRE.MatchString(ref) {
-			return "", fmt.Errorf("%s: the index names no linux image", image)
+			return "", fmt.Errorf("%s: the index names no linux image: %w", image, ErrBadImage)
 		}
 	}
 	if !digestRE.MatchString(m.Config.Digest) {
-		return "", fmt.Errorf("%s: the manifest names no config", image)
+		return "", fmt.Errorf("%s: the manifest names no config: %w", image, ErrBadImage)
 	}
 	data, err := c.get(ctx, base+"/v2/"+r.Repo+"/blobs/"+m.Config.Digest, auth, "*/*", true)
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(data)
-	if "sha256:"+hex.EncodeToString(sum[:]) != m.Config.Digest {
-		return "", fmt.Errorf("%s: its config does not match its digest", image)
+	if !matches(data, m.Config.Digest) {
+		return "", fmt.Errorf("%s: its config does not match its digest: %w", image, ErrBadImage)
 	}
 	var cfg struct {
 		Config struct {
@@ -505,16 +514,25 @@ func (c *Client) User(ctx context.Context, image string) (string, error) {
 		} `json:"config"`
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return "", fmt.Errorf("%s: unreadable config", image)
+		return "", fmt.Errorf("%s: unreadable config: %w", image, ErrBadImage)
 	}
 	return cfg.Config.User, nil
 }
 
-// get reads url with the Authorization the registry took. A manifest is
-// the registry's own answer (no redirect); a blob may be served from
-// elsewhere, and Go does not send the Authorization to another host.
-func (c *Client) get(ctx context.Context, url, auth, accept string, redirect bool) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+// matches reports whether data is what the sha256 digest names.
+func matches(data []byte, digest string) bool {
+	sum := sha256.Sum256(data)
+	return "sha256:"+hex.EncodeToString(sum[:]) == digest
+}
+
+// get reads target with the Authorization the registry took. A manifest is
+// the registry's own answer: no redirect. A blob may be served from
+// elsewhere (a CDN's signed address): a redirect is followed only over
+// https (or the scheme the first request used, in tests), at most 5 times,
+// and without the Authorization, which stays with the registry. Errors name
+// the path asked for, never a redirect's address, which may be signed.
+func (c *Client) get(ctx context.Context, target, auth, accept string, redirect bool) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -522,18 +540,40 @@ func (c *Client) get(ctx context.Context, url, auth, accept string, redirect boo
 		req.Header.Set("Authorization", auth)
 	}
 	req.Header.Set("Accept", accept)
+	path := req.URL.Path
 	hc := *c.http()
-	if !redirect {
-		hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	hc.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if !redirect {
+			return http.ErrUseLastResponse
+		}
+		if len(via) >= 5 {
+			return errors.New("too many redirects")
+		}
+		if next.URL.Scheme != "https" && next.URL.Scheme != via[0].URL.Scheme {
+			return errors.New("redirected off https")
+		}
+		next.Header.Del("Authorization")
+		return nil
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, err
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return nil, fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("GET %s: %s", req.URL.Path, resp.Status)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDocument))
+		return nil, fmt.Errorf("GET %s: %s", path, resp.Status)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDocument+1))
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	if len(data) > maxDocument {
+		return nil, fmt.Errorf("GET %s: larger than %d MB: %w", path, maxDocument>>20, ErrBadImage)
+	}
+	return data, nil
 }

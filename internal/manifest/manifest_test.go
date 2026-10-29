@@ -143,7 +143,7 @@ func TestRun(t *testing.T) {
 		t.Errorf("run.writable: %v %v", w, err)
 	}
 	for _, bad := range []string{"[var/cache]", "[/]", "[/tmp]", "[/tmp/x]", "[/a/../b]", "[/a/]", "[/a, /a]", "[/a, /a/b]", "[\"/a b\"]",
-		"[/a1, /a2, /a3, /a4, /a5, /a6, /a7, /a8, /a9]"} {
+		"[/a1, /a2, /a3, /a4, /a5, /a6, /a7, /a8, /a9]", "[/proc]", "[/dev/shm]", "[/sys]", "[/var/run/secrets]", "[/run/secrets/x]"} {
 		if _, err := Parse([]byte(base + "run:\n  writable: " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "run.writable") {
 			t.Errorf("accepted run.writable %s: %v", bad, err)
 		}

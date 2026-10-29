@@ -120,6 +120,9 @@ func (d *Deploys) pinImage(ctx context.Context, svc, image string) (pinnedImage,
 	p := pinnedImage{full: full, ref: r, digest: digest, pinned: r.Pinned(digest)}
 	if users, ok := d.o.Digests.(ImageUsers); ok {
 		user, err := users.User(ctx, p.pinned)
+		if errors.Is(err, registry.ErrBadImage) {
+			return pinnedImage{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("read the user %s runs as: %w", full, err))
+		}
 		if err != nil {
 			return pinnedImage{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the user %s runs as: %w", full, err))
 		}

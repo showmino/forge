@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/manifest"
+	"github.com/showmino/forge/internal/registry"
 )
 
 const (
@@ -447,5 +449,26 @@ func TestImageCreateRollbackAndClaim(t *testing.T) {
 		t.Errorf("claim after release: %v", err)
 	} else {
 		r()
+	}
+}
+
+// brokenImages has every image, at one digest, but cannot say who it runs as.
+type brokenImages struct{ err error }
+
+func (brokenImages) Digest(context.Context, string) (string, error) { return nginx127, nil }
+func (b brokenImages) User(context.Context, string) (string, error) { return "", b.err }
+
+// A problem with the image itself is the image's (FailedPrecondition); one
+// reaching the registry may pass (Unavailable).
+func TestImageUserLookupErrors(t *testing.T) {
+	t.Parallel()
+	for err, want := range map[error]connect.Code{
+		fmt.Errorf("docker.io/acme/tool:1: the index names no linux image: %w", registry.ErrBadImage): connect.CodeFailedPrecondition,
+		errors.New("GET /v2/acme/tool/blobs/x: 503 Service Unavailable"):                              connect.CodeUnavailable,
+	} {
+		d := &Deploys{o: DeployOptions{Digests: brokenImages{err}}}
+		if _, got := d.pinImage(context.Background(), "tool", "acme/tool:1"); connect.CodeOf(got) != want {
+			t.Errorf("%v: %v, want %v", err, got, want)
+		}
 	}
 }
