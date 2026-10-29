@@ -353,7 +353,8 @@ where the image listens and what is probed (every run option may be set).
 forge then deploys it to staging and watches the deploy (`--deploy=false`
 does not). A deploy pins the tag to its digest, so promoting moves exactly
 what staging ran; the version is the tag. `forge deploy start <name> --env
-staging --ref 1.28` runs another tag and writes it into that `forge.yaml`.
+staging --ref 1.28` runs another tag and, once it is deployed, writes it
+into that `forge.yaml`; a rollback leaves `forge.yaml` as it is.
 Such a service has no previews (they are made from a branch), and deleting it
 also removes its `forge.yaml` from the deploy repo. See
 `docs/specs/2026-10-29-deploy-sources-design.md`, phase 9.
@@ -388,8 +389,13 @@ The image of a service without a repo is checked by `policy/images.rego`
 tag `latest` is refused (it moves), and so is an image from a registry outside
 forge-api's `--allowed-registries` (`FORGE_ALLOWED_REGISTRIES`, comma
 separated hosts such as `ghcr.io,docker.io`; the platform chart's
-`allowedRegistries`; empty allows any). A refused create or deploy exits 6
-with the rule's message.
+`allowedRegistries`; empty allows any). Two more rules hold whatever that
+list says: an image under `<image registry>/<org>/`, where the services' own
+CI pushes, is refused (with the platform's pull secret it would let any team
+run another team's private image; deploy it from its repo), and a registry
+named by an address or a one-word name (`localhost:5000`, `10.0.0.5`) only
+runs when the list names it. A refused create or deploy exits 6 with the
+rule's message.
 
 From GitHub Actions, `forge deploy start --env staging` needs no secret: with
 `permissions: id-token: write`, the CLI requests the job's OIDC token

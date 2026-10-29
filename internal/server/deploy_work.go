@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -76,12 +77,18 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err != nil {
 		return nil, err
 	}
-	src, newManifest, err := d.resolve(ctx, m.GetService(), ref)
+	// A CI token belongs to a repo, and its ref is a commit of it: it never
+	// deploys a service without one.
+	if w := workloadOf(ctx); w != nil {
+		if repoless, err := d.repoless(ctx, strings.TrimPrefix(m.GetService(), servicePrefix)); err != nil {
+			return nil, err
+		} else if repoless {
+			return nil, workloadDenied(w, "not deploy %s, which has no repo", m.GetService())
+		}
+	}
+	src, retag, err := d.resolve(ctx, m.GetService(), ref)
 	if err != nil {
 		return nil, err
-	}
-	if w := workloadOf(ctx); w != nil && src.imageOnly != "" {
-		return nil, workloadDenied(w, "not deploy %s, which has no repo", m.GetService())
 	}
 	if w := workloadOf(ctx); w != nil && src.commit != w.SHA {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolved %s to %s, not the CI token's commit %s", ref, shortSHA(src.commit), shortSHA(w.SHA)))
@@ -147,13 +154,17 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		}
 		if src.imageOnly != "" {
 			emit("image", "pinned "+src.image)
-			if newManifest != nil {
-				if err := d.writeManifest(ctx, src.serviceID, newManifest, fmt.Sprintf("run %s as %s (%s)", src.serviceID, src.imageOnly, actor), emit); err != nil {
-					return err
+			emit("release", "version "+src.ref+", the image's tag")
+			if err := d.apply(ctx, src.serviceID, env, v, emit); err != nil {
+				return err
+			}
+			// Only a tag that deployed becomes the one forge.yaml names.
+			if retag {
+				if err := d.retagManifest(ctx, src.serviceID, src.imageOnly, fmt.Sprintf("run %s as %s (%s)", src.serviceID, src.imageOnly, actor), emit); err != nil {
+					emit("manifest", fmt.Sprintf("deployed, but %s was not written into forge.yaml (%v); a deploy without --ref runs the tag it names", src.imageOnly, err))
 				}
 			}
-			emit("release", "version "+src.ref+", the image's tag")
-			return d.apply(ctx, src.serviceID, env, v, emit)
+			return nil
 		}
 		if err := waitForImage(ctx, d.o.GitHub, d.o.Images, src, d.o.ImageTimeout, d.o.ImagePoll, emit); err != nil {
 			return err

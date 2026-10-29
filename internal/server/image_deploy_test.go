@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -232,7 +233,7 @@ func TestDeleteImageServiceRemovesItsForgeYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(f.removes, ","); got != "deployments/web/staging,deploy repo: services/web/forge.yaml" {
+	if got := strings.Join(f.removes, ","); got != "deployments/web/staging" {
 		t.Errorf("removes %s", got)
 	}
 	if op := wait(t, f.ops, op.GetName()); op.GetError() != nil {
@@ -258,5 +259,146 @@ func TestDeleteImageServiceRemovesItsForgeYAML(t *testing.T) {
 	}
 	if _, err := f.repo.Read(ctx, "services/idle/forge.yaml", ""); err == nil {
 		t.Error("idle's forge.yaml left in the deploy repo")
+	}
+}
+
+// The images the services' own CI pushes are deployed from their repos, and
+// a registry inside the network only when the platform names it.
+func TestImageRulesGuardThePlatform(t *testing.T) {
+	t.Parallel()
+	f := newImageFixture(t, nil)
+	images := f.deploys.o.Images.(*envtest.Images)
+	images.AddDigest("ghcr.io/showmino/payments:1a2b3c4", nginx127)
+	images.AddDigest("localhost:5000/tool:1", nginx127)
+	for image, want := range map[string]string{
+		"ghcr.io/showmino/payments:1a2b3c4": "is built by a service's CI, under ghcr.io/showmino/",
+		"localhost:5000/tool:1":             "is an address or a local name",
+	} {
+		_, err := f.create(t, &forgev1.CreateServiceRequest{ServiceId: "web", Image: image, OwnerTeam: "billing"})
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), want) {
+			t.Errorf("create %s: %v, want %q", image, err, want)
+		}
+	}
+}
+
+// A new tag becomes forge.yaml's only once it deployed; a rollback runs the
+// earlier digest.
+func TestImageServiceRetagAndRollback(t *testing.T) {
+	t.Parallel()
+	var argo *envtest.Argo
+	// A deploy that does not come up fails at once.
+	f := newImageFixture(t, func(o *DeployOptions) { o.SyncTimeout = 300 * time.Millisecond })
+	argo = f.argo
+	ctx := context.Background()
+	if _, err := f.create(t, &forgev1.CreateServiceRequest{ServiceId: "web", Image: "nginx:1.27", OwnerTeam: "billing"}); err != nil {
+		t.Fatal(err)
+	}
+	f.deployImage(t, "web", "staging", "")
+	tagged := func() string {
+		data, _ := f.repo.Read(ctx, "services/web/forge.yaml", "")
+		m, err := manifest.Parse(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.RunImage()
+	}
+
+	// 1.28 does not come up: forge.yaml keeps 1.27.
+	argo.SetUnhealthy("web-staging", "Degraded")
+	resp, err := f.client.StartDeploy(ctx, as("writer", &forgev1.StartDeployRequest{Service: "services/web", Env: "staging", Ref: "1.28"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, resp.Msg.GetOperation().GetName()); op.GetError() == nil {
+		t.Fatal("an unhealthy deploy succeeded")
+	}
+	if got := tagged(); got != "docker.io/library/nginx:1.27" {
+		t.Errorf("after a failed 1.28: forge.yaml names %s", got)
+	}
+	argo.SetUnhealthy("web-staging", "")
+
+	f.deployImage(t, "web", "staging", "1.28")
+	if got := tagged(); got != "docker.io/library/nginx:1.28" {
+		t.Errorf("after 1.28: forge.yaml names %s", got)
+	}
+	// Back to the first deploy, 1.27 (the failed 1.28 is in the history too).
+	recs, err := f.deploys.history(ctx, "web", "staging", 50)
+	if err != nil || len(recs) != 3 {
+		t.Fatalf("history: %v %v", recs, err)
+	}
+	rb, err := f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: "deployments/web/staging", To: recs[2].DeployCommit}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, rb.Msg.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatalf("rollback: %v", op.GetError())
+	}
+	if v, _, _ := f.deploys.current(ctx, "web", "staging"); v.Image != "docker.io/library/nginx@"+nginx127 || v.Forge.Kind != kindRollback {
+		t.Errorf("after the rollback: %+v", v)
+	}
+}
+
+// A CI token belongs to a repo: it cannot deploy a service without one.
+func TestImageServiceRefusesCI(t *testing.T) {
+	t.Parallel()
+	f := newDeployFixtureAuth(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		images := o.Images.(*envtest.Images)
+		images.AddDigest("docker.io/library/nginx:1.27", nginx127)
+		o.Digests = images
+	}, func(_ *Catalog, a Authenticator) Authenticator {
+		static := a.(StaticAuthenticator)
+		static["ci-web"] = Principal{
+			Subject: "github:showmino/web", Permissions: []string{PermDeploy("web", "staging")},
+			Workload: &Workload{Repository: "showmino/web", Service: "web", SHA: envSHA},
+		}
+		return static
+	})
+	if _, err := f.create(t, &forgev1.CreateServiceRequest{ServiceId: "web", Image: "nginx:1.27", OwnerTeam: "billing"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.client.StartDeploy(context.Background(), as("ci-web", &forgev1.StartDeployRequest{Service: "services/web", Env: "staging"}))
+	if connect.CodeOf(err) != connect.CodePermissionDenied || !strings.Contains(err.Error(), "has no repo") {
+		t.Errorf("CI deploy of web: %v", err)
+	}
+}
+
+// A failed create takes back its own forge.yaml, never one written since;
+// and a name is created once at a time.
+func TestImageCreateRollbackAndClaim(t *testing.T) {
+	t.Parallel()
+	f := newImageFixture(t, nil)
+	ctx := context.Background()
+	quiet := func(string, string) {}
+	mine := []byte("apiVersion: forge.dev/v1\nservice:\n  name: web\n  team: a\nrun:\n  image: nginx:1.27\n")
+	theirs := []byte("apiVersion: forge.dev/v1\nservice:\n  name: web\n  team: b\nrun:\n  image: nginx:1.28\n")
+	if err := f.deploys.writeManifest(ctx, "web", theirs, "theirs", quiet); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.deploys.removeManifestIf(ctx, "web", mine, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := f.repo.Read(ctx, "services/web/forge.yaml", ""); err != nil || string(data) != string(theirs) {
+		t.Errorf("someone else's forge.yaml was removed: %v %q", err, data)
+	}
+	if err := f.deploys.removeManifestIf(ctx, "web", theirs, quiet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.Read(ctx, "services/web/forge.yaml", ""); err == nil {
+		t.Error("the create's own forge.yaml was kept")
+	}
+
+	c := &creator{}
+	release, err := c.claimName("web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.claimName("web"); connect.CodeOf(err) != connect.CodeAborted {
+		t.Errorf("second claim: %v, want Aborted", err)
+	}
+	release()
+	if r, err := c.claimName("web"); err != nil {
+		t.Errorf("claim after release: %v", err)
+	} else {
+		r()
 	}
 }

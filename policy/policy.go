@@ -64,7 +64,10 @@ type Image struct {
 	Digest  string `json:"digest"`
 	// AllowedRegistries are the hosts images may come from; empty allows any.
 	AllowedRegistries []string `json:"allowed_registries"`
-	Actor             Actor    `json:"actor"`
+	// ServiceImages is where the platform's services' CI pushes their images,
+	// "<registry>/<org>/": those are not for a service without a repo.
+	ServiceImages string `json:"service_images"`
+	Actor         Actor  `json:"actor"`
 }
 
 // Source is what runs in the environment a promotion takes from, as Argo CD

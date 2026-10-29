@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -67,8 +68,8 @@ func (d *Deploys) pinImage(ctx context.Context, svc, image string) (pinnedImage,
 	if d.o.Policy != nil {
 		res, err := d.o.Policy.EvaluateImage(ctx, policy.Image{
 			Service: svc, Image: full, Host: r.Host, Repo: r.Repo, Tag: r.Tag, Digest: r.Digest,
-			AllowedRegistries: d.o.AllowedRegistries,
-			Actor:             policy.Actor{Kind: actorUser, Subject: subjectOf(ctx)},
+			AllowedRegistries: d.o.AllowedRegistries, ServiceImages: d.serviceImages(),
+			Actor: policy.Actor{Kind: actorUser, Subject: subjectOf(ctx)},
 		})
 		if err != nil {
 			return pinnedImage{}, connect.NewError(connect.CodeInternal, fmt.Errorf("check the image rules: %w", err))
@@ -94,68 +95,78 @@ func (d *Deploys) pinImage(ctx context.Context, svc, image string) (pinnedImage,
 	return pinnedImage{full: full, ref: r, digest: digest, pinned: r.Pinned(digest)}, nil
 }
 
+// serviceImages is where the platform's services' CI pushes their images:
+// "<registry>/<org>/", as imageName names them.
+func (d *Deploys) serviceImages() string {
+	if d.o.Org == "" {
+		return ""
+	}
+	registry := d.o.Registry
+	if registry == "" {
+		registry = DefaultRegistry
+	}
+	return strings.ToLower(registry) + "/" + strings.ToLower(d.o.Org) + "/"
+}
+
 // imageSource is what a deploy of the service sid, which has no repo, runs:
 // the image its forge.yaml in the deploy repo names, or that image at the
-// tag ref when one is given. When ref changes the image, newManifest is the
-// forge.yaml to write, so that the next deploy runs the same tag.
-func (d *Deploys) imageSource(ctx context.Context, sid, ref string) (src source, newManifest []byte, err error) {
+// tag ref when one is given. retag reports that ref changes the image: once
+// the deploy has succeeded, the tag is written into forge.yaml, so that the
+// next deploy runs it too.
+func (d *Deploys) imageSource(ctx context.Context, sid, ref string) (src source, retag bool, err error) {
 	data, err := d.o.Repo.Read(ctx, manifestPath(sid), "")
 	if errors.Is(err, github.ErrNotFound) {
-		return src, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+		return src, false, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
 			"%s%s has no repo and no %s in the deploy repo: make a service that runs an image with forge create --image", servicePrefix, sid, manifestPath(sid)))
 	}
 	if err != nil {
-		return src, nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the deploy repo: %w", err))
+		return src, false, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the deploy repo: %w", err))
 	}
 	mf, err := manifest.Parse(data)
 	if err != nil {
-		return src, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s in the deploy repo is invalid: %w", manifestPath(sid), err))
+		return src, false, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s in the deploy repo is invalid: %w", manifestPath(sid), err))
 	}
 	image := mf.RunImage()
 	if image == "" {
-		return src, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s in the deploy repo names no run.image", manifestPath(sid)))
+		return src, false, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s in the deploy repo names no run.image", manifestPath(sid)))
 	}
 	if ref != "" {
 		r, err := registry.ParseRef(image)
 		if err != nil {
-			return src, nil, connect.NewError(connect.CodeInternal, err)
+			return src, false, connect.NewError(connect.CodeInternal, err)
 		}
 		image = r.Host + "/" + r.Repo + ":" + ref
 	}
 	p, err := d.pinImage(ctx, sid, image)
 	if err != nil {
-		return src, nil, err
+		return src, false, err
 	}
-	if p.full != mf.RunImage() {
-		if newManifest, err = manifest.SetRunImage(data, p.full); err != nil {
-			return src, nil, connect.NewError(connect.CodeInternal, err)
-		}
-	}
+	retag = p.full != mf.RunImage()
 	src = source{
 		serviceID: sid, ref: p.version(), commit: p.digest, image: p.pinned,
 		port: int32(mf.RunPort()), health: mf.RunHealth(), //nolint:gosec // Parse checks run.port is 1-65535
 		domain: mf.RunDomain(), host: mf.RunHost(), stagingInternal: mf.StagingInternal(), run: mf.Run,
 		imageOnly: p.full,
 	}
-	return src, newManifest, nil
+	return src, retag, nil
 }
 
 // resolve is what a deploy of service at ref runs: from its repo, or for a
 // service without one, the image its forge.yaml in the deploy repo names.
-func (d *Deploys) resolve(ctx context.Context, service, ref string) (source, []byte, error) {
+func (d *Deploys) resolve(ctx context.Context, service, ref string) (source, bool, error) {
 	sid, ok := strings.CutPrefix(service, servicePrefix)
 	if !ok || sid == "" {
-		return source{}, nil, invalidArg("service %q must be services/<name>", service)
+		return source{}, false, invalidArg("service %q must be services/<name>", service)
 	}
 	repoless, err := d.repoless(ctx, sid)
 	if err != nil {
-		return source{}, nil, err
+		return source{}, false, err
 	}
 	if repoless {
 		return d.imageSource(ctx, sid, ref)
 	}
 	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, d.o.Registry, service, ref)
-	return src, nil, err
+	return src, false, err
 }
 
 // repoless reports whether the service sid has no repo: it runs an image.
@@ -165,6 +176,24 @@ func (d *Deploys) repoless(ctx context.Context, sid string) (bool, error) {
 		return false, err // NotFound "services/<id> not found", or Unavailable
 	}
 	return entry.GetRepoUrl() == "", nil
+}
+
+// retagManifest writes image into the forge.yaml of sid as it is at the
+// deploy repo's head, keeping the rest of it.
+func (d *Deploys) retagManifest(ctx context.Context, sid, image, message string, emit func(string, string)) error {
+	build := func() ([]byte, error) {
+		data, err := d.o.Repo.Read(ctx, manifestPath(sid), "")
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", manifestPath(sid), err)
+		}
+		return manifest.SetRunImage(data, image)
+	}
+	sha, err := d.commit(ctx, manifestPath(sid), build, message, emit)
+	if err != nil {
+		return err
+	}
+	emit("manifest", fmt.Sprintf("forge-deploys %s: run.image is %s", shortSHA(sha), image))
+	return nil
 }
 
 // writeManifest commits the forge.yaml of a service without a repo.
@@ -180,16 +209,27 @@ func (d *Deploys) writeManifest(ctx context.Context, sid string, data []byte, me
 // removeManifest deletes the forge.yaml of a service without a repo from
 // the deploy repo, when it is there. Safe to repeat.
 func (d *Deploys) removeManifest(ctx context.Context, sid string, emit func(string, string)) error {
+	return d.removeManifestIf(ctx, sid, nil, emit)
+}
+
+// removeManifestIf is removeManifest, but when only is set it removes the
+// file only while it still holds only: a failed create takes back its own
+// write and nothing someone wrote since.
+func (d *Deploys) removeManifestIf(ctx context.Context, sid string, only []byte, emit func(string, string)) error {
 	path := manifestPath(sid)
 	for range 3 {
 		head, tree, err := d.o.Repo.Head(ctx)
 		if err != nil {
 			return fmt.Errorf("deploy repo head: %w", err)
 		}
-		if _, err := d.o.Repo.Read(ctx, path, head); errors.Is(err, github.ErrNotFound) {
+		got, err := d.o.Repo.Read(ctx, path, head)
+		if errors.Is(err, github.ErrNotFound) {
 			return nil
 		} else if err != nil {
 			return fmt.Errorf("read %s in the deploy repo: %w", path, err)
+		}
+		if only != nil && !bytes.Equal(got, only) {
+			return nil // someone else's by now
 		}
 		sha, err := d.o.Repo.DeleteFile(ctx, head, tree, path, fmt.Sprintf("remove the forge.yaml of %s (%s)", sid, actorOf(ctx)))
 		if errors.Is(err, github.ErrNotFastForward) {

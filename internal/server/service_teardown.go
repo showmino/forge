@@ -62,9 +62,6 @@ func (p teardownPlan) removes(svc string) []string {
 	for _, env := range slices.Backward(p.envs) {
 		out = append(out, deployNamePrefix+svc+"/"+env)
 	}
-	if p.manifest {
-		out = append(out, "deploy repo: "+manifestPath(svc))
-	}
 	return out
 }
 
@@ -361,7 +358,11 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 			}
 			return &OpError{Code: "catalog", Message: "everything " + name + " ran is removed, but its catalog entry is not: " + err.Error()}
 		}
-		emit("catalog", "removed "+name+" from the catalog; its GitHub repo is kept")
+		if plan.manifest {
+			emit("catalog", "removed "+name+" from the catalog")
+		} else {
+			emit("catalog", "removed "+name+" from the catalog; its GitHub repo is kept")
+		}
 		return nil
 	}
 }

@@ -71,6 +71,8 @@ type creator struct {
 	mu sync.Mutex
 	// results tracks each create by request_id.
 	results map[string]*outcome
+	// creating holds the names of the image creates under way.
+	creating map[string]bool
 }
 
 // outcome is one create's result: done closes when it ends, and final is

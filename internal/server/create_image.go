@@ -22,6 +22,13 @@ func (c *creator) fromImage(ctx context.Context, req *forgev1.CreateServiceReque
 	started := func(step string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_STARTED, "")) }
 	done := func(step, detail string) { w.send(stepMsg(step, forgev1.CreateStep_STATE_DONE, detail)) }
 	id := req.GetServiceId()
+	// One create of a name at a time: the deploy repo file is not claimed
+	// the way a new GitHub repo is.
+	release, err := c.claimName(id)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := c.checkFree(ctx, id); err != nil {
 		return nil, err
 	}
@@ -59,7 +66,7 @@ func (c *creator) fromImage(ctx context.Context, req *forgev1.CreateServiceReque
 	started("register")
 	resp, err := c.catalog.register(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}), false)
 	if err != nil {
-		delErr := c.deploys.removeManifest(work, id, quiet)
+		delErr := c.deploys.removeManifestIf(work, id, data, quiet)
 		c.log.WarnContext(ctx, "create failed", "service", id, "step", "register", "error", err, "rolled_back", delErr == nil, "rollback_error", delErr)
 		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Failure{Failure: &forgev1.CreateFailure{
 			Step: "register", Message: err.Error(), RolledBack: delErr == nil,
@@ -136,4 +143,22 @@ func (c *creator) imageCreateReady() error {
 		return connect.NewError(connect.CodeFailedPrecondition, errors.New("deploys are not configured on this Forge API, so it cannot run an image"))
 	}
 	return c.deploys.ready()
+}
+
+// claimName holds the name id for one create, until release is called.
+func (c *creator) claimName(id string) (release func(), err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.creating == nil {
+		c.creating = map[string]bool{}
+	}
+	if c.creating[id] {
+		return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("%s%s is being created already", servicePrefix, id))
+	}
+	c.creating[id] = true
+	return func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		delete(c.creating, id)
+	}, nil
 }

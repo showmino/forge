@@ -355,6 +355,21 @@ type Argo struct {
 	mu sync.Mutex
 }
 
+// SetUnhealthy makes the app name ("<svc>-<env>") Degraded with the
+// container waiting reason, or healthy again with "".
+func (a *Argo) SetUnhealthy(name, reason string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.Unhealthy == nil {
+		a.Unhealthy = map[string]string{}
+	}
+	if reason == "" {
+		delete(a.Unhealthy, name)
+		return
+	}
+	a.Unhealthy[name] = reason
+}
+
 // SetLag changes Lag; it applies to heads Argo has not synced yet.
 func (a *Argo) SetLag(d time.Duration) {
 	a.mu.Lock()
@@ -440,7 +455,10 @@ func (a *Argo) ensurePod(ctx context.Context, name, reason string) {
 
 func (a *Argo) sync(ctx context.Context, name, head string) error {
 	health := map[string]any{"status": "Healthy"}
-	if reason, bad := a.Unhealthy[name]; bad {
+	a.mu.Lock()
+	reason, bad := a.Unhealthy[name]
+	a.mu.Unlock()
+	if bad {
 		health = map[string]any{"status": "Degraded"}
 		a.ensurePod(ctx, name, reason)
 	}
