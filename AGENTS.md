@@ -16,7 +16,7 @@ on the owner's k3s cluster.
 | Repo | What |
 | --- | --- |
 | `showmino/forge` (this one) | CLI, API, protos, the deploy chart, the cluster manifests (`deploy/k3s`) |
-| `showmino/forge-web` | The web dashboard: Next.js, a thin client of the same API. Every Forge runs it from the `forge` chart (`web.image.tag`); released by pushing a `vX.Y.Z` tag there |
+| `showmino/forge-web` | The web dashboard: Next.js, a thin client of the same API. Every Forge runs it from the `forge` chart (`web.image.tag`); released by pushing a `vX.Y.Z` tag there. At showmino it is also a Forge service for staging only (`forge-web-staging.showmino.com`), never promoted |
 | `showmino/forge-templates` | The templates `forge create` scaffolds from (`go-grpc`, `nextjs`), versioned by repo-wide tags |
 | `showmino/forge-deploys` | The GitOps repo. Only forge-api writes to it; never edit it by hand |
 | `showmino/kubernetes` | The owner's cluster repo (Cloudflare tunnel, DNS records, Argo CD). Open a pull request there; the owner merges |
@@ -182,10 +182,11 @@ Run `make test lint` before every commit. Write the test first.
   except DNS records, which use the owner's `CloudflareRecordsApplication`.
 - Templates live in a Git repo, versioned by tag.
 - The dashboard is a Next.js app from Forge's own `nextjs` template; it has
-  no endpoints of its own. The `forge` chart runs it (`web.image.tag`). It was
-  a Forge service until 2026-10-29, when the owner retired that copy: a new
-  version reaches production as a `web.image.tag` pull request in
-  `showmino/kubernetes`, and the chart's default moves with a forge release.
+  no endpoints of its own. The `forge` chart runs it (`web.image.tag`): that
+  is production. Since 2026-10-29 the forge-web Forge service is staging only
+  (`run.host: forge-web`) and is never promoted. A new version reaches
+  production as a `web.image.tag` pull request in `showmino/kubernetes`, and
+  the chart's default moves with a forge release.
 - Telemetry off. Releases are GitHub Releases, cut by pushing a `vX.Y.Z` tag.
 
 ### Conventions
