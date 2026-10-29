@@ -6,8 +6,9 @@
 # platform's list (policy.allowedRegistries; empty allows any).
 # A message in deny refuses the image.
 #
-# A missing or mistyped field reads as its fallback, which these rules
-# refuse: an image the rules cannot judge does not run.
+# A missing field reads as its fallback, which these rules refuse: an image
+# with no tag or no host does not run. Forge fills every field from a
+# parsed image name, so none has the wrong type.
 package forge.images
 
 import rego.v1

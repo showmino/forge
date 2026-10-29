@@ -57,7 +57,7 @@ func ParseRef(image string) (Ref, error) {
 			return Ref{}, bad
 		}
 	}
-	if rest == "" || (r.Tag == "" && r.Digest == "") {
+	if !repoRE.MatchString(rest) || (r.Tag == "" && r.Digest == "") {
 		return Ref{}, bad
 	}
 	r.Repo = rest
@@ -99,7 +99,7 @@ func Normalize(image string) (string, error) {
 	}
 	host, repo := "docker.io", name
 	if first, rest, ok := strings.Cut(name, "/"); ok && isHost(first) {
-		host, repo = first, rest
+		host, repo = strings.ToLower(first), rest
 	}
 	if host == "index.docker.io" || host == "registry-1.docker.io" {
 		host = "docker.io"
@@ -134,6 +134,12 @@ func apiBase(host string) string {
 
 // ErrNotFound is the registry's answer for an image that is not there.
 var ErrNotFound = errors.New("image not found")
+
+// ErrNoLogin is what Creds returns when the install has no login for a
+// registry at all. Only then is the registry asked anonymously: any other
+// failure to read the logins (a broken pull secret, a denied read) is
+// reported, not hidden behind a "not found".
+var ErrNoLogin = errors.New("no login for this registry")
 
 // manifestTypes are the manifest media types Exists accepts.
 var manifestTypes = strings.Join([]string{
@@ -183,6 +189,9 @@ func (c *Client) Digest(ctx context.Context, image string) (string, error) {
 	if !digestRE.MatchString(d) {
 		return "", fmt.Errorf("%s: the registry named no sha256 digest for it", image)
 	}
+	if r, _ := ParseRef(image); r.Digest != "" && r.Digest != d {
+		return "", fmt.Errorf("%s: the registry answered with %s, not the digest it names", image, d)
+	}
 	return d, nil
 }
 
@@ -207,33 +216,43 @@ func (c *Client) lookup(ctx context.Context, image string) (http.Header, error) 
 	}
 	if status == http.StatusUnauthorized {
 		ch := parseChallenge(hdr.Get("WWW-Authenticate"))
-		user, pass, credsErr := "", "", errors.New("no registry logins are configured")
+		user, pass, credsErr := "", "", ErrNoLogin
 		if c.Creds != nil {
 			user, pass, credsErr = c.Creds(ctx, r.Host)
 		}
+		anonymous := errors.Is(credsErr, ErrNoLogin)
+		if credsErr != nil && !anonymous {
+			return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
+		}
 		var auth string
-		switch {
-		case ch.scheme == "bearer":
-			if credsErr != nil {
-				user, pass = "", "" // anonymous
+		switch ch.scheme {
+		case "bearer":
+			if anonymous {
+				user, pass = "", ""
 			}
 			token, err := c.token(ctx, ch, r, user, pass)
 			if err != nil {
-				if credsErr != nil {
-					return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
+				if anonymous {
+					return nil, fmt.Errorf("registry login for %s: %w (and an anonymous token: %w)", r.Host, credsErr, err)
 				}
 				return nil, err
 			}
 			auth = "Bearer " + token
-		case ch.scheme == "basic" && credsErr == nil:
+		case "basic":
+			if anonymous {
+				return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
+			}
 			auth = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
-		case ch.scheme == "basic":
-			return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
 		default:
 			return nil, fmt.Errorf("HEAD %s manifest %s: %d with no login method the registry names", r.Repo, ref, status)
 		}
 		if status, hdr, err = c.head(ctx, manifest, auth); err != nil {
 			return nil, err
+		}
+		// Anonymous and still refused: the image is private, and the install
+		// has no login that could read it.
+		if anonymous && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+			return nil, fmt.Errorf("HEAD %s manifest %s: %d anonymously; registry login for %s: %w", r.Repo, ref, status, r.Host, credsErr)
 		}
 	}
 	switch status {
@@ -377,12 +396,23 @@ func CredsFromDockerConfig(data []byte, host string) (string, string, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return "", "", errors.New("pull secret is not a docker config")
 	}
-	a, ok := cfg.Auths[host]
-	if !ok {
-		a, ok = cfg.Auths["https://"+host]
+	keys := []string{host, "https://" + host}
+	if host == "docker.io" { // where `docker login` writes Docker Hub's login
+		keys = append(keys, "https://index.docker.io/v1/", "index.docker.io")
+	}
+	var a struct {
+		Auth     string `json:"auth"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	ok := false
+	for _, k := range keys {
+		if a, ok = cfg.Auths[k]; ok {
+			break
+		}
 	}
 	if !ok {
-		return "", "", fmt.Errorf("pull secret has no login for %s", host)
+		return "", "", fmt.Errorf("pull secret has no login for %s: %w", host, ErrNoLogin)
 	}
 	if a.Username != "" {
 		return a.Username, a.Password, nil

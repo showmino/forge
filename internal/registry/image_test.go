@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,7 +99,7 @@ func TestDigestOfAPublicImage(t *testing.T) {
 	t.Cleanup(srv.Close)
 	// The install's pull secret has no login for Docker Hub.
 	c := &Client{BaseURL: srv.URL, Creds: func(context.Context, string) (string, string, error) {
-		return "", "", errors.New("pull secret has no login for docker.io")
+		return "", "", fmt.Errorf("pull secret has no login for docker.io: %w", ErrNoLogin)
 	}}
 	ctx := context.Background()
 	if d, err := c.Digest(ctx, "docker.io/library/nginx:1.27"); err != nil || d != someDigest {
@@ -124,5 +125,94 @@ func TestDigestMissingHeader(t *testing.T) {
 	c := &Client{BaseURL: srv.URL}
 	if d, err := c.Digest(context.Background(), "registry.example/org/app:1"); err == nil {
 		t.Errorf("digest %q without a header", d)
+	}
+}
+
+// Only "no login for this registry" makes the check anonymous. A pull secret
+// that cannot be read is reported, not turned into "not found".
+func TestBrokenLoginIsReported(t *testing.T) {
+	t.Parallel()
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /token", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"token":"anon"}`)) })
+	mux.HandleFunc("HEAD /v2/acme/private/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="`+srv.URL+`/token",service="ghcr.io"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound) // what ghcr.io tells an anonymous reader of a private image
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+	broken := &Client{BaseURL: srv.URL, Creds: func(context.Context, string) (string, string, error) {
+		return "", "", errors.New("pull secret forge/ghcr: forbidden")
+	}}
+	if ok, err := broken.Exists(ctx, "ghcr.io/acme/private:1a2b3c4"); err == nil || ok || !strings.Contains(err.Error(), "forbidden") {
+		t.Errorf("broken login: %v %v, want the login's error", ok, err)
+	}
+	// With no login at all, a 404 is a 404.
+	none := &Client{BaseURL: srv.URL, Creds: func(context.Context, string) (string, string, error) { return "", "", ErrNoLogin }}
+	if ok, err := none.Exists(ctx, "ghcr.io/acme/private:1a2b3c4"); err != nil || ok {
+		t.Errorf("no login: %v %v, want not found", ok, err)
+	}
+}
+
+// An anonymous reader refused outright is told that no login could read it.
+func TestAnonymousRefusalNamesTheLogin(t *testing.T) {
+	t.Parallel()
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /token", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"token":"anon"}`)) })
+	mux.HandleFunc("HEAD /v2/acme/private/manifests/{ref}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+srv.URL+`/token",service="ghcr.io"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL}
+	if _, err := c.Digest(context.Background(), "ghcr.io/acme/private:1"); err == nil || !errors.Is(err, ErrNoLogin) {
+		t.Errorf("refused: %v, want ErrNoLogin in it", err)
+	}
+}
+
+func TestDockerHubLoginKey(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"auths":{"https://index.docker.io/v1/":{"username":"u","password":"p"}}}`)
+	if u, p, err := CredsFromDockerConfig(data, "docker.io"); err != nil || u != "u" || p != "p" {
+		t.Errorf("docker login's key: %q %q %v", u, p, err)
+	}
+	if _, _, err := CredsFromDockerConfig(data, "ghcr.io"); !errors.Is(err, ErrNoLogin) {
+		t.Errorf("missing host: %v, want ErrNoLogin", err)
+	}
+}
+
+func TestNormalizeHostCase(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{"Docker.io/nginx:1": "docker.io/library/nginx:1", "GHCR.IO/a/b:1": "ghcr.io/a/b:1"} {
+		if got, err := Normalize(in); err != nil || got != want {
+			t.Errorf("Normalize(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"ghcr.io/a?x=1:t", "ghcr.io/../../x:t", "ghcr.io/A/b:1"} {
+		if r, err := ParseRef(bad); err == nil {
+			t.Errorf("ParseRef(%q) = %+v, accepted", bad, r)
+		}
+	}
+}
+
+// A digest the registry does not confirm is an error.
+func TestDigestMustMatch(t *testing.T) {
+	t.Parallel()
+	other := "sha256:" + strings.Repeat("f", 64)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Docker-Content-Digest", other)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL}
+	if d, err := c.Digest(context.Background(), "registry.example/org/app@"+someDigest); err == nil {
+		t.Errorf("digest %q accepted for another", d)
 	}
 }
