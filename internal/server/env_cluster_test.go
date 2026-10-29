@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -166,5 +167,29 @@ func TestGuardIgnoresForeignNamespaces(t *testing.T) {
 		if _, err := c.Kube.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{}); err != nil {
 			t.Errorf("%s was touched: %v", name, err)
 		}
+	}
+}
+
+// run.writable gives each folder an empty folder of its own, as /tmp has.
+func TestPreviewWritableFolders(t *testing.T) {
+	t.Parallel()
+	d := deployment(EnvWorkload{Service: "web", Image: "ghcr.io/a/web:1", Port: 8080, Health: "/", Writable: []string{"/var/cache/nginx", "/var/run"}})
+	pod := d.Spec.Template.Spec
+	var vols, mounts []string
+	for _, v := range pod.Volumes {
+		if v.EmptyDir == nil || v.EmptyDir.SizeLimit == nil || v.EmptyDir.SizeLimit.String() != "256Mi" {
+			t.Errorf("volume %s: %+v", v.Name, v.VolumeSource)
+		}
+		vols = append(vols, v.Name)
+	}
+	for _, m := range pod.Containers[0].VolumeMounts {
+		mounts = append(mounts, m.Name+"="+m.MountPath)
+	}
+	if strings.Join(vols, ",") != "tmp,writable-0,writable-1" ||
+		strings.Join(mounts, ",") != "tmp=/tmp,writable-0=/var/cache/nginx,writable-1=/var/run" {
+		t.Errorf("volumes %v, mounts %v", vols, mounts)
+	}
+	if !*pod.Containers[0].SecurityContext.ReadOnlyRootFilesystem {
+		t.Error("the root filesystem is writable")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -74,6 +75,10 @@ type Run struct {
 	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 	// Health is the HTTP path probed for readiness and liveness.
 	Health string `yaml:"health,omitempty" json:"health,omitempty"`
+	// Writable are folders the app writes besides /tmp (the root filesystem
+	// is read-only): each gets an empty folder of its own, as /tmp does.
+	// Mostly for images built elsewhere, such as /var/cache/nginx.
+	Writable []string `yaml:"writable,omitempty" json:"writable,omitempty"`
 	// Domain is the public domain of the service's staging and production
 	// addresses, one the platform offers: "payments.<domain>" in production.
 	// Empty means the platform's default; DomainNone keeps the service on
@@ -115,6 +120,39 @@ func (m *Manifest) RunHost() string {
 		return ""
 	}
 	return m.Run.Host
+}
+
+// MaxWritable is how many folders run.writable may name.
+const MaxWritable = 8
+
+// writablePath is an absolute, clean path of plain names.
+var writablePath = regexp.MustCompile(`^(/[A-Za-z0-9._-]+)+$`)
+
+// validWritable checks run.writable: absolute folders other than / and
+// /tmp (which is writable already), each once, none inside another.
+func validWritable(paths []string) error {
+	if len(paths) > MaxWritable {
+		return fmt.Errorf("run.writable names %d folders, at most %d", len(paths), MaxWritable)
+	}
+	for i, p := range paths {
+		if !writablePath.MatchString(p) || path.Clean(p) != p {
+			return fmt.Errorf("run.writable %q must be an absolute folder such as /var/cache/nginx", p)
+		}
+		if p == "/tmp" || strings.HasPrefix(p, "/tmp/") {
+			return fmt.Errorf("run.writable %q: /tmp is writable already", p)
+		}
+		for _, sys := range []string{"/proc", "/dev", "/sys", "/var/run/secrets", "/run/secrets"} {
+			if p == sys || strings.HasPrefix(p, sys+"/") {
+				return fmt.Errorf("run.writable %q: %s belongs to Kubernetes, and cannot be a folder of the app's", p, sys)
+			}
+		}
+		for _, q := range paths[:i] {
+			if p == q || strings.HasPrefix(p, q+"/") || strings.HasPrefix(q, p+"/") {
+				return fmt.Errorf("run.writable names %q and %q: name each folder once, and not one inside another", q, p)
+			}
+		}
+	}
+	return nil
 }
 
 // DomainNone is the run.domain of a service without a public address.
@@ -250,6 +288,9 @@ func (m *Manifest) Validate() error {
 		}
 		if r.Health != "" && !strings.HasPrefix(r.Health, "/") {
 			return fmt.Errorf("run.health %q must be an absolute path such as /healthz", r.Health)
+		}
+		if err := validWritable(r.Writable); err != nil {
+			return err
 		}
 		if r.Host != "" && !ValidID(r.Host) {
 			return fmt.Errorf("run.host %q must be a lowercase DNS label (a-z, 0-9, '-', max 63), the name before the domain", r.Host)

@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/manifest"
+	"github.com/showmino/forge/internal/registry"
 )
 
 const (
@@ -184,6 +187,52 @@ func TestImageRulesAndLookups(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("deploy %s: %v, want %q", ref, err, want)
 		}
+	}
+}
+
+// Every service runs as a non-root user, so an image that would run as root
+// (no USER, 0, root) or as a user Kubernetes cannot check (a name) is
+// refused before anything is written or deployed.
+func TestImageMustRunAsNonRoot(t *testing.T) {
+	t.Parallel()
+	var images *envtest.Images
+	f := newImageFixture(t, func(o *DeployOptions) { images = o.Images.(*envtest.Images) })
+	ctx := context.Background()
+	digest := func(n int) string { return fmt.Sprintf("sha256:%064x", n+100) }
+	for i, tc := range []struct{ user, want string }{
+		{"", "runs as root"},
+		{"0", "runs as root"},
+		{"root:root", "runs as root"},
+		{"0:101", "runs as root"},
+		{"nginx", `runs as the user "nginx"`},
+		{"101", ""},
+		{"101:101", ""},
+	} {
+		image := fmt.Sprintf("docker.io/acme/tool:%d", i)
+		images.AddDigest(image, digest(i+3))
+		images.SetUser(digest(i+3), tc.user)
+		name := fmt.Sprintf("tool-%d", i)
+		_, err := f.create(t, &forgev1.CreateServiceRequest{ServiceId: name, Image: image, OwnerTeam: "billing"})
+		if tc.want == "" {
+			if err != nil {
+				t.Errorf("user %q: %v", tc.user, err)
+			}
+			continue
+		}
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "non-root") {
+			t.Errorf("user %q: %v, want %q", tc.user, err, tc.want)
+		}
+		if _, err := f.repo.Read(ctx, "services/"+name+"/forge.yaml", ""); err == nil {
+			t.Errorf("user %q: a refused create wrote forge.yaml", tc.user)
+		}
+	}
+
+	// A new tag is checked too: tool-5 runs as 101, its tag 9 as root.
+	images.AddDigest("docker.io/acme/tool:9", digest(9))
+	images.SetUser(digest(9), "")
+	_, err := f.client.StartDeploy(ctx, as("writer", &forgev1.StartDeployRequest{Service: "services/tool-5", Env: "staging", Ref: "9"}))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "runs as root") {
+		t.Errorf("deploy a root tag: %v", err)
 	}
 }
 
@@ -400,5 +449,26 @@ func TestImageCreateRollbackAndClaim(t *testing.T) {
 		t.Errorf("claim after release: %v", err)
 	} else {
 		r()
+	}
+}
+
+// brokenImages has every image, at one digest, but cannot say who it runs as.
+type brokenImages struct{ err error }
+
+func (brokenImages) Digest(context.Context, string) (string, error) { return nginx127, nil }
+func (b brokenImages) User(context.Context, string) (string, error) { return "", b.err }
+
+// A problem with the image itself is the image's (FailedPrecondition); one
+// reaching the registry may pass (Unavailable).
+func TestImageUserLookupErrors(t *testing.T) {
+	t.Parallel()
+	for err, want := range map[error]connect.Code{
+		fmt.Errorf("docker.io/acme/tool:1: the index names no linux image: %w", registry.ErrBadImage): connect.CodeFailedPrecondition,
+		errors.New("GET /v2/acme/tool/blobs/x: 503 Service Unavailable"):                              connect.CodeUnavailable,
+	} {
+		d := &Deploys{o: DeployOptions{Digests: brokenImages{err}}}
+		if _, got := d.pinImage(context.Background(), "tool", "acme/tool:1"); connect.CodeOf(got) != want {
+			t.Errorf("%v: %v, want %v", err, got, want)
+		}
 	}
 }

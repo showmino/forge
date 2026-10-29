@@ -16,7 +16,7 @@ func TestDeployRunOptions(t *testing.T) {
 	withOptions := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n  port: 9090\n  health: /ready\n" +
 		"  replicas: 3\n  resources: {limits: {cpu: 250m, memory: 256Mi}}\n  env: {LOG_LEVEL: info}\n" +
 		"  secrets: [{name: stripe, item: vaults/Apps/items/stripe, env: {STRIPE_KEY: credential}}]\n" +
-		"  jobs: [{name: cleanup, schedule: \"0 3 * * *\", command: [node, cleanup.js]}]\n  autoscaling: {max: 6}\n"
+		"  jobs: [{name: cleanup, schedule: \"0 3 * * *\", command: [node, cleanup.js]}]\n  autoscaling: {max: 6}\n  writable: [/var/cache/app]\n"
 	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
 		o.GitHub.(*envtest.GitHub).Files[envSHA+":forge.yaml"] = []byte(withOptions)
 		o.SecretVaults = []string{"Apps"}
@@ -41,14 +41,15 @@ func TestDeployRunOptions(t *testing.T) {
 	s := values("staging")
 	// Staging runs one pod and never autoscales; the rest is as forge.yaml says.
 	if s.Replicas != 1 || s.Autoscaling != nil || s.Vars["LOG_LEVEL"] != "info" || s.Resources.Limits.Memory != "256Mi" ||
-		len(s.Secrets) != 1 || s.Secrets[0].Item != "vaults/Apps/items/stripe" || len(s.Jobs) != 1 || s.Jobs[0].Schedule != "0 3 * * *" {
+		len(s.Secrets) != 1 || s.Secrets[0].Item != "vaults/Apps/items/stripe" || len(s.Jobs) != 1 || s.Jobs[0].Schedule != "0 3 * * *" ||
+		strings.Join(s.Writable, ",") != "/var/cache/app" {
 		t.Errorf("staging: %+v", s)
 	}
 	if op := f.promote(t, forgev1.Bump_BUMP_UNSPECIFIED); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
 	p := values("production")
-	if p.Replicas != 3 || p.Autoscaling == nil || p.Autoscaling.Min != 3 || p.Autoscaling.Max != 6 || len(p.Secrets) != 1 || len(p.Jobs) != 1 {
+	if p.Replicas != 3 || p.Autoscaling == nil || p.Autoscaling.Min != 3 || p.Autoscaling.Max != 6 || len(p.Secrets) != 1 || len(p.Jobs) != 1 || len(p.Writable) != 1 {
 		t.Errorf("production: replicas %d autoscaling %+v", p.Replicas, p.Autoscaling)
 	}
 }

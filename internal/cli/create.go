@@ -20,7 +20,7 @@ import (
 
 func newCreateCmd(f *Factory) *cobra.Command {
 	var tmpl, team, image, health string
-	var owners, sets []string
+	var owners, sets, writable []string
 	var dryRun, deploy bool
 	var port int
 	var run runFlags
@@ -49,7 +49,9 @@ built (nginx:1.27, ghcr.io/acme/tool:2.3) and gets no repo: its forge.yaml,
 with run.image, is kept in the deploy repo. The image must have a tag other
 than latest, and come from a registry the platform allows. --port and
 --health say where it listens and what is probed; every run option may be
-set. forge then deploys it to staging and watches the deploy (--deploy=false
+set. The image must run as a non-root user given by number (its USER): a
+root image is refused. The root filesystem is read-only except /tmp:
+--writable names more folders the image writes, each an empty folder. forge then deploys it to staging and watches the deploy (--deploy=false
 does not); with -o json or yaml it prints the deployment. Deploy a new tag
 with 'forge deploy start <name> --env staging --ref <tag>'.`,
 		Example: `  forge create payments --template go-grpc --team billing
@@ -57,7 +59,7 @@ with 'forge deploy start <name> --env staging --ref <tag>'.`,
   forge create shop --template nextjs --team web --replicas 2 --env LOG_LEVEL=info \
     --secret stripe=vaults/Apps/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
   forge create payments --template go-grpc --team billing --dry-run
-  forge create web --image nginx:1.27 --port 80 --health / --team web`,
+  forge create web --image nginxinc/nginx-unprivileged:1.27 --health / --team web`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
@@ -71,8 +73,8 @@ with 'forge deploy start <name> --env staging --ref <tag>'.`,
 				return exitcode.Usagef("--template and --image: use one, not both")
 			case image != "" && len(sets) > 0:
 				return exitcode.Usagef("--set is for a template's parameters; an image has none")
-			case tmpl != "" && (port != 0 || health != ""):
-				return exitcode.Usagef("--port and --health are for --image; a template sets its own")
+			case tmpl != "" && (port != 0 || health != "" || len(writable) > 0):
+				return exitcode.Usagef("--port, --health and --writable are for --image; a template sets its own")
 			}
 			raw, err := parseSets(sets)
 			if err != nil {
@@ -85,11 +87,11 @@ with 'forge deploy start <name> --env staging --ref <tag>'.`,
 			if port < 0 || port > 65535 {
 				return exitcode.Usagef("--port %d must be 1-65535", port)
 			}
-			if image != "" && (port != 0 || health != "") {
+			if image != "" && (port != 0 || health != "" || len(writable) > 0) {
 				if runOptions == nil {
 					runOptions = &forgev1.RunOptions{}
 				}
-				runOptions.Port, runOptions.Health = int32(port), health //nolint:gosec // checked above
+				runOptions.Port, runOptions.Health, runOptions.Writable = int32(port), health, writable //nolint:gosec // checked above
 			}
 			format, err := f.Format()
 			if err != nil {
@@ -182,6 +184,7 @@ with 'forge deploy start <name> --env staging --ref <tag>'.`,
 	fl.StringVar(&image, "image", "", "an image to run instead of a template, such as nginx:1.27; the service gets no repo")
 	fl.IntVar(&port, "port", 0, "with --image: the port it listens on (default 8080)")
 	fl.StringVar(&health, "health", "", "with --image: the path its readiness is probed at (default /healthz)")
+	fl.StringSliceVar(&writable, "writable", nil, "with --image: folders it writes besides /tmp, such as /var/cache/nginx (repeatable)")
 	fl.BoolVar(&deploy, "deploy", true, "with --image: deploy it to staging and watch the deploy")
 	run.register(fl)
 	return cmd

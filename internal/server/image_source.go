@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -23,6 +24,30 @@ import (
 // ImageDigester finds the digest of an image. *registry.Client implements it.
 type ImageDigester interface {
 	Digest(ctx context.Context, image string) (string, error)
+}
+
+// ImageUsers finds the user an image runs as (its config's User). When
+// DeployOptions.Digests implements it, as *registry.Client does, an image
+// that would run as root is refused before it is written or deployed.
+type ImageUsers interface {
+	User(ctx context.Context, image string) (string, error)
+}
+
+// checkUser refuses an image whose user the service chart cannot run:
+// every service runs with runAsNonRoot, which needs a user given by a
+// number other than 0.
+func checkUser(image, user string) error {
+	const advice = "Forge runs every service as a non-root user: use an image built to run as one, with a numeric USER " +
+		"(such as nginxinc/nginx-unprivileged instead of nginx), or build one"
+	uid, _, _ := strings.Cut(user, ":")
+	if uid == "" || uid == "0" || uid == "root" {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s runs as root (its image sets no non-root USER). %s", image, advice))
+	}
+	if n, err := strconv.ParseUint(uid, 10, 32); err != nil || n == 0 {
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+			"%s runs as the user %q, a name, and Kubernetes can only check that a user given by number is not root. %s", image, user, advice))
+	}
+	return nil
 }
 
 // manifestPath is where the forge.yaml of a service without a repo lives in
@@ -92,7 +117,20 @@ func (d *Deploys) pinImage(ctx context.Context, svc, image string) (pinnedImage,
 	if r.Digest != "" && r.Digest != digest {
 		return pinnedImage{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s: the registry has %s for it, not the digest it names", full, digest))
 	}
-	return pinnedImage{full: full, ref: r, digest: digest, pinned: r.Pinned(digest)}, nil
+	p := pinnedImage{full: full, ref: r, digest: digest, pinned: r.Pinned(digest)}
+	if users, ok := d.o.Digests.(ImageUsers); ok {
+		user, err := users.User(ctx, p.pinned)
+		if errors.Is(err, registry.ErrBadImage) {
+			return pinnedImage{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("read the user %s runs as: %w", full, err))
+		}
+		if err != nil {
+			return pinnedImage{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the user %s runs as: %w", full, err))
+		}
+		if err := checkUser(full, user); err != nil {
+			return pinnedImage{}, err
+		}
+	}
+	return p, nil
 }
 
 // serviceImages is where the platform's services' CI pushes their images:

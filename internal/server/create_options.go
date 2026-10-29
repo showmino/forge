@@ -48,8 +48,8 @@ func applyRunOptions(files []template.File, t *template.Template, ro *forgev1.Ru
 	if err := checkDomain(ro, domains); err != nil {
 		return nil, err
 	}
-	if ro.GetPort() != 0 || ro.GetHealth() != "" {
-		return nil, invalid(fmt.Sprintf("port and health are the template's: %s sets them in its forge.yaml", t.Name))
+	if ro.GetPort() != 0 || ro.GetHealth() != "" || len(ro.GetWritable()) > 0 {
+		return nil, invalid(fmt.Sprintf("port, health and writable are the template's: %s sets them in its forge.yaml", t.Name))
 	}
 	asked := runFromProto(ro)
 	for _, o := range asked.OptionsSet() {

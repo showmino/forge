@@ -77,6 +77,9 @@ type EnvWorkload struct {
 	Service, Image, Host string
 	Port                 int32
 	Health               string
+	// Writable are forge.yaml's run.writable: folders besides /tmp that get
+	// an empty folder of their own.
+	Writable []string
 }
 
 // owned is the guard: a namespace is an environment's only if Forge made it.
@@ -266,6 +269,13 @@ func deployment(w EnvWorkload) *appsv1.Deployment {
 		}
 	}
 	tmpLimit := resource.MustParse("256Mi")
+	volumes := []corev1.Volume{{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &tmpLimit}}}}
+	mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
+	for i, p := range w.Writable {
+		name := "writable-" + strconv.Itoa(i)
+		volumes = append(volumes, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &tmpLimit}}})
+		mounts = append(mounts, corev1.VolumeMount{Name: name, MountPath: p})
+	}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: w.Service, Labels: labels},
 		Spec: appsv1.DeploymentSpec{
@@ -280,11 +290,9 @@ func deployment(w EnvWorkload) *appsv1.Deployment {
 						RunAsNonRoot:   &yes,
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
-					// The root filesystem is read-only; /tmp is the one writable path.
-					Volumes: []corev1.Volume{{
-						Name:         "tmp",
-						VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: &tmpLimit}},
-					}},
+					// The root filesystem is read-only; /tmp and run.writable are
+					// the writable paths.
+					Volumes: volumes,
 					Containers: []corev1.Container{{
 						Name:           w.Service,
 						Image:          w.Image,
@@ -297,7 +305,7 @@ func deployment(w EnvWorkload) *appsv1.Deployment {
 							ReadOnlyRootFilesystem:   &yes,
 							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 						},
-						VolumeMounts: []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}},
+						VolumeMounts: mounts,
 					}},
 				},
 			},

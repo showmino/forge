@@ -1,12 +1,15 @@
 // Package registry checks whether an image exists in an OCI registry
-// (ghcr.io, an Azure Container Registry, Docker Hub, ...) and finds its
-// digest, following the registry's own login challenge. The login goes only to the registry's own domain. Errors
+// (ghcr.io, an Azure Container Registry, Docker Hub, ...), finds its
+// digest and the user it runs as, following the registry's own login
+// challenge. The login goes only to the registry's own domain. Errors
 // never contain credentials or tokens.
 package registry
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,7 +174,7 @@ func (c *Client) http() *http.Client {
 // in where the challenge says (ghcr.io's /token, an Azure registry's
 // /oauth2/token, Docker Hub's auth.docker.io) and asks again.
 func (c *Client) Exists(ctx context.Context, image string) (bool, error) {
-	_, err := c.lookup(ctx, image)
+	_, _, err := c.lookup(ctx, image)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
@@ -181,7 +184,7 @@ func (c *Client) Exists(ctx context.Context, image string) (bool, error) {
 // Digest returns the digest of image's manifest (for a multi-platform image,
 // its index), as the registry names it: what a deploy pins.
 func (c *Client) Digest(ctx context.Context, image string) (string, error) {
-	hdr, err := c.lookup(ctx, image)
+	hdr, _, err := c.lookup(ctx, image)
 	if err != nil {
 		return "", err
 	}
@@ -195,14 +198,15 @@ func (c *Client) Digest(ctx context.Context, image string) (string, error) {
 	return d, nil
 }
 
-// lookup asks for image's manifest and returns the answer's headers, or
-// ErrNotFound. A registry that wants a login gets the install's; without
-// one for its host, a bearer registry is asked for an anonymous token, which
-// public images on Docker Hub and ghcr.io need.
-func (c *Client) lookup(ctx context.Context, image string) (http.Header, error) {
+// lookup asks for image's manifest and returns the answer's headers and the
+// Authorization the registry took ("" for none), or ErrNotFound. A registry
+// that wants a login gets the install's; without one for its host, a bearer
+// registry is asked for an anonymous token, which public images on Docker
+// Hub and ghcr.io need.
+func (c *Client) lookup(ctx context.Context, image string) (hdr http.Header, auth string, err error) {
 	r, err := ParseRef(image)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	base := c.BaseURL
 	if base == "" {
@@ -212,7 +216,7 @@ func (c *Client) lookup(ctx context.Context, image string) (http.Header, error) 
 	manifest := base + "/v2/" + r.Repo + "/manifests/" + url.PathEscape(ref)
 	status, hdr, err := c.head(ctx, manifest, "")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if status == http.StatusUnauthorized {
 		ch := parseChallenge(hdr.Get("WWW-Authenticate"))
@@ -222,9 +226,8 @@ func (c *Client) lookup(ctx context.Context, image string) (http.Header, error) 
 		}
 		anonymous := errors.Is(credsErr, ErrNoLogin)
 		if credsErr != nil && !anonymous {
-			return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
+			return nil, "", fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
 		}
-		var auth string
 		switch ch.scheme {
 		case "bearer":
 			if anonymous {
@@ -233,36 +236,36 @@ func (c *Client) lookup(ctx context.Context, image string) (http.Header, error) 
 			token, err := c.token(ctx, ch, r, user, pass)
 			if err != nil {
 				if anonymous {
-					return nil, fmt.Errorf("registry login for %s: %w (and an anonymous token: %w)", r.Host, credsErr, err)
+					return nil, "", fmt.Errorf("registry login for %s: %w (and an anonymous token: %w)", r.Host, credsErr, err)
 				}
-				return nil, err
+				return nil, "", err
 			}
 			auth = "Bearer " + token
 		case "basic":
 			if anonymous {
-				return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
+				return nil, "", fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
 			}
 			auth = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
 		default:
-			return nil, fmt.Errorf("HEAD %s manifest %s: %d with no login method the registry names", r.Repo, ref, status)
+			return nil, "", fmt.Errorf("HEAD %s manifest %s: %d with no login method the registry names", r.Repo, ref, status)
 		}
 		if status, hdr, err = c.head(ctx, manifest, auth); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		// Anonymous and still refused: the image is private, and the install
 		// has no login that could read it.
 		if anonymous && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
-			return nil, fmt.Errorf("HEAD %s manifest %s: %d anonymously; registry login for %s: %w", r.Repo, ref, status, r.Host, credsErr)
+			return nil, "", fmt.Errorf("HEAD %s manifest %s: %d anonymously; registry login for %s: %w", r.Repo, ref, status, r.Host, credsErr)
 		}
 	}
 	switch status {
 	case http.StatusOK:
 		// Not a redirect's target: head does not follow redirects.
-		return hdr, nil
+		return hdr, auth, nil
 	case http.StatusNotFound:
-		return nil, fmt.Errorf("%s: %w", image, ErrNotFound)
+		return nil, "", fmt.Errorf("%s: %w", image, ErrNotFound)
 	default:
-		return nil, fmt.Errorf("HEAD %s manifest %s: %d %s", r.Repo, ref, status, http.StatusText(status))
+		return nil, "", fmt.Errorf("HEAD %s manifest %s: %d %s", r.Repo, ref, status, http.StatusText(status))
 	}
 }
 
@@ -426,4 +429,151 @@ func CredsFromDockerConfig(data []byte, host string) (string, string, error) {
 		return "", "", fmt.Errorf("pull secret login for %s is not user:password", host)
 	}
 	return user, pass, nil
+}
+
+// ErrBadImage marks a problem with the image itself (a manifest or config
+// that is unreadable, too large or not what its digest names): asking again
+// will not help.
+var ErrBadImage = errors.New("bad image")
+
+// maxDocument is the most a manifest or config may hold.
+const maxDocument = 4 << 20
+
+// User returns the user image runs as: its config's User ("101", "101:101",
+// "nginx"; "" when the image names none, which is root). For a
+// multi-platform image it reads the linux/amd64 image, or the first linux
+// one. Every manifest and the config are checked against their digests.
+func (c *Client) User(ctx context.Context, image string) (string, error) {
+	r, err := ParseRef(image)
+	if err != nil {
+		return "", err
+	}
+	hdr, auth, err := c.lookup(ctx, image)
+	if err != nil {
+		return "", err
+	}
+	base := c.BaseURL
+	if base == "" {
+		base = apiBase(r.Host)
+	}
+	ref := hdr.Get("Docker-Content-Digest")
+	if !digestRE.MatchString(ref) {
+		return "", fmt.Errorf("%s: the registry named no sha256 digest for it: %w", image, ErrBadImage)
+	}
+	var m struct {
+		Manifests []struct {
+			Digest   string `json:"digest"`
+			Platform struct {
+				OS           string `json:"os"`
+				Architecture string `json:"architecture"`
+			} `json:"platform"`
+		} `json:"manifests"`
+		Config struct {
+			Digest string `json:"digest"`
+		} `json:"config"`
+	}
+	for range 2 {
+		data, err := c.get(ctx, base+"/v2/"+r.Repo+"/manifests/"+url.PathEscape(ref), auth, manifestTypes, false)
+		if err != nil {
+			return "", err
+		}
+		if !matches(data, ref) {
+			return "", fmt.Errorf("%s: its manifest does not match its digest: %w", image, ErrBadImage)
+		}
+		m.Manifests, m.Config.Digest = nil, ""
+		if err := json.Unmarshal(data, &m); err != nil {
+			return "", fmt.Errorf("%s: unreadable manifest: %w", image, ErrBadImage)
+		}
+		if len(m.Manifests) == 0 {
+			break
+		}
+		// An index: the image of one platform.
+		ref = ""
+		for _, p := range m.Manifests {
+			if p.Platform.OS == "linux" && (p.Platform.Architecture == "amd64" || ref == "") {
+				ref = p.Digest
+			}
+		}
+		if !digestRE.MatchString(ref) {
+			return "", fmt.Errorf("%s: the index names no linux image: %w", image, ErrBadImage)
+		}
+	}
+	if !digestRE.MatchString(m.Config.Digest) {
+		return "", fmt.Errorf("%s: the manifest names no config: %w", image, ErrBadImage)
+	}
+	data, err := c.get(ctx, base+"/v2/"+r.Repo+"/blobs/"+m.Config.Digest, auth, "*/*", true)
+	if err != nil {
+		return "", err
+	}
+	if !matches(data, m.Config.Digest) {
+		return "", fmt.Errorf("%s: its config does not match its digest: %w", image, ErrBadImage)
+	}
+	var cfg struct {
+		Config struct {
+			User string `json:"User"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", fmt.Errorf("%s: unreadable config: %w", image, ErrBadImage)
+	}
+	return cfg.Config.User, nil
+}
+
+// matches reports whether data is what the sha256 digest names.
+func matches(data []byte, digest string) bool {
+	sum := sha256.Sum256(data)
+	return "sha256:"+hex.EncodeToString(sum[:]) == digest
+}
+
+// get reads target with the Authorization the registry took. A manifest is
+// the registry's own answer: no redirect. A blob may be served from
+// elsewhere (a CDN's signed address): a redirect is followed only over
+// https (or the scheme the first request used, in tests), at most 5 times,
+// and without the Authorization, which stays with the registry. Errors name
+// the path asked for, never a redirect's address, which may be signed.
+func (c *Client) get(ctx context.Context, target, auth, accept string, redirect bool) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	req.Header.Set("Accept", accept)
+	path := req.URL.Path
+	hc := *c.http()
+	hc.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if !redirect {
+			return http.ErrUseLastResponse
+		}
+		if len(via) >= 5 {
+			return errors.New("too many redirects")
+		}
+		if next.URL.Scheme != "https" && next.URL.Scheme != via[0].URL.Scheme {
+			return errors.New("redirected off https")
+		}
+		next.Header.Del("Authorization")
+		return nil
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxDocument))
+		return nil, fmt.Errorf("GET %s: %s", path, resp.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDocument+1))
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	if len(data) > maxDocument {
+		return nil, fmt.Errorf("GET %s: larger than %d MB: %w", path, maxDocument>>20, ErrBadImage)
+	}
+	return data, nil
 }

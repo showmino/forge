@@ -177,6 +177,7 @@ func TestCreateFromImage(t *testing.T) {
 	h.fails(2, "create", "web", "--team", "billing")
 	h.fails(2, "create", "web", "--image", "nginx:1.27", "--template", "go-grpc", "--team", "billing")
 	h.fails(2, "create", "web", "--template", "go-grpc", "--port", "80", "--team", "billing")
+	h.fails(2, "create", "web", "--template", "go-grpc", "--writable", "/var/cache/nginx", "--team", "billing")
 	h.fails(2, "create", "web", "--image", "nginx:1.27", "--set", "a=b", "--team", "billing")
 	if r := h.fails(6, "create", "web", "--image", "nginx:latest", "--team", "billing"); !strings.Contains(r.err, "the tag latest moves") {
 		t.Errorf("latest: %v", r)
@@ -185,11 +186,12 @@ func TestCreateFromImage(t *testing.T) {
 	if r := h.ok("create", "web", "--image", "nginx:1.27", "--port", "80", "--health", "/", "--team", "billing", "--dry-run"); r.out != "Would create services/web, running nginx:1.27, with its forge.yaml in the deploy repo:\n  services/web/forge.yaml\n" {
 		t.Errorf("dry run: %q", r.out)
 	}
-	r := h.ok("create", "web", "--image", "nginx:1.27", "--port", "80", "--health", "/", "--team", "billing")
+	r := h.ok("create", "web", "--image", "nginx:1.27", "--port", "80", "--health", "/", "--writable", "/var/cache/nginx,/var/run", "--team", "billing")
 	if !strings.Contains(r.out, "created") || !strings.Contains(r.out, "docker.io/library/nginx@"+nginxDigest) || !strings.Contains(r.out, "1.27") {
 		t.Errorf("create and deploy: %v", r)
 	}
-	if data, err := repo.Read(context.Background(), "services/web/forge.yaml", ""); err != nil || !strings.Contains(string(data), "image: docker.io/library/nginx:1.27") || !strings.Contains(string(data), "port: 80") {
+	if data, err := repo.Read(context.Background(), "services/web/forge.yaml", ""); err != nil || !strings.Contains(string(data), "image: docker.io/library/nginx:1.27") || !strings.Contains(string(data), "port: 80") ||
+		!strings.Contains(string(data), "writable:\n    - /var/cache/nginx\n    - /var/run\n") {
 		t.Errorf("forge.yaml: %v\n%s", err, data)
 	}
 	h.fails(6, "create", "idle", "--image", "nginx:0.0", "--team", "billing")

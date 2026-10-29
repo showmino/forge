@@ -56,9 +56,14 @@ spec:
       securityContext:
         runAsNonRoot: true
         seccompProfile: {type: RuntimeDefault}
-      # The root filesystem is read-only; /tmp is the one writable path.
+      # The root filesystem is read-only; /tmp and run.writable are the
+      # writable paths.
       volumes:
         - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+        - name: writable-0
+          emptyDir: {sizeLimit: 256Mi}
+        - name: writable-1
           emptyDir: {sizeLimit: 256Mi}
       containers:
         - name: payments
@@ -99,6 +104,8 @@ spec:
             capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: tmp, mountPath: /tmp}
+            - {name: writable-0, mountPath: "/var/cache/app"}
+            - {name: writable-1, mountPath: "/var/run"}
 ---
 # Source: forge-chart/templates/cronjob.yaml
 apiVersion: batch/v1
@@ -130,6 +137,10 @@ spec:
             seccompProfile: {type: RuntimeDefault}
           volumes:
             - name: tmp
+              emptyDir: {sizeLimit: 256Mi}
+            - name: writable-0
+              emptyDir: {sizeLimit: 256Mi}
+            - name: writable-1
               emptyDir: {sizeLimit: 256Mi}
           containers:
             - name: cleanup
@@ -164,6 +175,8 @@ spec:
                 capabilities: {drop: [ALL]}
               volumeMounts:
                 - {name: tmp, mountPath: /tmp}
+                - {name: writable-0, mountPath: "/var/cache/app"}
+                - {name: writable-1, mountPath: "/var/run"}
 ---
 # Source: forge-chart/templates/httproute.yaml
 apiVersion: gateway.networking.k8s.io/v1
