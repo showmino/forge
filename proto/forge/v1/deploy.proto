@@ -125,7 +125,9 @@ message StartDeployRequest {
   string service = 1;
   // "staging" or "production".
   string env = 2;
-  // Branch, tag or commit; default main.
+  // Branch, tag or commit; default main. For a service without a repo,
+  // the image tag to run: default the one its forge.yaml names, and a new
+  // tag is written there.
   string ref = 3;
   // Retries with the same request_id return the same operation.
   string request_id = 4;

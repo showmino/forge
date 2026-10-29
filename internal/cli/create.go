@@ -19,13 +19,14 @@ import (
 )
 
 func newCreateCmd(f *Factory) *cobra.Command {
-	var tmpl, team string
+	var tmpl, team, image, health string
 	var owners, sets []string
-	var dryRun bool
+	var dryRun, deploy bool
+	var port int
 	var run runFlags
 	cmd := &cobra.Command{
-		Use:   "create <name> --template <template>[@version] --team <team>",
-		Short: "Create a service from a template",
+		Use:   "create <name> (--template <template>[@version] | --image <image>) --team <team>",
+		Short: "Create a service from a template or an image",
 		Long: `Create a service from a template: the Forge API renders the template,
 creates the private repo github.com/<org>/<name>, pushes the first commit
 (which starts its CI) and registers the service in the catalog. If a step
@@ -41,20 +42,37 @@ refused. Change them later in forge.yaml.
 
 A file template (type file in 'forge template get') makes no repo: it opens
 a pull request that adds its files to the template's target repo, and
-prints the pull request's URL. <name> names the branch and the files.`,
+prints the pull request's URL. <name> names the branch and the files.
+
+With --image instead of --template, the service runs an image someone else
+built (nginx:1.27, ghcr.io/acme/tool:2.3) and gets no repo: its forge.yaml,
+with run.image, is kept in the deploy repo. The image must have a tag other
+than latest, and come from a registry the platform allows. --port and
+--health say where it listens and what is probed; every run option may be
+set. forge then deploys it to staging and watches the deploy (--deploy=false
+does not); with -o json or yaml it prints the deployment. Deploy a new tag
+with 'forge deploy start <name> --env staging --ref <tag>'.`,
 		Example: `  forge create payments --template go-grpc --team billing
   forge create ledger --template go-grpc@v1.0.0 --team billing --owner ana@example.com --set port=9090
   forge create shop --template nextjs --team web --replicas 2 --env LOG_LEVEL=info \
     --secret stripe=vaults/Apps/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
-  forge create payments --template go-grpc --team billing --dry-run`,
+  forge create payments --template go-grpc --team billing --dry-run
+  forge create web --image nginx:1.27 --port 80 --health / --team web`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			if !manifest.ValidID(id) {
 				return exitcode.Usagef("%q is not a valid service name (lowercase letters, digits and '-')", id)
 			}
-			if tmpl == "" {
-				return exitcode.Usagef("--template is required").WithHint("see 'forge template list'")
+			switch {
+			case tmpl == "" && image == "":
+				return exitcode.Usagef("--template or --image is required").WithHint("see 'forge template list'")
+			case tmpl != "" && image != "":
+				return exitcode.Usagef("--template and --image: use one, not both")
+			case image != "" && len(sets) > 0:
+				return exitcode.Usagef("--set is for a template's parameters; an image has none")
+			case tmpl != "" && (port != 0 || health != ""):
+				return exitcode.Usagef("--port and --health are for --image; a template sets its own")
 			}
 			raw, err := parseSets(sets)
 			if err != nil {
@@ -63,6 +81,15 @@ prints the pull request's URL. <name> names the branch and the files.`,
 			runOptions, err := run.options()
 			if err != nil {
 				return err
+			}
+			if port < 0 || port > 65535 {
+				return exitcode.Usagef("--port %d must be 1-65535", port)
+			}
+			if image != "" && (port != 0 || health != "") {
+				if runOptions == nil {
+					runOptions = &forgev1.RunOptions{}
+				}
+				runOptions.Port, runOptions.Health = int32(port), health //nolint:gosec // checked above
 			}
 			format, err := f.Format()
 			if err != nil {
@@ -84,6 +111,12 @@ prints the pull request's URL. <name> names the branch and the files.`,
 			c, err := f.Client(ctx, true)
 			if err != nil {
 				return err
+			}
+			if image != "" {
+				return f.createFromImage(ctx, c, format, &forgev1.CreateServiceRequest{
+					ServiceId: id, Image: image, OwnerTeam: team, Owners: owners,
+					RequestId: client.NewRequestID(), ValidateOnly: dryRun, RunOptions: runOptions,
+				}, deploy)
 			}
 			name, version, _ := strings.Cut(tmpl, "@")
 			tr, err := c.Templates.GetTemplate(ctx, connect.NewRequest(&forgev1.GetTemplateRequest{
@@ -146,6 +179,10 @@ prints the pull request's URL. <name> names the branch and the files.`,
 	fl.StringSliceVar(&owners, "owner", nil, "owner email or handle (repeatable)")
 	fl.StringArrayVar(&sets, "set", nil, "template parameter as name=value (repeatable)")
 	fl.BoolVar(&dryRun, "dry-run", false, "render and check without creating anything; print the files")
+	fl.StringVar(&image, "image", "", "an image to run instead of a template, such as nginx:1.27; the service gets no repo")
+	fl.IntVar(&port, "port", 0, "with --image: the port it listens on (default 8080)")
+	fl.StringVar(&health, "health", "", "with --image: the path its readiness is probed at (default /healthz)")
+	fl.BoolVar(&deploy, "deploy", true, "with --image: deploy it to staging and watch the deploy")
 	run.register(fl)
 	return cmd
 }
@@ -309,4 +346,55 @@ func (f *Factory) printPlan(format output.Format, tmpl string, file bool, p *for
 		}
 	}
 	return nil
+}
+
+// createFromImage creates a service that runs an image and, when deploy is
+// set, deploys it to staging and watches the deploy.
+func (f *Factory) createFromImage(ctx context.Context, c *client.Client, format output.Format, req *forgev1.CreateServiceRequest, deploy bool) error {
+	sc, err := f.StreamClient(ctx)
+	if err != nil {
+		return err
+	}
+	id := req.GetServiceId()
+	final, err := f.streamCreate(ctx, sc, req)
+	if errors.Is(err, errMayStillFinish) {
+		return exitcode.From(errors.Unwrap(err)).WithHint(fmt.Sprintf("the create may still finish on the Forge API; check 'forge service get %s'", id))
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case final.GetPlan() != nil:
+		if format != output.Table {
+			return output.Print(f.IO.Out, format, output.View{Names: final.GetPlan().GetFiles(), Data: final.GetPlan()})
+		}
+		_, err := fmt.Fprintf(f.IO.Out, "Would create services/%s, running %s, with its forge.yaml in the deploy repo:\n  %s\n",
+			id, req.GetImage(), strings.Join(final.GetPlan().GetFiles(), "\n  "))
+		return err
+	case final.GetFailure() != nil:
+		fl := final.GetFailure()
+		hint := "its forge.yaml was removed from the deploy repo again; fix the cause and run the same command"
+		if !fl.GetRolledBack() {
+			hint = fmt.Sprintf("its forge.yaml is still in the deploy repo (services/%s/forge.yaml); the next create overwrites it", id)
+		}
+		return exitcode.New(exitcode.OperationFailed, "%s failed: %s", fl.GetStep(), fl.GetMessage()).WithHint(hint)
+	case final.GetService() == nil:
+		return errors.New("the Forge API ended the create without a result")
+	}
+	if !deploy {
+		return f.printMutation(final.GetService(), "created", false)
+	}
+	// One resource for -o json and yaml: the deployment, printed at the end.
+	if format == output.Table {
+		if err := f.printMutation(final.GetService(), "created", false); err != nil {
+			return err
+		}
+	}
+	resp, err := c.Deploys.StartDeploy(ctx, connect.NewRequest(&forgev1.StartDeployRequest{
+		Service: "services/" + id, Env: "staging", RequestId: client.NewRequestID(),
+	}))
+	if err != nil {
+		return exitcode.From(err).WithHint(fmt.Sprintf("services/%s is created; deploy it with 'forge deploy start %s --env staging'", id, id))
+	}
+	return f.finishDeploy(ctx, sc, format, resp.Msg.GetOperation(), id, "staging", true)
 }

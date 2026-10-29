@@ -69,12 +69,13 @@ func run() error {
 		appKey        = flag.String("github-app-key-file", env("FORGE_GITHUB_APP_KEY_FILE", ""), "file with the GitHub App's private key (PEM)")
 		githubOrg     = flag.String("github-org", env("FORGE_GITHUB_ORG", ""), "GitHub org the App is installed on; required with the GitHub App")
 
-		previewsOn     = flag.Bool("previews", env("FORGE_PREVIEWS", "") == "1" || env("FORGE_PREVIEWS", "") == "true", "serve preview environments (needs the GitHub App and Kubernetes access)")
-		previewDomain  = flag.String("preview-domain", env("FORGE_PREVIEW_DOMAIN", ""), "preview hosts are <environment>.<domain>, for example preview.10.150.1.222.nip.io")
-		previewGateway = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
-		imageRegistry  = flag.String("image-registry", env("FORGE_IMAGE_REGISTRY", server.DefaultRegistry), "where the services' CI pushes images (a host and an optional path); deploys and previews run <registry>/<owner>/<service>:<commit>")
-		previewPull    = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
-		previewMax     = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
+		previewsOn        = flag.Bool("previews", env("FORGE_PREVIEWS", "") == "1" || env("FORGE_PREVIEWS", "") == "true", "serve preview environments (needs the GitHub App and Kubernetes access)")
+		previewDomain     = flag.String("preview-domain", env("FORGE_PREVIEW_DOMAIN", ""), "preview hosts are <environment>.<domain>, for example preview.10.150.1.222.nip.io")
+		previewGateway    = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
+		allowedRegistries = flag.String("allowed-registries", env("FORGE_ALLOWED_REGISTRIES", ""), "registry hosts a service without a repo may run images from, comma separated (empty: any); the image rules (policy/images.rego) refuse others")
+		imageRegistry     = flag.String("image-registry", env("FORGE_IMAGE_REGISTRY", server.DefaultRegistry), "where the services' CI pushes images (a host and an optional path); deploys and previews run <registry>/<owner>/<service>:<commit>")
+		previewPull       = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
+		previewMax        = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
 
 		deploysOn     = flag.Bool("deploys", env("FORGE_DEPLOYS", "") == "1" || env("FORGE_DEPLOYS", "") == "true", "serve deploys to staging and production through Argo CD (needs --preview-pull-secret, and --deploy-domain without --previews)")
 		deployRepo    = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", ""), "GitOps repo (owner/name) Forge commits deploys to; required with --deploys")
@@ -202,7 +203,7 @@ func run() error {
 	deps, err := deploys(deployFlags{
 		on: *deploysOn, repo: *deployRepo, domain: *deployDomain, syncTimeout: env("FORGE_DEPLOY_SYNC_TIMEOUT", "10m"),
 		publicDomains: *publicDomains, publicTunnel: *publicTunnel, argoURL: *argoURL, secretVaults: *secretVaults, secretDenied: *secretDenied, secretBackend: *secretBackend,
-		namespaceTimeout: env("FORGE_DEPLOY_NAMESPACE_TIMEOUT", "5m"), resources: st, registry: *imageRegistry,
+		namespaceTimeout: env("FORGE_DEPLOY_NAMESPACE_TIMEOUT", "5m"), resources: st, registry: *imageRegistry, allowedRegistries: *allowedRegistries,
 	}, app, *previewDomain, cluster, images, catalog, ops, *githubOrg, log)
 	if err != nil {
 		return err

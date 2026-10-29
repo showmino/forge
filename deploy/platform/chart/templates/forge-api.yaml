@@ -106,6 +106,9 @@ spec:
             {{- with .Values.imageRegistry }}
             - {name: FORGE_IMAGE_REGISTRY, value: {{ . | quote }}}
             {{- end }}
+            {{- with .Values.allowedRegistries }}
+            - {name: FORGE_ALLOWED_REGISTRIES, value: {{ . | quote }}}
+            {{- end }}
             {{- if or .Values.previews.enabled .Values.deploys.enabled }}
             - {name: FORGE_PREVIEW_PULL_SECRET, value: {{ printf "%s/%s" .Release.Namespace (include "forge.pullSecret" .) | quote }}}
             {{- end }}

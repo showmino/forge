@@ -44,6 +44,9 @@ type deployFlags struct {
 	resources store.ResourceStore
 	// registry is --image-registry, checked with the previews' flags.
 	registry string
+	// allowedRegistries is --allowed-registries: where images of services
+	// without a repo may come from.
+	allowedRegistries string
 }
 
 // deploys returns the deploy service, or nil when deploys are off. It reuses
@@ -110,6 +113,19 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 			*list.to = append(*list.to, v)
 		}
 	}
+	var allowed []string
+	for _, h := range strings.Split(f.allowedRegistries, ",") {
+		if h = strings.ToLower(strings.TrimSpace(h)); h == "" {
+			continue
+		}
+		if strings.Contains(h, "/") || strings.Contains(h, "://") || !strings.ContainsAny(h, ".:") && h != "localhost" {
+			return nil, fmt.Errorf("--allowed-registries: %q must be a registry host such as ghcr.io or docker.io", h)
+		}
+		allowed = append(allowed, h)
+	}
+	// Images of services without a repo: their digests come from the same
+	// registry client that checks the services' own images.
+	digests, _ := images.(server.ImageDigester)
 	// The promotion rules: compiled here, with no request to bound them.
 	rules, err := policy.New(context.Background())
 	if err != nil {
@@ -120,7 +136,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 		Policy:        rules,
 		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS, ArgoURL: argoURL,
 		SecretVaults: vaults, SecretDeniedItems: denied, SecretBackend: f.secretBackend,
-		Cluster: cluster, GitHub: gh, Images: images,
+		Cluster: cluster, GitHub: gh, Images: images, Digests: digests, AllowedRegistries: allowed,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
 		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,
 		Org: org, Registry: f.registry, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,

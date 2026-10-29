@@ -101,3 +101,20 @@ func TestSetRunDomain(t *testing.T) {
 		t.Errorf("without run: %v %v\n%s", err, perr, out)
 	}
 }
+
+func TestSetRunImage(t *testing.T) {
+	t.Parallel()
+	in := "apiVersion: forge.dev/v1\nservice:\n  name: web\n  team: b\nrun:\n  image: docker.io/library/nginx:1.27 # what runs\n  port: 80\n"
+	out, err := SetRunImage([]byte(in), "docker.io/library/nginx:1.28")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Parse(out)
+	if err != nil || m.RunImage() != "docker.io/library/nginx:1.28" || m.RunPort() != 80 {
+		t.Errorf("%v:\n%s", err, out)
+	}
+	// In its place, with its comment.
+	if !strings.Contains(string(out), "run:\n  image: docker.io/library/nginx:1.28 # what runs\n  port: 80\n") {
+		t.Errorf("not in place:\n%s", out)
+	}
+}

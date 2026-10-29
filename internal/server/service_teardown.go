@@ -46,9 +46,12 @@ type teardownPlan struct {
 	previews []string
 	// envs are deploy environments, in promotion order.
 	envs []string
+	// manifest: the service has no repo, and its forge.yaml is in the
+	// deploy repo.
+	manifest bool
 }
 
-func (p teardownPlan) empty() bool { return len(p.previews) == 0 && len(p.envs) == 0 }
+func (p teardownPlan) empty() bool { return len(p.previews) == 0 && len(p.envs) == 0 && !p.manifest }
 
 // removes names what the plan takes down, for the caller to read.
 func (p teardownPlan) removes(svc string) []string {
@@ -58,6 +61,9 @@ func (p teardownPlan) removes(svc string) []string {
 	}
 	for _, env := range slices.Backward(p.envs) {
 		out = append(out, deployNamePrefix+svc+"/"+env)
+	}
+	if p.manifest {
+		out = append(out, "deploy repo: "+manifestPath(svc))
 	}
 	return out
 }
@@ -107,6 +113,11 @@ func (t *teardown) plan(ctx context.Context, name string) (teardownPlan, error) 
 				p.envs = append(p.envs, env)
 			}
 		}
+		there, err := t.deploys.hasManifest(ctx, svc)
+		if err != nil {
+			return p, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the deploy repo: %w", err))
+		}
+		p.manifest = there
 	}
 	return p, nil
 }
@@ -322,6 +333,12 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 		// Production first: staging keeps running until production is down.
 		for _, env := range slices.Backward(plan.envs) {
 			if err := t.deploys.undeploy(ctx, svc, env, emit); err != nil {
+				return err
+			}
+		}
+		// Once nothing runs: the forge.yaml of a service without a repo.
+		if t.hasDeploys() {
+			if err := t.deploys.removeManifest(ctx, svc, emit); err != nil {
 				return err
 			}
 		}

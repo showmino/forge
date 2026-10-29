@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/registry"
 )
 
 // HTTPRoutes is the Gateway API HTTPRoute resource.
@@ -111,6 +112,34 @@ func (g *GitHub) SetRuns(sha string, runs []github.WorkflowRun) {
 type Images struct {
 	mu      sync.Mutex
 	present map[string]bool
+	// digests are the digests AddDigest gave images, by name and by
+	// <host>/<repo>@<digest>.
+	digests map[string]string
+}
+
+// AddDigest makes image (in full, host/repo:tag) exist with digest.
+func (i *Images) AddDigest(image, digest string) {
+	i.Add(image)
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.digests == nil {
+		i.digests = map[string]string{}
+	}
+	i.digests[image] = digest
+	if at := strings.LastIndex(image, ":"); at > strings.LastIndex(image, "/") {
+		i.digests[image[:at]+"@"+digest] = digest
+	}
+}
+
+// Digest answers like a registry: the digest AddDigest gave image, or
+// registry.ErrNotFound.
+func (i *Images) Digest(_ context.Context, image string) (string, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if d, ok := i.digests[image]; ok {
+		return d, nil
+	}
+	return "", fmt.Errorf("%s: %w", image, registry.ErrNotFound)
 }
 
 // Add makes image exist.

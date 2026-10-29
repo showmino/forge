@@ -345,6 +345,18 @@ A file template (`type: file`, `target: <owner>/<repo>` in `template.yaml`)
 makes no repo: `forge create <name> --template <template> --team <team>`
 renders it and opens a pull request that adds its files to the target repo,
 and prints the pull request's URL. It refuses when a file is there already.
+`forge create <name> --image <image> --team <team>` makes a service without a
+repo, which runs an image someone else built (`nginx:1.27`,
+`ghcr.io/acme/tool:2.3`): its `forge.yaml`, with `run.image`, lives in the
+deploy repo at `services/<name>/forge.yaml`, and `--port` and `--health` say
+where the image listens and what is probed (every run option may be set).
+forge then deploys it to staging and watches the deploy (`--deploy=false`
+does not). A deploy pins the tag to its digest, so promoting moves exactly
+what staging ran; the version is the tag. `forge deploy start <name> --env
+staging --ref 1.28` runs another tag and writes it into that `forge.yaml`.
+Such a service has no previews (they are made from a branch), and deleting it
+also removes its `forge.yaml` from the deploy repo. See
+`docs/specs/2026-10-29-deploy-sources-design.md`, phase 9.
 Parameters can carry a `label`, `placeholder` and `group` for forms, an int
 `min` and `max`, and the type `list` (several of `values`, comma-separated);
 see `docs/specs/2026-10-14-file-templates-design.md`.
@@ -370,6 +382,14 @@ wait for the deploy to sync, and promote again. A rollback is never checked,
 so production can always be rolled back. The rules are `policy/deploys.rego`
 (package `forge.deploys`), built into forge-api like the resource rules; the
 audit log records `policy: passed` or `denied` on each promotion.
+
+The image of a service without a repo is checked by `policy/images.rego`
+(package `forge.images`) when the service is created and on every deploy: the
+tag `latest` is refused (it moves), and so is an image from a registry outside
+forge-api's `--allowed-registries` (`FORGE_ALLOWED_REGISTRIES`, comma
+separated hosts such as `ghcr.io,docker.io`; the platform chart's
+`allowedRegistries`; empty allows any). A refused create or deploy exits 6
+with the rule's message.
 
 From GitHub Actions, `forge deploy start --env staging` needs no secret: with
 `permissions: id-token: write`, the CLI requests the job's OIDC token
@@ -564,8 +584,11 @@ optional path such as `myregistry.azurecr.io`; the platform chart's
 that registry: forge-api uses it to check that the image exists, and asks the
 registry where to log in (its `WWW-Authenticate` challenge), so ghcr.io and an
 Azure Container Registry both work. The login only goes to a token service in
-the registry's own domain. Docker Hub does not work (`docker.io` redirects
-image requests to its website).
+the registry's own domain. Docker Hub works too: its images are named
+`docker.io/...` and its API is asked at `registry-1.docker.io`. When the pull
+secret has no login for a registry (or forge-api has no pull secret), forge-api
+asks it anonymously, which public images need; a pull secret that cannot be
+read is reported as such.
 
 ### Audit log
 

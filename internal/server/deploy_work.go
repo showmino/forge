@@ -76,9 +76,12 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err != nil {
 		return nil, err
 	}
-	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, d.o.Registry, m.GetService(), ref)
+	src, newManifest, err := d.resolve(ctx, m.GetService(), ref)
 	if err != nil {
 		return nil, err
+	}
+	if w := workloadOf(ctx); w != nil && src.imageOnly != "" {
+		return nil, workloadDenied(w, "not deploy %s, which has no repo", m.GetService())
 	}
 	if w := workloadOf(ctx); w != nil && src.commit != w.SHA {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("resolved %s to %s, not the CI token's commit %s", ref, shortSHA(src.commit), shortSHA(w.SHA)))
@@ -108,7 +111,11 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, src.serviceID+"-"+m.GetEnv()); err != nil {
 		return nil, err
 	}
-	if v.Forge.Version, err = d.plannedVersion(ctx, src.owner, src.repo, src.commit, env, bump); err != nil {
+	// A service without a repo runs as its image's tag: there is no repo to
+	// cut a version in.
+	if src.imageOnly != "" {
+		v.Forge.Version = src.ref
+	} else if v.Forge.Version, err = d.plannedVersion(ctx, src.owner, src.repo, src.commit, env, bump); err != nil {
 		return nil, err
 	}
 	preview := d.deploymentFrom(src.serviceID, env, v, "", AppStatus{})
@@ -130,9 +137,23 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	}
 	op := d.o.Operations.Start(ctx, opDeploy, deployNamePrefix+target, actor, func(ctx context.Context, emit func(string, string)) error {
 		defer d.unlock(target)
-		emit("resolve", fmt.Sprintf("%s is %s", src.ref, shortSHA(src.commit)))
+		if src.imageOnly != "" {
+			emit("resolve", fmt.Sprintf("%s is %s", src.imageOnly, shortDigest(src.commit)))
+		} else {
+			emit("resolve", fmt.Sprintf("%s is %s", src.ref, shortSHA(src.commit)))
+		}
 		if moved != "" {
 			emit("address", moved)
+		}
+		if src.imageOnly != "" {
+			emit("image", "pinned "+src.image)
+			if newManifest != nil {
+				if err := d.writeManifest(ctx, src.serviceID, newManifest, fmt.Sprintf("run %s as %s (%s)", src.serviceID, src.imageOnly, actor), emit); err != nil {
+					return err
+				}
+			}
+			emit("release", "version "+src.ref+", the image's tag")
+			return d.apply(ctx, src.serviceID, env, v, emit)
 		}
 		if err := waitForImage(ctx, d.o.GitHub, d.o.Images, src, d.o.ImageTimeout, d.o.ImagePoll, emit); err != nil {
 			return err

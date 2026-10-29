@@ -26,6 +26,10 @@ type source struct {
 	stagingInternal bool
 	// run is forge.yaml's run section, nil without one.
 	run *manifest.Run
+	// imageOnly is set for a service without a repo: the image its
+	// forge.yaml in the deploy repo names, in full. Then commit is the
+	// image's digest, ref its tag and image the image pinned to the digest.
+	imageOnly string
 }
 
 // resolveSource checks service ("services/<id>") and ref (default main),
@@ -48,6 +52,10 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 	if err != nil {
 		return s, err // NotFound "services/<id> not found", or Unavailable
 	}
+	if svc.GetRepoUrl() == "" {
+		return s, connect.NewError(connect.CodeFailedPrecondition,
+			fmt.Errorf("%s%s has no repo: it runs an image, and this needs a branch or a commit of a repo", servicePrefix, sid))
+	}
 	if s.owner, s.repo, ok = repoOf(svc.GetRepoUrl(), org); !ok {
 		return s, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Errorf("%s%s has no GitHub repo in %s (repo_url %q)", servicePrefix, sid, org, svc.GetRepoUrl()))
@@ -69,6 +77,10 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 		mf, err := manifest.Parse(data)
 		if err != nil {
 			return s, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("forge.yaml at %s is invalid: %w", shortSHA(s.commit), err))
+		}
+		if mf.RunImage() != "" {
+			return s, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"forge.yaml at %s has run.image, which is for a service without a repo; %s%s runs what its CI builds", shortSHA(s.commit), servicePrefix, sid))
 		}
 		s.port, s.health = int32(mf.RunPort()), mf.RunHealth() //nolint:gosec // Parse checks run.port is 1-65535
 		s.domain, s.host = mf.RunDomain(), mf.RunHost()

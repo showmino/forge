@@ -32,6 +32,8 @@ type deployFixture struct {
 	client    forgev1connect.DeployServiceClient
 	argo      *envtest.Argo
 	catalog   *Catalog
+	// catalogClient reaches the same API, for creates.
+	catalogClient forgev1connect.ServiceCatalogServiceClient
 }
 
 func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *envtest.Argo)) *deployFixture {
@@ -117,6 +119,7 @@ func newDeployFixtureAuth(t *testing.T, noArgo bool, tweak func(*DeployOptions, 
 	t.Cleanup(srv.Close)
 	f.client = forgev1connect.NewDeployServiceClient(srv.Client(), srv.URL)
 	f.opsClient = forgev1connect.NewOperationServiceClient(srv.Client(), srv.URL)
+	f.catalogClient = forgev1connect.NewServiceCatalogServiceClient(srv.Client(), srv.URL)
 	return f
 }
 

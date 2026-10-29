@@ -45,15 +45,11 @@ func runFromProto(ro *forgev1.RunOptions) *manifest.Run {
 // not offer, and options forge.yaml's rules refuse.
 // domains are the platform's public domains, which ro.domain must be one of.
 func applyRunOptions(files []template.File, t *template.Template, ro *forgev1.RunOptions, domains []string) ([]template.File, error) {
-	if d := ro.GetDomain(); d != "" {
-		switch {
-		case ro.GetNetworkOnly():
-			return nil, invalid(fmt.Sprintf("domain %s is a public address and network_only is none: ask for one, not both", d))
-		case len(domains) == 0:
-			return nil, invalid(fmt.Sprintf("domain %s: this Forge API offers no public domains", d))
-		case !slices.Contains(domains, d):
-			return nil, invalid(fmt.Sprintf("domain %s is not a domain of this platform: use %s", d, strings.Join(domains, " or ")))
-		}
+	if err := checkDomain(ro, domains); err != nil {
+		return nil, err
+	}
+	if ro.GetPort() != 0 || ro.GetHealth() != "" {
+		return nil, invalid(fmt.Sprintf("port and health are the template's: %s sets them in its forge.yaml", t.Name))
 	}
 	asked := runFromProto(ro)
 	for _, o := range asked.OptionsSet() {
