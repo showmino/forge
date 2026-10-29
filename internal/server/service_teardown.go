@@ -46,9 +46,12 @@ type teardownPlan struct {
 	previews []string
 	// envs are deploy environments, in promotion order.
 	envs []string
+	// manifest: the service has no repo, and its forge.yaml is in the
+	// deploy repo.
+	manifest bool
 }
 
-func (p teardownPlan) empty() bool { return len(p.previews) == 0 && len(p.envs) == 0 }
+func (p teardownPlan) empty() bool { return len(p.previews) == 0 && len(p.envs) == 0 && !p.manifest }
 
 // removes names what the plan takes down, for the caller to read.
 func (p teardownPlan) removes(svc string) []string {
@@ -107,6 +110,11 @@ func (t *teardown) plan(ctx context.Context, name string) (teardownPlan, error) 
 				p.envs = append(p.envs, env)
 			}
 		}
+		there, err := t.deploys.hasManifest(ctx, svc)
+		if err != nil {
+			return p, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the deploy repo: %w", err))
+		}
+		p.manifest = there
 	}
 	return p, nil
 }
@@ -325,6 +333,12 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 				return err
 			}
 		}
+		// Once nothing runs: the forge.yaml of a service without a repo.
+		if t.hasDeploys() {
+			if err := t.deploys.removeManifest(ctx, svc, emit); err != nil {
+				return err
+			}
+		}
 		// Nothing new may be started for a service being deleted, but a
 		// request that was already past its checks can still have landed.
 		// Look once more before the entry goes: whatever is there now would
@@ -344,7 +358,11 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 			}
 			return &OpError{Code: "catalog", Message: "everything " + name + " ran is removed, but its catalog entry is not: " + err.Error()}
 		}
-		emit("catalog", "removed "+name+" from the catalog; its GitHub repo is kept")
+		if plan.manifest {
+			emit("catalog", "removed "+name+" from the catalog")
+		} else {
+			emit("catalog", "removed "+name+" from the catalog; its GitHub repo is kept")
+		}
 		return nil
 	}
 }

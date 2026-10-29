@@ -93,9 +93,15 @@ func newDeployStartCmd(f *Factory) *cobra.Command {
 		Short: "Deploy a ref of a service to an environment",
 		Long: `Deploy a ref of a service to an environment. Every commit that reaches
 staging gets a release candidate version (v0.3.1-rc.2); one that reaches
-production gets a final version (v0.3.1), each with a GitHub release.`,
+production gets a final version (v0.3.1), each with a GitHub release.
+
+A service without a repo (forge create --image) runs its image's tag: --ref
+is the tag to run (default the one its forge.yaml names), and a new tag is
+written into that forge.yaml. The tag is pinned to its digest, so promoting
+moves exactly what staging ran, and the version is the tag.`,
 		Example: `  forge deploy start payments --env staging
-  forge deploy start --env staging --ref v1.4.2    # in a service repo`,
+  forge deploy start --env staging --ref v1.4.2    # in a service repo
+  forge deploy start web --env staging --ref 1.28  # a service that runs nginx`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if env == "" {
@@ -142,7 +148,7 @@ production gets a final version (v0.3.1), each with a GitHub release.`,
 		},
 	}
 	cmd.Flags().StringVar(&env, "env", "", "staging or production")
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit (default $GITHUB_SHA in GitHub Actions, else main)")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit (default $GITHUB_SHA in GitHub Actions, else main); for a service without a repo, the image tag")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check and resolve without deploying")
 	cmd.Flags().BoolVar(&wait, "wait", true, "watch the deploy until it ends")
 	cmd.Flags().StringVar(&bump, "bump", "", "for a first deploy of a commit to production: patch (default), minor or major")

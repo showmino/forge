@@ -144,6 +144,10 @@ database:
 # <imageRegistry>/<owner>/<service>:<commit>. Empty is ghcr.io.
 imageRegistry: ""
 
+# Registry hosts that a service without a repo (forge create --image) may run
+# images from, comma separated, such as "ghcr.io,docker.io". Empty allows any.
+allowedRegistries: ""
+
 # Argo CD's web address, to link a deployment to its Application. Optional.
 argocdURL: ""
 

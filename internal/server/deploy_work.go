@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"connectrpc.com/connect"
@@ -76,7 +77,16 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err != nil {
 		return nil, err
 	}
-	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, d.o.Registry, m.GetService(), ref)
+	// A CI token belongs to a repo, and its ref is a commit of it: it never
+	// deploys a service without one.
+	if w := workloadOf(ctx); w != nil {
+		if repoless, err := d.repoless(ctx, strings.TrimPrefix(m.GetService(), servicePrefix)); err != nil {
+			return nil, err
+		} else if repoless {
+			return nil, workloadDenied(w, "not deploy %s, which has no repo", m.GetService())
+		}
+	}
+	src, retag, err := d.resolve(ctx, m.GetService(), ref)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +118,11 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, src.serviceID+"-"+m.GetEnv()); err != nil {
 		return nil, err
 	}
-	if v.Forge.Version, err = d.plannedVersion(ctx, src.owner, src.repo, src.commit, env, bump); err != nil {
+	// A service without a repo runs as its image's tag: there is no repo to
+	// cut a version in.
+	if src.imageOnly != "" {
+		v.Forge.Version = src.ref
+	} else if v.Forge.Version, err = d.plannedVersion(ctx, src.owner, src.repo, src.commit, env, bump); err != nil {
 		return nil, err
 	}
 	preview := d.deploymentFrom(src.serviceID, env, v, "", AppStatus{})
@@ -130,9 +144,27 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	}
 	op := d.o.Operations.Start(ctx, opDeploy, deployNamePrefix+target, actor, func(ctx context.Context, emit func(string, string)) error {
 		defer d.unlock(target)
-		emit("resolve", fmt.Sprintf("%s is %s", src.ref, shortSHA(src.commit)))
+		if src.imageOnly != "" {
+			emit("resolve", fmt.Sprintf("%s is %s", src.imageOnly, shortDigest(src.commit)))
+		} else {
+			emit("resolve", fmt.Sprintf("%s is %s", src.ref, shortSHA(src.commit)))
+		}
 		if moved != "" {
 			emit("address", moved)
+		}
+		if src.imageOnly != "" {
+			emit("image", "pinned "+src.image)
+			emit("release", "version "+src.ref+", the image's tag")
+			if err := d.apply(ctx, src.serviceID, env, v, emit); err != nil {
+				return err
+			}
+			// Only a tag that deployed becomes the one forge.yaml names.
+			if retag {
+				if err := d.retagManifest(ctx, src.serviceID, src.imageOnly, fmt.Sprintf("run %s as %s (%s)", src.serviceID, src.imageOnly, actor), emit); err != nil {
+					emit("manifest", fmt.Sprintf("deployed, but %s was not written into forge.yaml (%v); a deploy without --ref runs the tag it names", src.imageOnly, err))
+				}
+			}
+			return nil
 		}
 		if err := waitForImage(ctx, d.o.GitHub, d.o.Images, src, d.o.ImageTimeout, d.o.ImagePoll, emit); err != nil {
 			return err

@@ -44,12 +44,18 @@ type DeployRepo interface {
 
 // DeployOptions configure deploys.
 type DeployOptions struct {
-	Cluster    *Cluster
-	GitHub     EnvGitHub
-	Images     ImageChecker
-	Repo       DeployRepo
-	Catalog    *Catalog
-	Operations *Operations
+	Cluster *Cluster
+	GitHub  EnvGitHub
+	Images  ImageChecker
+	// Digests finds image digests, for services without a repo, which run an
+	// image someone else built. Without it they cannot be deployed.
+	Digests ImageDigester
+	// AllowedRegistries are the hosts such images may come from (the image
+	// rules); empty allows any.
+	AllowedRegistries []string
+	Repo              DeployRepo
+	Catalog           *Catalog
+	Operations        *Operations
 	// Releases, when set, gives every deployed commit a version: a tag and
 	// a GitHub release in the service's repo.
 	Releases ReleaseGitHub
@@ -704,9 +710,19 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
 	// Staging's candidate number is not production's version: that is cut
 	// below, or there is none.
+	stagingVersion := v.Forge.Version
 	v.Forge.Version = ""
 	var cut func(context.Context, func(string, string)) (string, error)
-	if d.o.Releases != nil {
+	repoless, err := d.repoless(ctx, svc)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case repoless:
+		// No repo to cut a version in: production runs as staging did, by the
+		// image's tag.
+		v.Forge.Version = stagingVersion
+	case d.o.Releases != nil:
 		owner, repo, err := d.serviceRepo(ctx, svc)
 		if err != nil {
 			return nil, err

@@ -82,6 +82,18 @@ func SetRunOptions(data []byte, r *Run) ([]byte, error) {
 // SetRunDomain sets run.domain in the forge.yaml in data ("none": only the
 // internal address), keeping everything else and its comments.
 func SetRunDomain(data []byte, domain string) ([]byte, error) {
+	return setRunScalar(data, "domain", domain)
+}
+
+// SetRunImage sets run.image in the forge.yaml in data, keeping everything
+// else and its comments.
+func SetRunImage(data []byte, image string) ([]byte, error) {
+	return setRunScalar(data, "image", image)
+}
+
+// setRunScalar sets run.<key> to value: in its place when it is there, else
+// at the end of run, which it makes when there is none.
+func setRunScalar(data []byte, key, value string) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return nil, err
@@ -96,8 +108,12 @@ func SetRunDomain(data []byte, domain string) ([]byte, error) {
 		root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "run"}, run)
 	}
 	run.Style = 0
-	removeKey(run, "domain")
-	run.Content = append(run.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "domain"}, &yaml.Node{Kind: yaml.ScalarNode, Value: domain})
+	if v := mapValue(run, key); v != nil && v.Kind == yaml.ScalarNode {
+		v.Value, v.Tag, v.Style = value, "", 0
+	} else {
+		removeKey(run, key)
+		run.Content = append(run.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: key}, &yaml.Node{Kind: yaml.ScalarNode, Value: value})
+	}
 	var b bytes.Buffer
 	enc := yaml.NewEncoder(&b)
 	enc.SetIndent(2)

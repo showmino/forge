@@ -540,7 +540,19 @@ func TestImageRules(t *testing.T) {
 		{"a registry not allowed", mod(func(i *Image) { i.AllowedRegistries = []string{"ghcr.io"} }),
 			"docker.io/library/nginx:1.27: images may only come from ghcr.io"},
 		{"no host", mod(func(i *Image) { i.Host = ""; i.AllowedRegistries = []string{"ghcr.io"} }),
-			"docker.io/library/nginx:1.27: images may only come from ghcr.io"},
+			"docker.io/library/nginx:1.27: images may only come from ghcr.io|docker.io/library/nginx:1.27: the registry  is an address or a local name; the platform must allow it by name"},
+		{"another registry than the services' passes", mod(func(i *Image) { i.ServiceImages = "ghcr.io/my-org/" }), ""},
+		{"a service's own CI image", mod(func(i *Image) {
+			i.Image, i.Host, i.Repo, i.Tag, i.ServiceImages = "ghcr.io/my-org/payments:1a2b3c4", "ghcr.io", "my-org/payments", "1a2b3c4", "ghcr.io/My-Org/"
+		}), "ghcr.io/my-org/payments:1a2b3c4 is built by a service's CI, under ghcr.io/My-Org/; deploy it from that service's repo"},
+		{"an org whose name starts the same passes", mod(func(i *Image) {
+			i.Host, i.Repo, i.ServiceImages = "ghcr.io", "my-org-tools/x", "ghcr.io/my-org/"
+		}), ""},
+		{"localhost", mod(func(i *Image) { i.Host = "localhost:5000" }),
+			"docker.io/library/nginx:1.27: the registry localhost:5000 is an address or a local name; the platform must allow it by name"},
+		{"an address", mod(func(i *Image) { i.Host = "10.0.0.5:5000" }),
+			"docker.io/library/nginx:1.27: the registry 10.0.0.5:5000 is an address or a local name; the platform must allow it by name"},
+		{"an address the platform allows", mod(func(i *Image) { i.Host = "10.0.0.5:5000"; i.AllowedRegistries = []string{"10.0.0.5:5000"} }), ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

@@ -157,9 +157,10 @@ message DeleteServiceResponse {
 }
 
 message CreateServiceRequest {
-  // Becomes services/{service_id} and the repo {github org}/{service_id}.
+  // Becomes services/{service_id} and, from a template, the repo
+  // {github org}/{service_id}.
   string service_id = 1;
-  // "templates/{template}".
+  // "templates/{template}". Either a template or an image.
   string template = 2;
   // Release tag; empty means the newest.
   string template_version = 3;
@@ -172,8 +173,14 @@ message CreateServiceRequest {
   // Render and check; create nothing.
   bool validate_only = 8;
   // forge.yaml's run options, written into the new repo's forge.yaml over
-  // the template's. Only the options the template offers may be set.
+  // the template's. Only the options the template offers may be set. With
+  // an image every option may be set, and port and health too.
   RunOptions run_options = 9;
+  // An image to run instead of a template ("nginx:1.27",
+  // "ghcr.io/acme/tool:2.3"): the service gets no repo, and its forge.yaml
+  // (with run.image) lives in the deploy repo. It must pass the image rules
+  // (no "latest"; an allowed registry). Deploy it with StartDeploy.
+  string image = 10;
 }
 
 // RunOptions are forge.yaml's run options (see the README, "Run options").
@@ -197,6 +204,11 @@ message RunOptions {
   // forge.yaml gets run.domain. "" for the default. Not with network_only.
   // Every service template allows it.
   string domain = 9;
+  // The port the service listens on, and the path its readiness is probed
+  // at: forge.yaml's run.port and run.health. Only with an image; a
+  // template sets its own.
+  int32 port = 10;
+  string health = 11;
 }
 
 // RunResources are the app container's requests and limits, as Kubernetes

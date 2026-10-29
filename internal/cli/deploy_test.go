@@ -19,6 +19,7 @@ func (h *harness) serveDeploys(unhealthy map[string]string) *envtest.Repo {
 	cluster := &server.Cluster{Kube: envtest.Kube(), Dynamic: envtest.Dynamic(), Gateway: "forge/forge-previews", PullSecret: "forge/mino-ghcr"}
 	images := &envtest.Images{}
 	images.Add("ghcr.io/showmino/payments:1a2b3c4")
+	images.AddDigest("docker.io/library/nginx:1.27", nginxDigest)
 	repo := &envtest.Repo{}
 	rules, err := policy.New(context.Background())
 	if err != nil {
@@ -26,7 +27,7 @@ func (h *harness) serveDeploys(unhealthy map[string]string) *envtest.Repo {
 	}
 	h.deploys = server.NewDeploys(server.DeployOptions{
 		Policy:  rules,
-		Cluster: cluster, Images: images, Repo: repo, Catalog: h.catalog, Operations: h.ops,
+		Cluster: cluster, Images: images, Digests: images, Repo: repo, Catalog: h.catalog, Operations: h.ops,
 		GitHub:   &envtest.GitHub{Refs: map[string]string{"main": cliSHA}},
 		Releases: &envtest.Releases{},
 		Org:      "showmino", Domain: "10.150.1.222.nip.io",
@@ -164,4 +165,36 @@ func TestServiceDeleteTakesDeploymentsDown(t *testing.T) {
 		t.Error("the deployment is still in the deploy repo")
 	}
 	h.fails(3, "service", "get", "payments")
+}
+
+const nginxDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+
+func TestCreateFromImage(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	repo := h.serveDeploys(map[string]string{})
+
+	h.fails(2, "create", "web", "--team", "billing")
+	h.fails(2, "create", "web", "--image", "nginx:1.27", "--template", "go-grpc", "--team", "billing")
+	h.fails(2, "create", "web", "--template", "go-grpc", "--port", "80", "--team", "billing")
+	h.fails(2, "create", "web", "--image", "nginx:1.27", "--set", "a=b", "--team", "billing")
+	if r := h.fails(6, "create", "web", "--image", "nginx:latest", "--team", "billing"); !strings.Contains(r.err, "the tag latest moves") {
+		t.Errorf("latest: %v", r)
+	}
+
+	if r := h.ok("create", "web", "--image", "nginx:1.27", "--port", "80", "--health", "/", "--team", "billing", "--dry-run"); r.out != "Would create services/web, running nginx:1.27, with its forge.yaml in the deploy repo:\n  services/web/forge.yaml\n" {
+		t.Errorf("dry run: %q", r.out)
+	}
+	r := h.ok("create", "web", "--image", "nginx:1.27", "--port", "80", "--health", "/", "--team", "billing")
+	if !strings.Contains(r.out, "created") || !strings.Contains(r.out, "docker.io/library/nginx@"+nginxDigest) || !strings.Contains(r.out, "1.27") {
+		t.Errorf("create and deploy: %v", r)
+	}
+	if data, err := repo.Read(context.Background(), "services/web/forge.yaml", ""); err != nil || !strings.Contains(string(data), "image: docker.io/library/nginx:1.27") || !strings.Contains(string(data), "port: 80") {
+		t.Errorf("forge.yaml: %v\n%s", err, data)
+	}
+	h.fails(6, "create", "idle", "--image", "nginx:0.0", "--team", "billing")
+	if r := h.ok("create", "idle", "--image", "nginx:1.27", "--team", "billing", "--deploy=false", "-o", "name"); strings.TrimSpace(r.out) != "services/idle" {
+		t.Errorf("--deploy=false: %v", r)
+	}
+	h.fails(3, "deploy", "status", "idle", "--env", "staging")
 }

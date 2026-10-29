@@ -60,6 +60,9 @@ type creator struct {
 	catalog   *Catalog
 	templates TemplateSource
 	repos     RepoHost // nil: repos cannot be created; validate_only still works
+	// deploys writes the forge.yaml of a service made from an image, and
+	// checks the image; nil: such services cannot be created.
+	deploys *Deploys
 	// domains are the public domains a new service may choose (run.domain).
 	domains []string
 	org     string
@@ -68,6 +71,8 @@ type creator struct {
 	mu sync.Mutex
 	// results tracks each create by request_id.
 	results map[string]*outcome
+	// creating holds the names of the image creates under way.
+	creating map[string]bool
 }
 
 // outcome is one create's result: done closes when it ends, and final is
@@ -81,7 +86,14 @@ func validateCreate(req *forgev1.CreateServiceRequest) error {
 	if !manifest.ValidID(req.GetServiceId()) {
 		return invalid(fmt.Sprintf("service_id %q must be a lowercase DNS label (a-z, 0-9, '-', max 63)", req.GetServiceId()))
 	}
-	if !manifest.ValidID(strings.TrimPrefix(req.GetTemplate(), templatePrefix)) {
+	switch {
+	case req.GetImage() != "" && req.GetTemplate() != "":
+		return invalid("ask for a template or an image, not both")
+	case req.GetImage() != "":
+		if req.GetTemplateVersion() != "" || len(req.GetParameters()) > 0 {
+			return invalid("template_version and parameters are for a template; an image has none")
+		}
+	case !manifest.ValidID(strings.TrimPrefix(req.GetTemplate(), templatePrefix)):
 		return invalid(fmt.Sprintf("template %q must look like templates/{template}", req.GetTemplate()))
 	}
 	if strings.TrimSpace(req.GetOwnerTeam()) == "" {
@@ -115,11 +127,17 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 	if err := authorizeTeam(ctx, ActServiceCreate, req.GetOwnerTeam()); err != nil {
 		return err
 	}
-	if c.templates == nil {
-		return connect.NewError(connect.CodeFailedPrecondition, errors.New("templates are not configured on this Forge API"))
-	}
-	if c.repos == nil && !req.GetValidateOnly() {
-		return connect.NewError(connect.CodeFailedPrecondition, errors.New("creating repos is not configured on this Forge API (no GitHub App)"))
+	if req.GetImage() != "" {
+		if err := c.imageCreateReady(); err != nil {
+			return err
+		}
+	} else {
+		if c.templates == nil {
+			return connect.NewError(connect.CodeFailedPrecondition, errors.New("templates are not configured on this Forge API"))
+		}
+		if c.repos == nil && !req.GetValidateOnly() {
+			return connect.NewError(connect.CodeFailedPrecondition, errors.New("creating repos is not configured on this Forge API (no GitHub App)"))
+		}
 	}
 	key := req.GetRequestId()
 	if key == "" || req.GetValidateOnly() {
@@ -168,6 +186,9 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 // create runs the pipeline. It returns the last message (nil when it ended
 // with an error before any side effect).
 func (c *creator) create(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) (*forgev1.CreateServiceResponse, error) {
+	if req.GetImage() != "" {
+		return c.fromImage(ctx, req, stream)
+	}
 	return c.scaffold(ctx, req, stream)
 }
 

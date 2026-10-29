@@ -49,17 +49,22 @@ A service has a repo, or it has none; `resolveSource` (forge-api) reads
 Run an image someone else built: `nginx:1.27`, `ghcr.io/acme/tool:2.3`.
 
 - **CLI:** `forge create web --image nginx:1.27 --port 80 --team platform`
-  makes the service (no repo). `forge deploy start web --image nginx:1.28`
-  deploys a new tag; without `--image`, the tag in `forge.yaml`.
+  makes the service (no repo) and deploys it to staging (`--deploy=false`
+  does not). `forge deploy start web --env staging --ref 1.28` deploys a new
+  tag and writes it into `forge.yaml`; without `--ref`, the tag there.
 - **Digest, not tag:** a deploy resolves the tag to a digest and pins
   `image@sha256:...` in staging's values. Promote copies the digest, so
   production runs what staging ran even if the tag moved. The version is
   the tag (`1.28`), plus a Forge release candidate number as today.
 - **Registries:** public images, and private ones the install's pull secret
   can read. More credentials per team: later.
-- **Policy:** a new rule in `policy/` refuses `:latest` and images outside
-  the allowed registries (`policy.allowedRegistries`, a chart value, empty
-  means any).
+- **Policy:** `policy/images.rego` refuses `:latest` and images outside
+  the allowed registries (`--allowed-registries`, the chart value
+  `allowedRegistries`; empty means any).
+- **Built in three parts:** the registry, `run.image` and the rules
+  (forge#174); the API and the CLI (create from an image; deploy, promote and
+  roll back without a repo; previews refused; a delete removes the deploy
+  repo's `forge.yaml`); the dashboard and the docs.
 - **Dashboard:** the Create page gets a first choice, "From a template" or
   "From an image"; the image path skips template and inputs.
 - **Not in this phase:** deploying a new tag when one appears.

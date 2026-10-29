@@ -484,7 +484,9 @@ type StartDeployRequest struct {
 	Service string `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
 	// "staging" or "production".
 	Env string `protobuf:"bytes,2,opt,name=env,proto3" json:"env,omitempty"`
-	// Branch, tag or commit; default main.
+	// Branch, tag or commit; default main. For a service without a repo,
+	// the image tag to run: default the one its forge.yaml names, and a new
+	// tag is written there.
 	Ref string `protobuf:"bytes,3,opt,name=ref,proto3" json:"ref,omitempty"`
 	// Retries with the same request_id return the same operation.
 	RequestId string `protobuf:"bytes,4,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
