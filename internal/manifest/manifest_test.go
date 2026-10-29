@@ -129,6 +129,15 @@ func TestRun(t *testing.T) {
 			t.Errorf("accepted %q", bad)
 		}
 	}
+	// run.image: what a service without a repo runs, written in full.
+	if i, err := Parse([]byte(base + "run:\n  image: nginx:1.27\n")); err != nil || i.RunImage() != "docker.io/library/nginx:1.27" || m.RunImage() != "" {
+		t.Errorf("run.image: %v %v", i, err)
+	}
+	for _, bad := range []string{"run:\n  image: Nginx:1\n", "run:\n  image: https://ghcr.io/acme/tool:1\n", "run:\n  image: \"nginx:\"\n"} {
+		if _, err := Parse([]byte(base + bad)); err == nil || !strings.Contains(err.Error(), "run.image") {
+			t.Errorf("accepted %q: %v", bad, err)
+		}
+	}
 	out, err := (&Manifest{APIVersion: APIVersion, Service: Service{Name: "a", Team: "b"}, Run: &Run{Port: 9090, Health: "/ready"}}).Marshal()
 	if err != nil || !strings.Contains(string(out), "run:\n  port: 9090\n  health: /ready\n") {
 		t.Errorf("marshal: %s %v", out, err)

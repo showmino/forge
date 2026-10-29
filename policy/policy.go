@@ -1,6 +1,7 @@
-// Package policy checks resource plans and promotions against Forge's Rego
-// rules. The rules are the .rego files next to this file, built into the
-// binary: package forge.resources for plans, forge.deploys for promotions.
+// Package policy checks resource plans, promotions and images against
+// Forge's Rego rules. The rules are the .rego files next to this file, built
+// into the binary: package forge.resources for plans, forge.deploys for
+// promotions, forge.images for the image a service without a repo runs.
 package policy
 
 import (
@@ -52,6 +53,20 @@ type Promotion struct {
 	Actor   Actor  `json:"actor"`
 }
 
+// Image is what the image rules know: the image a service without a repo
+// runs, written in full and in parts.
+type Image struct {
+	Service string `json:"service"`
+	Image   string `json:"image"`
+	Host    string `json:"host"`
+	Repo    string `json:"repo"`
+	Tag     string `json:"tag"`
+	Digest  string `json:"digest"`
+	// AllowedRegistries are the hosts images may come from; empty allows any.
+	AllowedRegistries []string `json:"allowed_registries"`
+	Actor             Actor    `json:"actor"`
+}
+
 // Source is what runs in the environment a promotion takes from, as Argo CD
 // reports it.
 type Source struct {
@@ -79,6 +94,7 @@ func (r Result) Denied() bool { return len(r.Deny) > 0 }
 type Engine struct {
 	query       rego.PreparedEvalQuery
 	promotion   rego.PreparedEvalQuery
+	image       rego.PreparedEvalQuery
 	fingerprint string
 }
 
@@ -121,7 +137,11 @@ func NewFromFS(ctx context.Context, fsys fs.FS) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{query: q, promotion: pq, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
+	iq, err := prepare("deny = data.forge.images.deny")
+	if err != nil {
+		return nil, err
+	}
+	return &Engine{query: q, promotion: pq, image: iq, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
 }
 
 // Fingerprint identifies the rule set: the first 12 hex characters of the
@@ -156,6 +176,24 @@ func (e *Engine) EvaluatePromotion(ctx context.Context, p Promotion) (Result, er
 		return Result{}, err
 	}
 	return results(e.promotion.Eval(ctx, rego.EvalInput(input)))
+}
+
+// EvaluateImage checks the image a service without a repo is to run. An
+// error means it could not be checked; it must then not run. Images have no
+// warnings.
+func (e *Engine) EvaluateImage(ctx context.Context, i Image) (Result, error) {
+	if i.AllowedRegistries == nil {
+		i.AllowedRegistries = []string{}
+	}
+	b, err := json.Marshal(i)
+	if err != nil {
+		return Result{}, err
+	}
+	var input map[string]any
+	if err := json.Unmarshal(b, &input); err != nil {
+		return Result{}, err
+	}
+	return results(e.image.Eval(ctx, rego.EvalInput(input)))
 }
 
 // results reads the deny and, when bound, warn sets of one evaluation.

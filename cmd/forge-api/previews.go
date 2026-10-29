@@ -75,6 +75,9 @@ func previews(f previewFlags, app *github.App, catalog *server.Catalog, ops *ser
 	}
 	c := &server.Cluster{Kube: kube, Dynamic: dyn, Gateway: f.gateway, PullSecret: f.pullSecret}
 	images := &registry.Client{Creds: func(ctx context.Context, host string) (string, string, error) {
+		if c.PullSecret == "" {
+			return "", "", registry.ErrNoLogin // public images only
+		}
 		data, err := c.PullSecretData(ctx)
 		if err != nil {
 			return "", "", err

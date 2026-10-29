@@ -19,6 +19,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/docs"
+	"github.com/showmino/forge/internal/registry"
 	"github.com/showmino/forge/internal/resource"
 )
 
@@ -65,6 +66,10 @@ const (
 
 // Run says how preview environments run the service.
 type Run struct {
+	// Image is the image a service without a repo runs, such as nginx:1.27.
+	// Its forge.yaml lives in the deploy repo; a service with a repo runs
+	// what its own CI builds and has none.
+	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 	// Port the service listens on for HTTP.
 	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 	// Health is the HTTP path probed for readiness and liveness.
@@ -121,6 +126,19 @@ func (m *Manifest) RunDomain() string {
 		return ""
 	}
 	return m.Run.Domain
+}
+
+// RunImage is run.image written in full ("docker.io/library/nginx:1.27"),
+// or "" without one. Parse has checked it can be.
+func (m *Manifest) RunImage() string {
+	if m.Run == nil || m.Run.Image == "" {
+		return ""
+	}
+	full, err := registry.Normalize(m.Run.Image)
+	if err != nil {
+		return ""
+	}
+	return full
 }
 
 // RunPort returns run.port or DefaultRunPort.
@@ -222,6 +240,11 @@ func (m *Manifest) Validate() error {
 		return fmt.Errorf("service.lifecycle %q must be experimental, production or deprecated", m.Service.Lifecycle)
 	}
 	if r := m.Run; r != nil {
+		if r.Image != "" {
+			if _, err := registry.Normalize(r.Image); err != nil {
+				return fmt.Errorf("run.image: %w", err)
+			}
+		}
 		if r.Port < 0 || r.Port > 65535 {
 			return fmt.Errorf("run.port %d must be 1-65535", r.Port)
 		}
