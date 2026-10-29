@@ -1,7 +1,8 @@
 # Five ways in, one track: phases 9 to 13
 
-Proposed on 2026-10-29. Not approved yet: each phase needs the owner's
-go-ahead before code, and the choices marked **Owner's call** need an answer.
+Proposed on 2026-10-29. The owner chose the order and choices 1 to 4 below
+the same day, and gave the go-ahead for phase 9. Each later phase still needs
+its own go-ahead before code; choice 5 is open until phase 11.
 
 ## What
 
@@ -157,20 +158,16 @@ An app made of several parts, put together in the dashboard.
 database in the dashboard, deploys them, and promotes the application to
 production in one step.
 
-## Owner's call
+## Owner's choices
 
-1. **Order:** 9, 10, 11, 12, 13 as above? (Recommended: yes. 9 is the
-   smallest and the others build on it.)
+1. **Order:** 9, 10, 11, 12, 13. Phase 9 may start (2026-10-29).
 2. **Name of the app catalog:** "catalog" already means the services Forge
-   knows. Recommended: "Apps" in the dashboard and `forge app list | get |
-   install`, with "App catalog" as the page title.
-3. **Where a repo-less service's `forge.yaml` lives:** recommended in the
-   deploy repo, as above. The alternative is a small repo per service, made
-   by Forge: more to clean up, but editable by people.
-4. **Source deploy builds:** recommended a pull request with Forge's build
-   workflow (above). The alternative is builds in the cluster (BuildKit
-   jobs run by the runner): works for repos outside GitHub, but Forge then
-   runs build machines.
-5. **Charts:** namespaced resources only, as above? Charts that need
-   cluster-wide objects would stay something the platform team installs
-   by hand.
+   knows, so phase 12 is "Apps": the dashboard page "App catalog" and
+   `forge app list | get | install`.
+3. **Where a repo-less service's `forge.yaml` lives:** in the deploy repo,
+   at `services/<name>/forge.yaml`, as above (not a small repo per service).
+4. **Source deploy builds:** a pull request that adds Forge's build
+   workflow, as above (not builds in the cluster).
+5. **Charts (open, decided before phase 11):** namespaced resources only, as
+   proposed? Charts that need cluster-wide objects would stay something the
+   platform team installs by hand.
