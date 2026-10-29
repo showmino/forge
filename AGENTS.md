@@ -98,8 +98,9 @@ a yes to the next one.
   Rollout pull requests are in `showmino/kubernetes`, and the owner merges
   them there.
   In `forge-web` the
-  job `image` only runs on `main` and shows as skipped on a pull request;
-  that is expected, and `test` must pass. Any other skip is a stop.
+  jobs `image` and `deploy` only run on a push to `main` and show as skipped
+  on a pull request; that is expected, and `test` must pass. Any other skip
+  is a stop.
 - **The checks run once, on the pull request, and not again after the merge**
   (the owner's rule: a second run of the same checks only costs time). That
   makes two things matter. `main` changes only through pull requests. And
