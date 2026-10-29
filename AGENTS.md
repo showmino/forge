@@ -16,7 +16,7 @@ on the owner's k3s cluster.
 | Repo | What |
 | --- | --- |
 | `showmino/forge` (this one) | CLI, API, protos, the deploy chart, the cluster manifests (`deploy/k3s`) |
-| `showmino/forge-web` | The web dashboard: Next.js, a thin client of the same API. It is itself a Forge service |
+| `showmino/forge-web` | The web dashboard: Next.js, a thin client of the same API. Every Forge runs it from the `forge` chart (`web.image.tag`); released by pushing a `vX.Y.Z` tag there. At showmino it is also a Forge service for staging only (`forge-staging.showmino.com`), never promoted: its production address would be the chart's |
 | `showmino/forge-templates` | The templates `forge create` scaffolds from (`go-grpc`, `nextjs`), versioned by repo-wide tags |
 | `showmino/forge-deploys` | The GitOps repo. Only forge-api writes to it; never edit it by hand |
 | `showmino/kubernetes` | The owner's cluster repo (Cloudflare tunnel, DNS records, Argo CD). Open a pull request there; the owner merges |
@@ -96,8 +96,8 @@ a yes to the next one.
   Rollout pull requests are in `showmino/kubernetes`, and the owner merges
   them there.
   In `forge-web` the
-  jobs `image` and `deploy` only run on `main` and show as skipped on a pull
-  request; that is expected, and `test` must pass. Any other skip is a stop.
+  job `image` only runs on `main` and shows as skipped on a pull request;
+  that is expected, and `test` must pass. Any other skip is a stop.
 - **The checks run once, on the pull request, and not again after the merge**
   (the owner's rule: a second run of the same checks only costs time). That
   makes two things matter. `main` changes only through pull requests. And
@@ -181,8 +181,12 @@ Run `make test lint` before every commit. Write the test first.
 - Argo CD only (Flux later). OpenTofu jobs run by the API (not Crossplane),
   except DNS records, which use the owner's `CloudflareRecordsApplication`.
 - Templates live in a Git repo, versioned by tag.
-- The dashboard is a Next.js app from Forge's own `nextjs` template, deployed
-  by Forge; it has no endpoints of its own.
+- The dashboard is a Next.js app from Forge's own `nextjs` template; it has
+  no endpoints of its own. The `forge` chart runs it (`web.image.tag`): that
+  is production. Since 2026-10-29 the forge-web Forge service is staging only
+  (`run.host: forge`, so `forge-staging.showmino.com`) and is never promoted: its production address would be `forge.showmino.com`, the chart's. A new version reaches
+  production as a `web.image.tag` pull request in `showmino/kubernetes`, and
+  the chart's default moves with a forge release.
 - Telemetry off. Releases are GitHub Releases, cut by pushing a `vX.Y.Z` tag.
 
 ### Conventions
