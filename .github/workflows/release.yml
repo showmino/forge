@@ -79,11 +79,15 @@ jobs:
           owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           helm push "/tmp/forge-chart-$version.tgz" "oci://ghcr.io/$owner"
       # Forge itself, at the same version: oci://ghcr.io/<owner>/charts/forge.
+      # The same package goes on the GitHub release, where forgegate.io's
+      # build picks it up for its classic chart repo (forgegate.io/charts).
       - name: Push the forge chart
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version=${GITHUB_REF_NAME#v}
           helm package deploy/platform/chart --version "$version" --app-version "$version" -d /tmp
           owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           helm push "/tmp/forge-$version.tgz" "oci://ghcr.io/$owner/charts"
+          gh release upload "$GITHUB_REF_NAME" "/tmp/forge-$version.tgz" --clobber --repo "${{ github.repository }}"

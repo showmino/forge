@@ -11,6 +11,11 @@ Application of its own (for example a CloudNativePG `Cluster`), or use a
 managed server, and back it up. It needs two databases owned by one user:
 `forge` for the API and `dex` for the login's sessions.
 
+The chart is published two ways, the same package in both:
+`oci://ghcr.io/showmino/charts/forge`, and the classic Helm repo
+`https://forgegate.io/charts` (`helm repo add forge https://forgegate.io/charts`,
+then `forge/forge`).
+
 Install Forge from code: an Argo CD Application in your cluster's Git repo, so
 an upgrade or a setting is a commit. Make the Secrets first (they don't go in
 Git), then commit and apply the Application:
