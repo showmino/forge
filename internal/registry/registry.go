@@ -1,6 +1,6 @@
 // Package registry checks whether an image exists in an OCI registry
-// (ghcr.io, an Azure Container Registry, ...), following the registry's own
-// login challenge. The login goes only to the registry's own domain. Errors
+// (ghcr.io, an Azure Container Registry, Docker Hub, ...) and finds its
+// digest, following the registry's own login challenge. The login goes only to the registry's own domain. Errors
 // never contain credentials or tokens.
 package registry
 
@@ -14,25 +14,126 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
 
-// Ref is a parsed image reference "host/repo:tag".
-type Ref struct{ Host, Repo, Tag string }
+// Ref is a parsed image reference "host/repo:tag", "host/repo@digest" or
+// both.
+type Ref struct{ Host, Repo, Tag, Digest string }
 
-// ParseRef parses "host/owner/name:tag". A host and a tag are required.
-func ParseRef(image string) (Ref, error) {
-	host, rest, ok := strings.Cut(image, "/")
-	if !ok || !strings.Contains(host, ".") {
-		return Ref{}, fmt.Errorf("image %q must be host/repo:tag", image)
+// Reference is what a manifest request names: the digest when there is one,
+// else the tag.
+func (r Ref) Reference() string {
+	if r.Digest != "" {
+		return r.Digest
 	}
-	i := strings.LastIndex(rest, ":")
-	if i <= 0 || i == len(rest)-1 {
-		return Ref{}, fmt.Errorf("image %q must be host/repo:tag", image)
-	}
-	return Ref{Host: host, Repo: rest[:i], Tag: rest[i+1:]}, nil
+	return r.Tag
 }
+
+// Pinned is the image at digest, without its tag: what a cluster pulls, so
+// that a moved tag changes nothing that runs.
+func (r Ref) Pinned(digest string) string { return r.Host + "/" + r.Repo + "@" + digest }
+
+// ParseRef parses "host/owner/name:tag", "host/owner/name@sha256:..." or
+// both. A host, and a tag or a digest, are required.
+func ParseRef(image string) (Ref, error) {
+	bad := fmt.Errorf("image %q must be host/repo:tag", image)
+	host, rest, ok := strings.Cut(image, "/")
+	if !ok || !isHost(host) {
+		return Ref{}, bad
+	}
+	r := Ref{Host: host}
+	if name, digest, ok := strings.Cut(rest, "@"); ok {
+		if !digestRE.MatchString(digest) {
+			return Ref{}, fmt.Errorf("image %q: the digest must be sha256:<64 hex digits>", image)
+		}
+		rest, r.Digest = name, digest
+	}
+	if i := strings.LastIndex(rest, ":"); i > 0 && !strings.Contains(rest[i:], "/") {
+		rest, r.Tag = rest[:i], rest[i+1:]
+		if r.Tag == "" {
+			return Ref{}, bad
+		}
+	}
+	if rest == "" || (r.Tag == "" && r.Digest == "") {
+		return Ref{}, bad
+	}
+	r.Repo = rest
+	return r, nil
+}
+
+var (
+	digestRE = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+	tagRE    = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
+	repoRE   = regexp.MustCompile(`^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$`)
+	hostRE   = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]+)?$`)
+)
+
+// isHost reports whether the first part of an image name is a registry
+// host: it has a dot or a port, or is localhost.
+func isHost(s string) bool {
+	return (strings.ContainsAny(s, ".:") || s == "localhost") && hostRE.MatchString(s)
+}
+
+// Normalize writes an image as people type it ("nginx:1.27",
+// "grafana/grafana:11.2.0") in full, the way ParseRef reads it:
+// "docker.io/library/nginx:1.27". With neither a tag nor a digest the tag
+// is "latest", as Docker reads it; whether that may run is policy's call.
+func Normalize(image string) (string, error) {
+	bad := func(why string) (string, error) { return "", fmt.Errorf("image %q: %s", image, why) }
+	if image == "" || strings.ContainsAny(image, " \t\n") || strings.Contains(image, "://") {
+		return bad("write it as [host/]name[:tag][@sha256:digest], without a scheme")
+	}
+	name, digest, hasDigest := strings.Cut(image, "@")
+	if hasDigest && !digestRE.MatchString(digest) {
+		return bad("the digest must be sha256:<64 hex digits>")
+	}
+	tag := ""
+	if i := strings.LastIndex(name, ":"); i >= 0 && !strings.Contains(name[i:], "/") {
+		name, tag = name[:i], name[i+1:]
+		if !tagRE.MatchString(tag) {
+			return bad("the tag must be letters, digits, '_', '.' or '-', at most 128, not starting with '.' or '-'")
+		}
+	}
+	host, repo := "docker.io", name
+	if first, rest, ok := strings.Cut(name, "/"); ok && isHost(first) {
+		host, repo = first, rest
+	}
+	if host == "index.docker.io" || host == "registry-1.docker.io" {
+		host = "docker.io"
+	}
+	if host == "docker.io" && !strings.Contains(repo, "/") {
+		repo = "library/" + repo
+	}
+	if !repoRE.MatchString(repo) {
+		return bad("the name must be lowercase letters, digits and separators")
+	}
+	out := host + "/" + repo
+	if tag == "" && !hasDigest {
+		tag = "latest"
+	}
+	if tag != "" {
+		out += ":" + tag
+	}
+	if hasDigest {
+		out += "@" + digest
+	}
+	return out, nil
+}
+
+// apiBase is where a registry's API answers: Docker Hub's images are named
+// docker.io, its API is registry-1.docker.io.
+func apiBase(host string) string {
+	if host == "docker.io" {
+		host = "registry-1.docker.io"
+	}
+	return "https://" + host
+}
+
+// ErrNotFound is the registry's answer for an image that is not there.
+var ErrNotFound = errors.New("image not found")
 
 // manifestTypes are the manifest media types Exists accepts.
 var manifestTypes = strings.Join([]string{
@@ -64,50 +165,85 @@ func (c *Client) http() *http.Client {
 // in where the challenge says (ghcr.io's /token, an Azure registry's
 // /oauth2/token, Docker Hub's auth.docker.io) and asks again.
 func (c *Client) Exists(ctx context.Context, image string) (bool, error) {
+	_, err := c.lookup(ctx, image)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Digest returns the digest of image's manifest (for a multi-platform image,
+// its index), as the registry names it: what a deploy pins.
+func (c *Client) Digest(ctx context.Context, image string) (string, error) {
+	hdr, err := c.lookup(ctx, image)
+	if err != nil {
+		return "", err
+	}
+	d := hdr.Get("Docker-Content-Digest")
+	if !digestRE.MatchString(d) {
+		return "", fmt.Errorf("%s: the registry named no sha256 digest for it", image)
+	}
+	return d, nil
+}
+
+// lookup asks for image's manifest and returns the answer's headers, or
+// ErrNotFound. A registry that wants a login gets the install's; without
+// one for its host, a bearer registry is asked for an anonymous token, which
+// public images on Docker Hub and ghcr.io need.
+func (c *Client) lookup(ctx context.Context, image string) (http.Header, error) {
 	r, err := ParseRef(image)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	base := c.BaseURL
 	if base == "" {
-		base = "https://" + r.Host
+		base = apiBase(r.Host)
 	}
-	manifest := base + "/v2/" + r.Repo + "/manifests/" + url.PathEscape(r.Tag)
+	ref := r.Reference()
+	manifest := base + "/v2/" + r.Repo + "/manifests/" + url.PathEscape(ref)
 	status, hdr, err := c.head(ctx, manifest, "")
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if status == http.StatusUnauthorized {
 		ch := parseChallenge(hdr.Get("WWW-Authenticate"))
-		user, pass, err := c.Creds(ctx, r.Host)
-		if err != nil {
-			return false, fmt.Errorf("registry login for %s: %w", r.Host, err)
+		user, pass, credsErr := "", "", errors.New("no registry logins are configured")
+		if c.Creds != nil {
+			user, pass, credsErr = c.Creds(ctx, r.Host)
 		}
 		var auth string
-		switch ch.scheme {
-		case "bearer":
+		switch {
+		case ch.scheme == "bearer":
+			if credsErr != nil {
+				user, pass = "", "" // anonymous
+			}
 			token, err := c.token(ctx, ch, r, user, pass)
 			if err != nil {
-				return false, err
+				if credsErr != nil {
+					return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
+				}
+				return nil, err
 			}
 			auth = "Bearer " + token
-		case "basic":
+		case ch.scheme == "basic" && credsErr == nil:
 			auth = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+		case ch.scheme == "basic":
+			return nil, fmt.Errorf("registry login for %s: %w", r.Host, credsErr)
 		default:
-			return false, fmt.Errorf("HEAD %s manifest %s: %d with no login method the registry names", r.Repo, r.Tag, status)
+			return nil, fmt.Errorf("HEAD %s manifest %s: %d with no login method the registry names", r.Repo, ref, status)
 		}
-		if status, _, err = c.head(ctx, manifest, auth); err != nil {
-			return false, err
+		if status, hdr, err = c.head(ctx, manifest, auth); err != nil {
+			return nil, err
 		}
 	}
 	switch status {
 	case http.StatusOK:
 		// Not a redirect's target: head does not follow redirects.
-		return true, nil
+		return hdr, nil
 	case http.StatusNotFound:
-		return false, nil
+		return nil, fmt.Errorf("%s: %w", image, ErrNotFound)
 	default:
-		return false, fmt.Errorf("HEAD %s manifest %s: %d %s", r.Repo, r.Tag, status, http.StatusText(status))
+		return nil, fmt.Errorf("HEAD %s manifest %s: %d %s", r.Repo, ref, status, http.StatusText(status))
 	}
 }
 
@@ -178,7 +314,9 @@ func (c *Client) token(ctx context.Context, ch challenge, r Ref, user, pass stri
 	if err != nil {
 		return "", err
 	}
-	req.SetBasicAuth(user, pass)
+	if user != "" || pass != "" {
+		req.SetBasicAuth(user, pass)
+	}
 	resp, err := c.http().Do(req)
 	if err != nil {
 		return "", err

@@ -515,3 +515,50 @@ func TestPromotionWithoutRules(t *testing.T) {
 		t.Error("no promotion rules must be an error")
 	}
 }
+
+func TestImageRules(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := Image{Service: "web", Image: "docker.io/library/nginx:1.27", Host: "docker.io", Repo: "library/nginx", Tag: "1.27"}
+	mod := func(f func(*Image)) Image { i := ok; f(&i); return i }
+	for _, tc := range []struct {
+		name string
+		i    Image
+		deny string
+	}{
+		{"a tagged image from any registry passes when none are named", ok, ""},
+		{"an allowed registry passes", mod(func(i *Image) { i.AllowedRegistries = []string{"ghcr.io", "docker.io"} }), ""},
+		{"a digest without a tag passes", mod(func(i *Image) { i.Tag = ""; i.Digest = "sha256:0123" }), ""},
+		{"latest", mod(func(i *Image) { i.Tag = "latest" }),
+			"docker.io/library/nginx:1.27: the tag latest moves; name a version, such as nginx:1.27"},
+		{"no tag and no digest", mod(func(i *Image) { i.Tag = "" }),
+			"docker.io/library/nginx:1.27 names no tag; name a version, such as nginx:1.27"},
+		{"a registry not allowed", mod(func(i *Image) { i.AllowedRegistries = []string{"ghcr.io"} }),
+			"docker.io/library/nginx:1.27: images may only come from ghcr.io"},
+		{"no host", mod(func(i *Image) { i.Host = ""; i.AllowedRegistries = []string{"ghcr.io"} }),
+			"docker.io/library/nginx:1.27: images may only come from ghcr.io"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, err := e.EvaluateImage(ctx, tc.i)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(r.Deny, "|"); got != tc.deny {
+				t.Errorf("deny %q, want %q", got, tc.deny)
+			}
+		})
+	}
+	// A rule set without image rules cannot judge an image.
+	bare, err := NewFromFS(ctx, fstest.MapFS{"x.rego": {Data: []byte("package forge.resources\nimport rego.v1\ndeny contains \"no\" if false\n")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bare.EvaluateImage(ctx, ok); err == nil {
+		t.Error("an image was judged without image rules")
+	}
+}
