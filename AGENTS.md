@@ -34,7 +34,7 @@ on the owner's k3s cluster.
 | `README.md` | The user-facing documentation |
 
 This repo is public. showmino's own install is in the private repo
-`showmino/kubernetes` (`gitops/apps/forge.yaml`), and the agents' runbooks
+`showmino/kubernetes` (`apps/helm/forge/production/app.yaml`), and the agents' runbooks
 in the private repo `showmino/forge-ops`; keep a
 checkout of it next to this one (`../forge-ops`). Nothing about showmino's
 install goes back into this repo.
@@ -57,9 +57,11 @@ These were set by the owner. They are not suggestions.
   promoting a service to production, deleting anything.
 - A rollout follows one procedure, written out in `showmino/forge-ops`
   `docs/agents/verifying.md`. What is live is the Argo CD Application `forge`
-  in `showmino/kubernetes` (`gitops/apps/forge.yaml`: the public `forge`
-  chart at a fixed version, showmino's values inline, plus
-  `apps/forge/production/`), synced automatically. A rollout is a pull request
+  in `showmino/kubernetes` (`apps/helm/forge/production/app.yaml`, read by
+  the `helm-apps` ApplicationSet: the public `forge` chart at a fixed version
+  and showmino's values; plus the claim `apps/claims/gitapps/forge.yaml` for
+  the extra manifests in `infrastructure/forge/production/`), synced
+  automatically. A rollout is a pull request
   there: change the version or the values, render the chart with them
   (`helm template`), read `kubectl diff` and a `kubectl apply --dry-run=server`
   of it, and put what changes in the pull request. The owner merges in
@@ -96,8 +98,9 @@ a yes to the next one.
   Rollout pull requests are in `showmino/kubernetes`, and the owner merges
   them there.
   In `forge-web` the
-  job `image` only runs on `main` and shows as skipped on a pull request;
-  that is expected, and `test` must pass. Any other skip is a stop.
+  jobs `image` and `deploy` only run on a push to `main` and show as skipped
+  on a pull request; that is expected, and `test` must pass. Any other skip
+  is a stop.
 - **The checks run once, on the pull request, and not again after the merge**
   (the owner's rule: a second run of the same checks only costs time). That
   makes two things matter. `main` changes only through pull requests. And
