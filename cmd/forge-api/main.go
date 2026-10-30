@@ -72,6 +72,8 @@ func run() error {
 		previewsOn        = flag.Bool("previews", env("FORGE_PREVIEWS", "") == "1" || env("FORGE_PREVIEWS", "") == "true", "serve preview environments (needs the GitHub App and Kubernetes access)")
 		previewDomain     = flag.String("preview-domain", env("FORGE_PREVIEW_DOMAIN", ""), "preview hosts are <environment>.<domain>, for example preview.10.150.1.222.nip.io")
 		previewGateway    = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
+		ciRunner          = flag.String("ci-runner", env("FORGE_CI_RUNNER", "ubuntu-latest"), "runs-on of the build job in the workflow forge service connect adds to a repo")
+		ciDeployRunner    = flag.String("ci-deploy-runner", env("FORGE_CI_DEPLOY_RUNNER", ""), "runs-on of that workflow's deploy job, which must reach this API (default: --ci-runner)")
 		allowedRegistries = flag.String("allowed-registries", env("FORGE_ALLOWED_REGISTRIES", ""), "registry hosts a service without a repo may run images from, comma separated (empty: any); the image rules (policy/images.rego) refuse others")
 		imageRegistry     = flag.String("image-registry", env("FORGE_IMAGE_REGISTRY", server.DefaultRegistry), "where the services' CI pushes images (a host and an optional path); deploys and previews run <registry>/<owner>/<service>:<commit>")
 		previewPull       = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
@@ -268,6 +270,8 @@ func run() error {
 		Sessions:         sessions,
 		Repos:            repoHost(app),
 		GitHubOrg:        *githubOrg,
+		CIRunner:         *ciRunner,
+		CIDeployRunner:   *ciDeployRunner,
 		MinClientVersion: *minClient,
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID, WebClientID: *webClientID},
 		Authenticator:    authn,

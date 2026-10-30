@@ -364,6 +364,19 @@ into that `forge.yaml`; a rollback leaves `forge.yaml` as it is.
 Such a service has no previews (they are made from a branch), and deleting it
 also removes its `forge.yaml` from the deploy repo. See
 `docs/specs/2026-10-29-deploy-sources-design.md`, phase 9.
+`forge service connect github.com/<org>/<repo> --team <team>` connects an
+existing repo of the organization that has a Dockerfile, or Go, Node or
+Python code Forge proposes one for: forge-api registers the service and opens
+a pull request in the repo (branch `forge/connect`) that adds `forge.yaml`,
+Forge's workflow `.github/workflows/forge.yml` (build
+`<registry>/<org>/<service>:<sha7>`, then on `main` `forge deploy start --env
+staging` with the job's OIDC token) and `forge-release.yml`. Merging it is
+the first deploy. The owning team must be able to write to the repo (an admin
+may connect any); Forge changes no one's access to it. The workflow's runners
+are forge-api's `--ci-runner` and `--ci-deploy-runner` (the chart's
+`ci.runner` and `ci.deployRunner`, default `ubuntu-latest`); the deploy
+runner must reach the API at the organization variable `FORGE_API_URL`. See
+`docs/specs/2026-10-30-phase-10-source-deploy-design.md`.
 Parameters can carry a `label`, `placeholder` and `group` for forms, an int
 `min` and `max`, and the type `list` (several of `values`, comma-separated);
 see `docs/specs/2026-10-14-file-templates-design.md`.

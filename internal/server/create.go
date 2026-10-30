@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
@@ -65,8 +66,11 @@ type creator struct {
 	deploys *Deploys
 	// domains are the public domains a new service may choose (run.domain).
 	domains []string
-	org     string
-	log     *slog.Logger
+	// ciRunner and ciDeployRunner are the runners of a connected repo's
+	// workflow: where it builds, and where it deploys (it must reach the API).
+	ciRunner, ciDeployRunner string
+	org                      string
+	log                      *slog.Logger
 
 	mu sync.Mutex
 	// results tracks each create by request_id.
@@ -86,9 +90,22 @@ func validateCreate(req *forgev1.CreateServiceRequest) error {
 	if !manifest.ValidID(req.GetServiceId()) {
 		return invalid(fmt.Sprintf("service_id %q must be a lowercase DNS label (a-z, 0-9, '-', max 63)", req.GetServiceId()))
 	}
+	sources := 0
+	for _, s := range []string{req.GetTemplate(), req.GetImage(), req.GetRepoUrl()} {
+		if s != "" {
+			sources++
+		}
+	}
 	switch {
-	case req.GetImage() != "" && req.GetTemplate() != "":
-		return invalid("ask for a template or an image, not both")
+	case sources > 1:
+		return invalid("ask for one of a template, an image or a repo")
+	case req.GetRepoUrl() != "":
+		if req.GetTemplateVersion() != "" || len(req.GetParameters()) > 0 {
+			return invalid("template_version and parameters are for a template; a repo has none")
+		}
+		if ro := req.GetRunOptions(); ro != nil && !proto.Equal(ro, &forgev1.RunOptions{Port: ro.GetPort(), Health: ro.GetHealth()}) {
+			return invalid("a connected repo takes only port and health; set the rest in its forge.yaml")
+		}
 	case req.GetImage() != "":
 		if req.GetTemplateVersion() != "" || len(req.GetParameters()) > 0 {
 			return invalid("template_version and parameters are for a template; an image has none")
@@ -127,11 +144,16 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 	if err := authorizeTeam(ctx, ActServiceCreate, req.GetOwnerTeam()); err != nil {
 		return err
 	}
-	if req.GetImage() != "" {
+	switch {
+	case req.GetRepoUrl() != "":
+		if _, err := c.connectReady(); err != nil {
+			return err
+		}
+	case req.GetImage() != "":
 		if err := c.imageCreateReady(); err != nil {
 			return err
 		}
-	} else {
+	default:
 		if c.templates == nil {
 			return connect.NewError(connect.CodeFailedPrecondition, errors.New("templates are not configured on this Forge API"))
 		}
@@ -186,7 +208,10 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 // create runs the pipeline. It returns the last message (nil when it ended
 // with an error before any side effect).
 func (c *creator) create(ctx context.Context, req *forgev1.CreateServiceRequest, stream createStream) (*forgev1.CreateServiceResponse, error) {
-	if req.GetImage() != "" {
+	switch {
+	case req.GetRepoUrl() != "":
+		return c.fromRepo(ctx, req, stream)
+	case req.GetImage() != "":
 		return c.fromImage(ctx, req, stream)
 	}
 	return c.scaffold(ctx, req, stream)

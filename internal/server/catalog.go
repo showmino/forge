@@ -187,6 +187,12 @@ func (c *Catalog) get(ctx context.Context, name string) (*forgev1.Service, error
 	return s, storeErr(err)
 }
 
+// forget removes a service from the catalog, and nothing else: for a create
+// that registered it and then failed before it ran anything.
+func (c *Catalog) forget(ctx context.Context, name string) error {
+	return storeErr(c.store.Write(ctx, func(tx store.Tx) error { return tx.Delete(ctx, name) }))
+}
+
 // servicesForRepo returns the ids, sorted, of the services whose repo_url is
 // https://github.com/<org>/<repo>, both compared case-insensitively.
 func (c *Catalog) servicesForRepo(ctx context.Context, org, repo string) ([]string, error) {

@@ -147,18 +147,28 @@ func (c *creator) imageCreateReady() error {
 
 // claimName holds the name id for one create, until release is called.
 func (c *creator) claimName(id string) (release func(), err error) {
+	return c.claim(id, servicePrefix+id+" is being created already")
+}
+
+// claimRepo holds owner/repo for one connect, until release is called: the
+// check that no service has the repo, and the register, are not one step.
+func (c *creator) claimRepo(owner, repo string) (release func(), err error) {
+	return c.claim("repo:"+strings.ToLower(owner+"/"+repo), "github.com/"+owner+"/"+repo+" is being connected already")
+}
+
+func (c *creator) claim(key, busy string) (release func(), err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.creating == nil {
 		c.creating = map[string]bool{}
 	}
-	if c.creating[id] {
-		return nil, connect.NewError(connect.CodeAborted, fmt.Errorf("%s%s is being created already", servicePrefix, id))
+	if c.creating[key] {
+		return nil, connect.NewError(connect.CodeAborted, errors.New(busy))
 	}
-	c.creating[id] = true
+	c.creating[key] = true
 	return func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		delete(c.creating, id)
+		delete(c.creating, key)
 	}, nil
 }

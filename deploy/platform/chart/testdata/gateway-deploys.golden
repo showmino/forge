@@ -673,6 +673,7 @@ spec:
             - {name: FORGE_GITHUB_ORG, value: "acme"}
             - {name: FORGE_TEMPLATES_REPO, value: "acme/forge-templates"}
             - {name: FORGE_CLI_REPO, value: "showmino/forge"}
+            - {name: FORGE_CI_RUNNER, value: "ubuntu-latest"}
             - {name: FORGE_PREVIEW_PULL_SECRET, value: "forge/ghcr"}
             - {name: FORGE_DEPLOYS, value: "1"}
             - {name: FORGE_DEPLOY_REPO, value: "acme/forge-deploys"}

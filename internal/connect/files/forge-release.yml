@@ -1,0 +1,32 @@
+# Added by Forge. Forge tags every commit it deploys: a release candidate
+# (v0.3.1-rc.2) when it reaches staging, the version (v0.3.1) when it reaches
+# production. This adds that version to the image CI built for the commit.
+name: forge-release
+on:
+  push:
+    tags: ["v[0-9]*"]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: {% .Runner %}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: {% .Host %}
+{%- if .GHCR %}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+{%- else %}
+          username: ${{ secrets.FORGE_REGISTRY_USERNAME }}
+          password: ${{ secrets.FORGE_REGISTRY_PASSWORD }}
+{%- end %}
+      - name: Tag the image with the version
+        run: |
+          image={% .Image %}
+          docker buildx imagetools create --tag "$image:$GITHUB_REF_NAME" "$image:${GITHUB_SHA::7}"

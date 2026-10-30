@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -50,6 +51,10 @@ type Options struct {
 	// Repos creates the repos of new services; nil answers FAILED_PRECONDITION
 	// to CreateService unless validate_only.
 	Repos RepoHost
+	// CIRunner is the runs-on of a connected repo's build job, and
+	// CIDeployRunner of its deploy job, which must reach this API; both
+	// default to ubuntu-latest, the deploy runner to CIRunner.
+	CIRunner, CIDeployRunner string
 	// GitHubOrg is the org new repos are created in; empty when no
 	// GitHub-App-backed feature is configured.
 	GitHubOrg string
@@ -82,6 +87,11 @@ type Options struct {
 func New(o Options) (http.Handler, error) {
 	if o.Authenticator == nil {
 		return nil, errors.New("server: an Authenticator is required")
+	}
+	for flag, label := range map[string]string{"--ci-runner": o.CIRunner, "--ci-deploy-runner": o.CIDeployRunner} {
+		if label != "" && !runnerLabel.MatchString(label) {
+			return nil, fmt.Errorf("server: %s %q must be one runner label, such as ubuntu-latest or self-hosted", flag, label)
+		}
 	}
 	if o.Catalog == nil {
 		o.Catalog = NewCatalog(nil)
@@ -125,6 +135,7 @@ func New(o Options) (http.Handler, error) {
 	mux := http.NewServeMux()
 	create := &creator{
 		catalog: o.Catalog, templates: o.Templates, repos: o.Repos, deploys: o.Deploys, domains: o.Deploys.publicDomainNames(), org: o.GitHubOrg, log: o.Logger,
+		ciRunner: o.CIRunner, ciDeployRunner: o.CIDeployRunner,
 		results: map[string]*outcome{},
 	}
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))

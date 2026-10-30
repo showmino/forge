@@ -1,0 +1,77 @@
+# Added by Forge (forge service connect). It builds this repo's image and, on
+# main, deploys it to staging through Forge; production is a promotion. Change
+# what you need: Forge only waits for the image named below.
+name: forge
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # On main, and on pull requests from this repo so a preview can run the branch.
+  image:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: {% .Runner %}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # Forge looks for the tag of the branch's commit, not of the PR's merge commit.
+      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: docker/login-action@v3
+        with:
+          registry: {% .Host %}
+{%- if .GHCR %}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+{%- else %}
+          username: ${{ secrets.FORGE_REGISTRY_USERNAME }}
+          password: ${{ secrets.FORGE_REGISTRY_PASSWORD }}
+{%- end %}
+      - name: Build and push
+        run: |
+          image={% .Image %}:${SHA::7}
+          docker build -t "$image" .
+          docker push "$image"
+
+  # Deploys main to staging. It logs in with this job's GitHub OIDC token: the
+  # token only lets it deploy this service to staging, at this commit. The
+  # runner must reach the Forge API, at the organization variable FORGE_API_URL.
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: image
+    runs-on: {% .DeployRunner %}
+    timeout-minutes: 20
+    concurrency:
+      group: forge-deploy-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FORGE_API_URL: ${{ vars.FORGE_API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get the forge CLI from the Forge API
+        run: |
+          if [ -z "$FORGE_API_URL" ]; then
+            echo "::error::set the organization variable FORGE_API_URL to the Forge API"
+            exit 1
+          fi
+          case $(uname -m) in
+            x86_64) arch=amd64 ;;
+            aarch64|arm64) arch=arm64 ;;
+            *) echo "::error::unsupported runner architecture $(uname -m)"; exit 1 ;;
+          esac
+          curl -fsS --retry 3 --max-time 120 -o "$RUNNER_TEMP/forge" "$FORGE_API_URL/cli/forge-linux-$arch"
+          chmod +x "$RUNNER_TEMP/forge"
+          "$RUNNER_TEMP/forge" version
+      - name: Deploy to staging
+        run: '"$RUNNER_TEMP/forge" deploy start --env staging'

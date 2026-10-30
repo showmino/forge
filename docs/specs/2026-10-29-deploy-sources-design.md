@@ -97,6 +97,9 @@ A repo with a Dockerfile and no CI of its own gets built and deployed.
   detects (Go, Node, Python), from the templates' Dockerfiles. Cloud Native
   Buildpacks: later.
 
+As built: `2026-10-30-phase-10-source-deploy-design.md` (a third source of
+`CreateService`, `repo_url`; the workflow's runners are forge-api settings).
+
 **Exit gate:** a repo with only a Dockerfile is connected from the
 dashboard; after its pull request merges, it runs in staging without anyone
 touching CI.
