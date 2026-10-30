@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"gopkg.in/yaml.v3"
 
@@ -119,6 +120,21 @@ type Deploys struct {
 	requests map[string]string
 	// cutLocks maps "owner/repo" to the lock held while a version is cut there.
 	cutLocks sync.Map
+
+	// listed is what ListDeployments read from the deploy repo at the commit
+	// listedAt, by "<service>/<env>". A commit's files never change, so it
+	// is right for as long as the repo's head is that commit.
+	listMu   sync.Mutex
+	listedAt string
+	listed   map[string]listedValues
+}
+
+// listedValues is one deployment's values and the commit that last changed
+// them; missing when it was never deployed.
+type listedValues struct {
+	values  deployValues
+	commit  string
+	missing bool
 }
 
 // NewDeploys returns the deploy service.
@@ -487,49 +503,113 @@ func (d *Deploys) ListDeployments(ctx context.Context, req *connect.Request[forg
 			return nil, err
 		}
 	}
-	var out []*forgev1.Deployment
 	ids, err := d.o.Catalog.ids(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, svc := range ids {
+	head, _, err := d.o.Repo.Head(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the deploy repo: %w", err))
+	}
+	// Each service is read on its own, a few at a time: one after another,
+	// a hundred services took seconds.
+	per := make([][]*forgev1.Deployment, len(ids))
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(listParallel)
+	for i, svc := range ids {
 		if s := req.Msg.GetService(); s != "" && s != servicePrefix+svc {
 			continue
 		}
-		var staged *forgev1.Deployment
-		var stagedValues deployValues
-		var production *deployValues
-		for _, env := range deployEnvs {
-			if e := req.Msg.GetEnv(); e != "" && e != env {
-				continue
-			}
-			v, commit, err := d.current(ctx, svc, env)
-			if connect.CodeOf(err) == connect.CodeNotFound {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, svc+"-"+env)
-			if err != nil {
-				return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("argo cd: %w", err))
-			}
-			dep := d.deploymentFrom(svc, env, v, commit, st)
-			if env == finalEnv {
-				production = &v
-			} else {
-				staged, stagedValues = dep, v
-			}
-			out = append(out, dep)
-		}
-		if staged != nil {
-			if production == nil && req.Msg.GetEnv() != "" {
-				production = d.productionOf(ctx, svc)
-			}
-			staged.Version = shownVersion(staged.GetEnv(), stagedValues, production)
-		}
+		g.Go(func() error {
+			deps, err := d.listService(gctx, head, svc, req.Msg.GetEnv())
+			per[i] = deps
+			return err
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	var out []*forgev1.Deployment
+	for _, deps := range per {
+		out = append(out, deps...)
 	}
 	return connect.NewResponse(&forgev1.ListDeploymentsResponse{Deployments: out}), nil
+}
+
+// listParallel is how many services ListDeployments reads at once.
+const listParallel = 8
+
+// listService is svc's deployments, in env or in every environment, read at
+// the deploy repo's commit head.
+func (d *Deploys) listService(ctx context.Context, head, svc, env string) ([]*forgev1.Deployment, error) {
+	var out []*forgev1.Deployment
+	var staged *forgev1.Deployment
+	var stagedValues deployValues
+	var production *deployValues
+	for _, e := range deployEnvs {
+		if env != "" && env != e {
+			continue
+		}
+		v, commit, err := d.listedValues(ctx, head, svc, e)
+		if connect.CodeOf(err) == connect.CodeNotFound {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, svc+"-"+e)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("argo cd: %w", err))
+		}
+		dep := d.deploymentFrom(svc, e, v, commit, st)
+		if e == finalEnv {
+			production = &v
+		} else {
+			staged, stagedValues = dep, v
+		}
+		out = append(out, dep)
+	}
+	if staged != nil {
+		if production == nil && env != "" {
+			if v, _, err := d.listedValues(ctx, head, svc, finalEnv); err == nil {
+				production = &v
+			}
+		}
+		staged.Version = shownVersion(staged.GetEnv(), stagedValues, production)
+	}
+	return out, nil
+}
+
+// listedValues is current for ListDeployments: what was read at head
+// already is not read again.
+func (d *Deploys) listedValues(ctx context.Context, head, svc, env string) (deployValues, string, error) {
+	key := svc + "/" + env
+	d.listMu.Lock()
+	got, ok := d.listed[key]
+	ok = ok && d.listedAt == head
+	d.listMu.Unlock()
+	if !ok {
+		v, commit, err := d.current(ctx, svc, env)
+		switch {
+		case connect.CodeOf(err) == connect.CodeNotFound:
+			got = listedValues{missing: true}
+		case err != nil:
+			return v, commit, err
+		default:
+			got = listedValues{values: v, commit: commit}
+		}
+		// What was read is at least as new as head: keep it under head.
+		d.listMu.Lock()
+		if d.listedAt != head {
+			d.listedAt, d.listed = head, map[string]listedValues{}
+		}
+		d.listed[key] = got
+		d.listMu.Unlock()
+	}
+	if got.missing {
+		return deployValues{}, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("%s%s/%s has never been deployed", deployNamePrefix, svc, env))
+	}
+	return got.values, got.commit, nil
 }
 
 func (d *Deploys) ListDeployHistory(ctx context.Context, req *connect.Request[forgev1.ListDeployHistoryRequest]) (*connect.Response[forgev1.ListDeployHistoryResponse], error) {
