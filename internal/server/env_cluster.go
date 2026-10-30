@@ -392,6 +392,11 @@ type AppStatus struct {
 	Sync, Health, Message string
 	// Revisions are the synced revisions, one per source.
 	Revisions []string
+	// Refused is what Argo CD refused to sync in its last sync, which failed,
+	// and RefusedAt that sync's revisions: an object the project does not
+	// allow is named per resource, not in the sync's own message.
+	Refused   string
+	RefusedAt []string
 }
 
 // Application reads Argo CD's status for name in argoNamespace. A missing
@@ -427,6 +432,25 @@ func (c *Cluster) Application(ctx context.Context, argoNamespace, name string) (
 	if phase, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "phase"); phase == "Failed" || phase == "Error" {
 		if m, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "message"); m != "" {
 			msgs = append(msgs, m)
+		}
+		var refused []string
+		rs, _, _ := unstructured.NestedSlice(u.Object, "status", "operationState", "syncResult", "resources")
+		for _, r := range rs {
+			rm, _ := r.(map[string]any)
+			if status, _ := rm["status"].(string); status != "SyncFailed" {
+				continue
+			}
+			if m, _ := rm["message"].(string); m != "" {
+				refused = append(refused, m)
+			}
+		}
+		if len(refused) > 0 {
+			st.Refused = strings.Join(refused, "; ")
+			msgs = append(msgs, st.Refused)
+			st.RefusedAt, _, _ = unstructured.NestedStringSlice(u.Object, "status", "operationState", "syncResult", "revisions")
+			if rev, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "syncResult", "revision"); rev != "" {
+				st.RefusedAt = append(st.RefusedAt, rev)
+			}
 		}
 	}
 	res, _, _ := unstructured.NestedSlice(u.Object, "status", "resources")
@@ -604,6 +628,27 @@ func (c *Cluster) WaitServiceNamespace(ctx context.Context, service, env string,
 		case <-time.After(poll):
 		}
 	}
+}
+
+// Pod Security Admission levels of a namespace that runs a published chart:
+// enforced, pods may not be privileged, share the node's network, PIDs or
+// files, or add capabilities beyond the defaults; Kubernetes warns about
+// anything short of the restricted level.
+const (
+	podSecurityEnforce = "pod-security.kubernetes.io/enforce"
+	podSecurityWarn    = "pod-security.kubernetes.io/warn"
+)
+
+// RestrictPodSecurity labels <service>-<env>, which must be Forge's, so
+// that Kubernetes refuses privileged pods in it: a chart's pods are not
+// Forge's, and run as the chart says.
+func (c *Cluster) RestrictPodSecurity(ctx context.Context, service, env string) error {
+	if err := c.checkServiceNamespace(ctx, service, env); err != nil {
+		return err
+	}
+	patch := []byte(`{"metadata":{"labels":{"` + podSecurityEnforce + `":"baseline","` + podSecurityWarn + `":"restricted"}}}`)
+	_, err := c.Kube.CoreV1().Namespaces().Patch(ctx, service+"-"+env, types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
 }
 
 // WriteServicePullSecret copies the pull secret into <service>-<env>.

@@ -1,3 +1,5 @@
+{{- /* With a chart, the route goes to the chart's own Service. */ -}}
+{{- if not .Values.chart }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -6,3 +8,4 @@ spec:
   selector: {app: {{ .Values.name }}}
   ports:
     - {name: http, port: 80, targetPort: {{ .Values.port }}}
+{{- end }}

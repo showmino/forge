@@ -1,7 +1,8 @@
 // Package policy checks resource plans, promotions and images against
 // Forge's Rego rules. The rules are the .rego files next to this file, built
 // into the binary: package forge.resources for plans, forge.deploys for
-// promotions, forge.images for the image a service without a repo runs.
+// promotions, forge.images for the image a service without a repo runs,
+// forge.charts for the chart one runs.
 package policy
 
 import (
@@ -70,6 +71,20 @@ type Image struct {
 	Actor         Actor  `json:"actor"`
 }
 
+// Chart is what the chart rules know: the Helm chart a service without a
+// repo runs.
+type Chart struct {
+	Service string `json:"service"`
+	// Repo is the chart repository as forge.yaml has it, Host its host.
+	Repo    string `json:"repo"`
+	Host    string `json:"host"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	// AllowedRepos are the repositories charts may come from; empty allows any.
+	AllowedRepos []string `json:"allowed_repos"`
+	Actor        Actor    `json:"actor"`
+}
+
 // Source is what runs in the environment a promotion takes from, as Argo CD
 // reports it.
 type Source struct {
@@ -98,6 +113,7 @@ type Engine struct {
 	query       rego.PreparedEvalQuery
 	promotion   rego.PreparedEvalQuery
 	image       rego.PreparedEvalQuery
+	chart       rego.PreparedEvalQuery
 	fingerprint string
 }
 
@@ -144,7 +160,11 @@ func NewFromFS(ctx context.Context, fsys fs.FS) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{query: q, promotion: pq, image: iq, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
+	cq, err := prepare("deny = data.forge.charts.deny")
+	if err != nil {
+		return nil, err
+	}
+	return &Engine{query: q, promotion: pq, image: iq, chart: cq, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
 }
 
 // Fingerprint identifies the rule set: the first 12 hex characters of the
@@ -197,6 +217,23 @@ func (e *Engine) EvaluateImage(ctx context.Context, i Image) (Result, error) {
 		return Result{}, err
 	}
 	return results(e.image.Eval(ctx, rego.EvalInput(input)))
+}
+
+// EvaluateChart checks the chart a service without a repo is to run. An
+// error means it could not be checked; it must then not run.
+func (e *Engine) EvaluateChart(ctx context.Context, c Chart) (Result, error) {
+	if c.AllowedRepos == nil {
+		c.AllowedRepos = []string{}
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		return Result{}, err
+	}
+	var input map[string]any
+	if err := json.Unmarshal(b, &input); err != nil {
+		return Result{}, err
+	}
+	return results(e.chart.Eval(ctx, rego.EvalInput(input)))
 }
 
 // results reads the deny and, when bound, warn sets of one evaluation.

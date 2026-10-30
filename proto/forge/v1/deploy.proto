@@ -126,8 +126,8 @@ message StartDeployRequest {
   // "staging" or "production".
   string env = 2;
   // Branch, tag or commit; default main. For a service without a repo,
-  // the image tag to run: default the one its forge.yaml names, and a new
-  // tag is written there.
+  // the image tag (or, for a chart, the chart version) to run: default the
+  // one its forge.yaml names, and a new one is written there.
   string ref = 3;
   // Retries with the same request_id return the same operation.
   string request_id = 4;
@@ -136,6 +136,10 @@ message StartDeployRequest {
   // For a deploy straight to production of a commit without a final
   // version: how far the version goes up. Default patch.
   Bump bump = 6;
+  // For a service that runs a chart: new chart values (YAML) for every
+  // environment, replacing forge.yaml's chart.values. They are written
+  // there once the deploy has succeeded. ref is then the chart version.
+  string chart_values = 7;
 }
 
 message StartDeployResponse {

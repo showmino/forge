@@ -11,5 +11,5 @@ spec:
   hostnames: [{{ required "host" .Values.host | quote }}]
   rules:
     - backendRefs:
-        - {name: {{ .Values.name }}, port: 80}
+        - {name: {{ include "forge.backendName" . }}, port: {{ include "forge.backendPort" . }}}
 {{- end }}

@@ -1,0 +1,118 @@
+{{- if and .Values.deploys.enabled .Values.deploys.charts.enabled }}
+{{- range .Values.deploys.charts.allowedRepos }}
+{{- if not (regexMatch `^(oci|https)://[^/@?#\s]+(/[^@?#\s]*[^/@?#\s])?$` .) }}
+{{- fail (printf "deploys.charts.allowedRepos: %q must be oci://<registry>/<path> or https://<host>/<path>" .) }}
+{{- end }}
+{{- end }}
+# Services that run a published Helm chart (forge.yaml chart:). forge-api
+# writes services/<service>/<env>/chart.json (where the chart is) and
+# chart-values.yaml (its values) next to the environment's values.yaml; the
+# ApplicationSet below makes <service>-<env>-chart from them, into the same
+# namespace as the <service>-<env> application of forge-services, which
+# makes the namespace, the address, the quota, the DNS record and the
+# chart's AppProject forge-chart-<service>-<env> (the service chart's
+# chartproject.yaml): namespaced resources only, in that namespace only,
+# and none of the kinds that would take an address, a DNS record, a quota
+# or a platform secret. A chart that brings a ClusterRole, a CRD, a webhook
+# or a Namespace, or writes into another namespace, fails its sync, and
+# forge-api says which object.
+#
+# The double-brace expressions are Argo CD ApplicationSet's own Go
+# templates, emitted as literal text, as in deploys.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: forge-charts
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+        revision: main
+        files:
+          - path: services/*/staging/chart.json
+          - path: services/*/production/chart.json
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{`{{ index .path.segments 1 }}`}}-{{`{{ .path.basename }}`}}-chart'
+      labels:
+        app.kubernetes.io/managed-by: forge
+        forge.dev/chart: "true"
+      # Deleting chart.json removes what the chart made.
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      # Its own project, made by Forge's chart in forge-services.
+      project: 'forge-chart-{{`{{ index .path.segments 1 }}`}}-{{`{{ .path.basename }}`}}'
+      sources:
+        # chart.json: an OCI chart is repoURL oci://.../<name> at path ".";
+        # one from an HTTPS repository is repoURL plus chart.
+        - repoURL: '{{`{{ .repoURL }}`}}'
+          chart: '{{`{{ .chart }}`}}'
+          path: '{{`{{ .chartPath }}`}}'
+          targetRevision: '{{`{{ .version }}`}}'
+          helm:
+            # The release is the service's name: a chart's Service is
+            # usually named after its release (chart.expose.service).
+            releaseName: '{{`{{ index .path.segments 1 }}`}}'
+            valueFiles:
+              - '$values/{{`{{ .path.path }}`}}/chart-values.yaml'
+        - repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        # The namespace forge-services makes for the environment; forge-api
+        # writes chart.json only once it is there.
+        namespace: '{{`{{ index .path.segments 1 }}`}}-{{`{{ .path.basename }}`}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
+---
+# A route leads to the Service chart.expose names, which the chart writes:
+# in a service's namespace a Service must be a plain ClusterIP, so that its
+# address cannot lead to another namespace (ExternalName) or past the
+# address model (externalIPs, LoadBalancer, NodePort). Forge's own Services
+# are all plain ClusterIPs. Needs Kubernetes 1.30 or later.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: forge-service-addresses
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - {key: forge.dev/deploy-env, operator: Exists}
+    resourceRules:
+      - {apiGroups: [""], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [services]}
+  validations:
+    - expression: "!has(object.spec.type) || object.spec.type == 'ClusterIP'"
+      message: "a Service in a Forge service's namespace must be of type ClusterIP: Forge gives the service its address"
+    - expression: "!has(object.spec.externalIPs) || size(object.spec.externalIPs) == 0"
+      message: "a Service in a Forge service's namespace may not have externalIPs"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: forge-service-addresses
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  policyName: forge-service-addresses
+  validationActions: [Deny]
+{{- end }}

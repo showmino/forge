@@ -86,7 +86,13 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 			return nil, workloadDenied(w, "not deploy %s, which has no repo", m.GetService())
 		}
 	}
-	src, retag, err := d.resolve(ctx, m.GetService(), ref)
+	var chartValues map[string]any
+	if cv := m.GetChartValues(); cv != "" {
+		if chartValues, err = parseChartValues("chart_values", cv); err != nil {
+			return nil, err
+		}
+	}
+	src, retag, err := d.resolve(ctx, m.GetService(), ref, chartValues)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +115,11 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	v.setAddress(addr)
 	v.setOptions(src.run)
 	v.forEnv(env)
+	if src.chart != nil {
+		// The chart decides how it runs; Forge's chart gives it its address.
+		v.Health, v.Replicas, v.Chart = "", 0, deployChartFor(src.chart, env)
+		v.Resources, v.Vars, v.Secrets, v.Jobs, v.Writable, v.Autoscaling = nil, nil, nil, nil, nil, nil
+	}
 	if err := d.secretsAllowed(v); err != nil {
 		return nil, err
 	}
@@ -118,9 +129,16 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, src.serviceID+"-"+m.GetEnv()); err != nil {
 		return nil, err
 	}
-	// A service without a repo runs as its image's tag: there is no repo to
-	// cut a version in.
-	if src.imageOnly != "" {
+	if src.chart != nil {
+		if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, chartApp(src.serviceID, m.GetEnv())); err != nil {
+			return nil, err
+		}
+	}
+	// A service without a repo runs as its image's tag, or its chart's
+	// version: there is no repo to cut a version in.
+	if src.chart != nil {
+		v.Forge.Version = src.ref
+	} else if src.imageOnly != "" {
 		v.Forge.Version = src.ref
 	} else if v.Forge.Version, err = d.plannedVersion(ctx, src.owner, src.repo, src.commit, env, bump); err != nil {
 		return nil, err
@@ -144,13 +162,29 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	}
 	op := d.o.Operations.Start(ctx, opDeploy, deployNamePrefix+target, actor, func(ctx context.Context, emit func(string, string)) error {
 		defer d.unlock(target)
-		if src.imageOnly != "" {
+		switch {
+		case src.chart != nil:
+			emit("resolve", fmt.Sprintf("chart %s %s from %s", src.chart.Name, src.chart.Version, src.chart.Repo))
+		case src.imageOnly != "":
 			emit("resolve", fmt.Sprintf("%s is %s", src.imageOnly, shortDigest(src.commit)))
-		} else {
+		default:
 			emit("resolve", fmt.Sprintf("%s is %s", src.ref, shortSHA(src.commit)))
 		}
 		if moved != "" {
 			emit("address", moved)
+		}
+		if src.chart != nil {
+			emit("release", "version "+src.ref+", the chart's")
+			if err := d.apply(ctx, src.serviceID, env, v, emit); err != nil {
+				return err
+			}
+			// Only a version and values that deployed go into forge.yaml.
+			if retag {
+				if err := d.rewriteChart(ctx, src.serviceID, src.chart, fmt.Sprintf("run %s as chart %s %s (%s)", src.serviceID, src.chart.Name, src.chart.Version, actor), emit); err != nil {
+					emit("manifest", fmt.Sprintf("deployed, but forge.yaml was not changed (%v); the next deploy runs what it names", err))
+				}
+			}
+			return nil
 		}
 		if src.imageOnly != "" {
 			emit("image", "pinned "+src.image)
@@ -203,6 +237,9 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 	if v.Database = db; db != nil {
 		emit("database", "DATABASE_URL comes from Secret "+db.Secret)
 	}
+	if v.Chart != nil {
+		return d.applyChart(ctx, svc, env, v, emit)
+	}
 	rec := v.Forge
 	rec.Image = v.Image
 	content := v.marshal()
@@ -217,17 +254,24 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 		}
 		return err
 	}
-	nctx, cancel := context.WithTimeout(ctx, d.o.NamespaceTimeout)
-	err = d.o.Cluster.WaitServiceNamespace(nctx, svc, env, d.o.Poll)
-	cancel()
-	if err != nil {
-		return stands(&OpError{Code: "namespace_timeout", Message: fmt.Sprintf("namespace %s-%s did not appear within %s: %v", svc, env, d.o.NamespaceTimeout, err)})
+	if err := d.waitNamespace(ctx, svc, env); err != nil {
+		return stands(err)
 	}
 	if err := d.o.Cluster.WriteServicePullSecret(ctx, svc, env); err != nil {
 		return stands(fmt.Errorf("pull secret for %s-%s: %w", svc, env, err))
 	}
 	emit("namespace", svc+"-"+env)
 	return stands(d.awaitSync(ctx, svc, env, commit, content, emit))
+}
+
+// waitNamespace waits for <svc>-<env>, which Argo CD makes on the first deploy.
+func (d *Deploys) waitNamespace(ctx context.Context, svc, env string) error {
+	nctx, cancel := context.WithTimeout(ctx, d.o.NamespaceTimeout)
+	defer cancel()
+	if err := d.o.Cluster.WaitServiceNamespace(nctx, svc, env, d.o.Poll); err != nil {
+		return &OpError{Code: "namespace_timeout", Message: fmt.Sprintf("namespace %s-%s did not appear within %s: %v", svc, env, d.o.NamespaceTimeout, err)}
+	}
+	return nil
 }
 
 // database is the database the service's pods should reach in env: the one
@@ -278,6 +322,13 @@ func (d *Deploys) commit(ctx context.Context, path string, build func() ([]byte,
 // for good: a revision then counts when it is deployCommit or when the values
 // file at that revision equals content, what we committed.
 func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, content []byte, emit func(string, string)) error {
+	return d.awaitApp(ctx, svc, env, svc+"-"+env, deployCommit, map[string][]byte{valuesPath(svc, env): content}, "sync", emit)
+}
+
+// awaitApp waits until Argo CD's application app has synced files (path to
+// content, committed in deployCommit) and is healthy, reporting as step. A
+// revision counts when it is deployCommit or holds every one of files.
+func (d *Deploys) awaitApp(ctx context.Context, svc, env, app, deployCommit string, files map[string][]byte, step string, emit func(string, string)) error {
 	timeout := time.NewTimer(d.o.SyncTimeout)
 	defer timeout.Stop()
 	last := ""
@@ -293,16 +344,26 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 		for _, rev := range revs {
 			same, done := checked[rev]
 			if !done {
-				data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), rev)
-				switch {
-				case errors.Is(err, github.ErrNotFound):
-					checked[rev] = false
-				case err != nil:
-					continue // try again
-				default:
-					same = bytes.Equal(data, content)
-					checked[rev] = same
+				same, done = true, true
+				for path, content := range files {
+					data, err := d.o.Repo.Read(ctx, path, rev)
+					if errors.Is(err, github.ErrNotFound) {
+						same = false
+						break
+					}
+					if err != nil {
+						done = false // try again
+						break
+					}
+					if !bytes.Equal(data, content) {
+						same = false
+						break
+					}
 				}
+				if !done {
+					continue
+				}
+				checked[rev] = same
 			}
 			if same {
 				return true
@@ -311,18 +372,29 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 		return false
 	}
 	for {
-		st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, svc+"-"+env)
+		st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, app)
 		var msg string
 		if err != nil {
 			msg = "reading the Argo CD application: " + clip(err.Error())
 		} else {
 			atRev := atRevision(st.Revisions)
-			if atRev && st.Sync == "Synced" && st.Health == "Healthy" {
-				url := "http://" + d.host(svc, env)
-				if v, err := parseValues(content); err == nil && v.Host != "" {
-					url = hostURL(v.Host, v.isPublic())
+			// Only a refusal of the sync of this very deploy: an earlier one
+			// stays in the status until Argo CD syncs again.
+			if app == chartApp(svc, env) && st.Refused != "" && atRevision(st.RefusedAt) {
+				if refused := chartRefused(svc, env, st.Refused); refused != nil {
+					return refused
 				}
-				emit("sync", url)
+			}
+			if atRev && st.Sync == "Synced" && st.Health == "Healthy" {
+				if content, ok := files[valuesPath(svc, env)]; ok && step == "sync" {
+					url := "http://" + d.host(svc, env)
+					if v, err := parseValues(content); err == nil && v.Host != "" {
+						url = hostURL(v.Host, v.isPublic())
+					}
+					emit(step, url)
+				} else {
+					emit(step, app+" is Synced and Healthy")
+				}
 				return nil
 			}
 			msg = fmt.Sprintf("%s, %s", st.Sync, st.Health)
@@ -337,14 +409,14 @@ func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, 
 			}
 		}
 		if msg != last {
-			emit("sync", msg)
+			emit(step, msg)
 			last = msg
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timeout.C:
-			return &OpError{Code: "not_healthy", Message: fmt.Sprintf("%s-%s was not Synced and Healthy within %s: %s", svc, env, d.o.SyncTimeout, last)}
+			return &OpError{Code: "not_healthy", Message: fmt.Sprintf("%s was not Synced and Healthy within %s: %s", app, d.o.SyncTimeout, last)}
 		case <-time.After(d.o.Poll):
 		}
 	}

@@ -574,3 +574,51 @@ func TestImageRules(t *testing.T) {
 		t.Error("an image was judged without image rules")
 	}
 }
+
+func TestChartRules(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := Chart{Service: "podinfo", Repo: "oci://ghcr.io/stefanprodan/charts", Host: "ghcr.io", Name: "podinfo", Version: "6.7.1"}
+	mod := func(f func(*Chart)) Chart { c := ok; f(&c); return c }
+	for _, tc := range []struct {
+		name string
+		c    Chart
+		deny string
+	}{
+		{"any repository passes when none are named", ok, ""},
+		{"an allowed repository passes", mod(func(c *Chart) {
+			c.AllowedRepos = []string{"https://charts.example.com", "oci://ghcr.io/stefanprodan/charts"}
+		}), ""},
+		{"a repository not allowed", mod(func(c *Chart) { c.AllowedRepos = []string{"https://charts.example.com"} }),
+			"podinfo from oci://ghcr.io/stefanprodan/charts: charts may only come from https://charts.example.com"},
+		{"localhost", mod(func(c *Chart) { c.Repo, c.Host = "oci://localhost:5000/charts", "localhost:5000" }),
+			"podinfo from oci://localhost:5000/charts: the host localhost:5000 is an address or a local name; the platform must allow the repository by name"},
+		{"an address", mod(func(c *Chart) { c.Repo, c.Host = "https://10.0.0.5/charts", "10.0.0.5" }),
+			"podinfo from https://10.0.0.5/charts: the host 10.0.0.5 is an address or a local name; the platform must allow the repository by name"},
+		{"an address the platform allows", mod(func(c *Chart) {
+			c.Repo, c.Host, c.AllowedRepos = "https://10.0.0.5/charts", "10.0.0.5", []string{"https://10.0.0.5/charts"}
+		}), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, err := e.EvaluateChart(ctx, tc.c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(r.Deny, "|"); got != tc.deny {
+				t.Errorf("deny %q, want %q", got, tc.deny)
+			}
+		})
+	}
+	bare, err := NewFromFS(ctx, fstest.MapFS{"x.rego": {Data: []byte("package forge.resources\nimport rego.v1\ndeny contains \"no\" if false\n")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bare.EvaluateChart(ctx, ok); err == nil {
+		t.Error("a chart was judged without chart rules")
+	}
+}

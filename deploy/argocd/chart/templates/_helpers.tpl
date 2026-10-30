@@ -20,3 +20,13 @@ fields of run.secrets. The Deployment and the CronJobs share them. */}}
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /* The Service the address leads to: Forge's own on port 80, or, for a
+service that runs a chart, the one chart.expose names. */ -}}
+{{- define "forge.backendName" -}}
+{{- if .Values.chart -}}{{ required "chart.expose.service" .Values.chart.expose.service }}{{- else -}}{{ .Values.name }}{{- end -}}
+{{- end }}
+
+{{- define "forge.backendPort" -}}
+{{- if .Values.chart -}}{{ required "chart.expose.port" .Values.chart.expose.port }}{{- else -}}80{{- end -}}
+{{- end }}

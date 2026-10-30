@@ -28,9 +28,13 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/secret-backend-none.yaml | diff -u deploy/argocd/chart/testdata/secret-backend-none.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
 	  -f deploy/argocd/chart/testdata/ingress.yaml | diff -u deploy/argocd/chart/testdata/ingress.golden -
+	$(HELM) template podinfo deploy/argocd/chart --namespace podinfo-staging \
+	  -f deploy/argocd/chart/testdata/chart.yaml | diff -u deploy/argocd/chart/testdata/chart.golden -
+	$(HELM) template podinfo deploy/argocd/chart --namespace podinfo-staging \
+	  -f deploy/argocd/chart/testdata/chart-ingress.yaml | diff -u deploy/argocd/chart/testdata/chart-ingress.golden -
 
 PLATFORM_CHART := deploy/platform/chart
-PLATFORM_CASES := minimal gateway full ingress-deploys gateway-deploys platform
+PLATFORM_CASES := minimal gateway full ingress-deploys gateway-deploys platform charts
 
 platform-chart-test: ## Lint deploy/platform/chart and compare its renders with their goldens
 	$(HELM) lint $(PLATFORM_CHART) -f $(PLATFORM_CHART)/testdata/minimal.yaml

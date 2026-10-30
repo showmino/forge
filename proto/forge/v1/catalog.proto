@@ -188,6 +188,29 @@ message CreateServiceRequest {
   // team must have write access to the repo, unless an admin connects it.
   // run_options may set port and health.
   string repo_url = 11;
+  // A published Helm chart to run instead of a template, an image or a repo:
+  // the service gets no repo, and its forge.yaml (with chart) lives in the
+  // deploy repo. It must pass the chart rules (an allowed repository) and
+  // exist in its repository. run_options may set only the address (domain,
+  // network_only, staging_network_only). Deploy it with StartDeploy.
+  ChartSource chart = 12;
+}
+
+// ChartSource is forge.yaml's chart, for a new service.
+message ChartSource {
+  // oci://<registry>/<path> or https://<host>/<path>.
+  string repo = 1;
+  string name = 2;
+  // One exact version, such as 6.7.1.
+  string version = 3;
+  // The chart's values in every environment, as YAML; may be empty.
+  string values = 4;
+  // The chart's Service that gets the address, and its port.
+  string expose_service = 5;
+  int32 expose_port = 6;
+  // Values of one environment, as YAML, merged over values.
+  string staging_values = 7;
+  string production_values = 8;
 }
 
 // RunOptions are forge.yaml's run options (see the README, "Run options").

@@ -180,6 +180,10 @@ func notGone(what string, timeout time.Duration, last error) string {
 // asked for again.
 func (d *Deploys) undeploy(ctx context.Context, svc, env string, emit func(string, string)) error {
 	path, target := valuesPath(svc, env), svc+"-"+env
+	// A chart goes first, while its namespace and address are still there.
+	if err := d.unchart(ctx, svc, env, emit); err != nil {
+		return err
+	}
 	removed, commit := false, ""
 	for attempt := 0; attempt < 3 && !removed; attempt++ {
 		if attempt > 0 {
@@ -433,4 +437,29 @@ func (c *Catalog) startTeardown(ctx context.Context, name, etag string, dry bool
 	}
 	c.delMu.Unlock()
 	return op, removes, nil
+}
+
+// unchart removes the chart a service runs in env, if any, and waits for
+// Argo CD to remove what it made. Safe to repeat.
+func (d *Deploys) unchart(ctx context.Context, svc, env string, emit func(string, string)) error {
+	removed, err := d.removeChartFiles(ctx, svc, env, actorOf(ctx))
+	if err != nil {
+		return fmt.Errorf("remove the chart of %s from %s: %w", svc, env, err)
+	}
+	if removed {
+		emit("chart", "removed the chart of "+svc+" from "+env+" in the deploy repo")
+	}
+	app := chartApp(svc, env)
+	gone, last := waitGone(ctx, d.o.SyncTimeout, d.o.Poll, func(ctx context.Context) (bool, error) {
+		there, err := d.o.Cluster.ForgeApplicationExists(ctx, d.o.ArgoNamespace, app)
+		return !there, err
+	})
+	if !gone {
+		return &OpError{Code: "sync_timeout", Message: notGone("the Argo CD application "+app, d.o.SyncTimeout, last) +
+			"; what the chart made may still be running. Delete again once it is gone"}
+	}
+	if removed {
+		emit("argo", "Argo CD removed "+app+" and what the chart made")
+	}
+	return nil
 }

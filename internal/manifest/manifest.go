@@ -38,6 +38,8 @@ type Manifest struct {
 	Namespace string `yaml:"namespace,omitempty"`
 	// Run says how preview environments run the service.
 	Run *Run `yaml:"run,omitempty"`
+	// Chart is the Helm chart a service without a repo runs (chart.go).
+	Chart *Chart `yaml:"chart,omitempty"`
 	// Resources are what the service needs besides its own pods.
 	Resources []Resource `yaml:"resources,omitempty"`
 	// Docs lists the pages under docs/ in the order of the side menu.
@@ -309,6 +311,9 @@ func (m *Manifest) Validate() error {
 		return fmt.Errorf("resources: %w", err)
 	}
 	if err := m.checkRun(); err != nil {
+		return err
+	}
+	if err := m.checkChart(); err != nil {
 		return err
 	}
 	seen := map[string]bool{}

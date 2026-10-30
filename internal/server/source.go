@@ -30,6 +30,10 @@ type source struct {
 	// forge.yaml in the deploy repo names, in full. Then commit is the
 	// image's digest, ref its tag and image the image pinned to the digest.
 	imageOnly string
+	// chart is set for a service that runs a published chart: the chart as
+	// the deploy runs it. Then ref and commit are its version, and image
+	// shows it.
+	chart *manifest.Chart
 }
 
 // writable is forge.yaml's run.writable, nil without a run section.
@@ -62,7 +66,7 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 	}
 	if svc.GetRepoUrl() == "" {
 		return s, connect.NewError(connect.CodeFailedPrecondition,
-			fmt.Errorf("%s%s has no repo: it runs an image, and this needs a branch or a commit of a repo", servicePrefix, sid))
+			fmt.Errorf("%s%s has no repo: it runs an image or a chart, and this needs a branch or a commit of a repo", servicePrefix, sid))
 	}
 	if s.owner, s.repo, ok = repoOf(svc.GetRepoUrl(), org); !ok {
 		return s, connect.NewError(connect.CodeFailedPrecondition,

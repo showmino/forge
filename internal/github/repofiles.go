@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -62,43 +63,38 @@ func (r *RepoFiles) Head(ctx context.Context) (string, string, error) {
 // moves the branch to it without forcing. If the branch is no longer at
 // parent, it returns ErrNotFastForward and the branch is unchanged.
 func (r *RepoFiles) CommitFile(ctx context.Context, parent, tree, path string, content []byte, message string) (string, error) {
-	var newTree, commit struct {
-		SHA string `json:"sha"`
-	}
-	in := map[string]any{
-		"base_tree": tree,
-		"tree":      []map[string]any{{"path": path, "mode": "100644", "type": "blob", "content": string(content)}},
-	}
-	if err := r.Client.doJSON(ctx, http.MethodPost, r.git()+"/trees", in, &newTree); err != nil {
-		return "", fmt.Errorf("create the tree: %w", err)
-	}
-	if err := r.Client.doJSON(ctx, http.MethodPost, r.git()+"/commits",
-		map[string]any{"message": message, "tree": newTree.SHA, "parents": []string{parent}}, &commit); err != nil {
-		return "", fmt.Errorf("create the commit: %w", err)
-	}
-	err := r.Client.doJSON(ctx, http.MethodPatch, r.git()+"/refs/heads/"+escapeRef(r.Branch), map[string]any{"sha": commit.SHA, "force": false}, nil)
-	var se *StatusError
-	if errors.As(err, &se) && se.Status == http.StatusUnprocessableEntity {
-		return "", fmt.Errorf("%w: %w", ErrNotFastForward, err)
-	}
-	if err != nil {
-		return "", fmt.Errorf("update %s: %w", r.Branch, err)
-	}
-	return commit.SHA, nil
+	return r.CommitFiles(ctx, parent, tree, map[string][]byte{path: content}, message)
 }
 
 // DeleteFile commits the removal of path on top of parent (whose tree is
 // tree) and moves the branch to it without forcing, as CommitFile does. The
 // path must exist in tree.
 func (r *RepoFiles) DeleteFile(ctx context.Context, parent, tree, path, message string) (string, error) {
+	return r.CommitFiles(ctx, parent, tree, map[string][]byte{path: nil}, message)
+}
+
+// CommitFiles commits every path=content of files in one commit on top of
+// parent, as CommitFile does; a nil content removes the path, which must
+// then exist in tree.
+func (r *RepoFiles) CommitFiles(ctx context.Context, parent, tree string, files map[string][]byte, message string) (string, error) {
 	var newTree, commit struct {
 		SHA string `json:"sha"`
 	}
-	// A tree entry with a null sha removes the path from the base tree.
-	in := map[string]any{
-		"base_tree": tree,
-		"tree":      []map[string]any{{"path": path, "mode": "100644", "type": "blob", "sha": nil}},
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
 	}
+	slices.Sort(paths)
+	entries := make([]map[string]any, 0, len(files))
+	for _, p := range paths {
+		if c := files[p]; c != nil {
+			entries = append(entries, map[string]any{"path": p, "mode": "100644", "type": "blob", "content": string(c)})
+		} else {
+			// A tree entry with a null sha removes the path from the base tree.
+			entries = append(entries, map[string]any{"path": p, "mode": "100644", "type": "blob", "sha": nil})
+		}
+	}
+	in := map[string]any{"base_tree": tree, "tree": entries}
 	if err := r.Client.doJSON(ctx, http.MethodPost, r.git()+"/trees", in, &newTree); err != nil {
 		return "", fmt.Errorf("create the tree: %w", err)
 	}

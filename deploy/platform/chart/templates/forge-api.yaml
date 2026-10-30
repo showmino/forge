@@ -127,6 +127,12 @@ spec:
             - {name: FORGE_DEPLOYS, value: "1"}
             - {name: FORGE_DEPLOY_REPO, value: {{ include "forge.deployRepo" . | quote }}}
             - {name: FORGE_DEPLOY_DOMAIN, value: {{ include "forge.appsDomain" . | quote }}}
+            {{- if .Values.deploys.charts.enabled }}
+            - {name: FORGE_CHARTS, value: "1"}
+            {{- with .Values.deploys.charts.allowedRepos }}
+            - {name: FORGE_ALLOWED_CHART_REPOS, value: {{ join "," . | quote }}}
+            {{- end }}
+            {{- end }}
             {{- end }}
             {{- if .Values.clusters.enabled }}
             - {name: FORGE_CLUSTERS, value: "1"}
