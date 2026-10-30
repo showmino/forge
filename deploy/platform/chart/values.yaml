@@ -148,6 +148,14 @@ imageRegistry: ""
 # images from, comma separated, such as "ghcr.io,docker.io". Empty allows any.
 allowedRegistries: ""
 
+# The GitHub Actions runners of the workflow 'forge service connect' adds to a
+# repo: where it builds the image, and where its deploy job runs, which must
+# reach the Forge API (at the organization variable FORGE_API_URL). Empty
+# deployRunner is the same as runner.
+ci:
+  runner: ubuntu-latest
+  deployRunner: ""
+
 # Argo CD's web address, to link a deployment to its Application. Optional.
 argocdURL: ""
 

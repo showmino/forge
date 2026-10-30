@@ -181,6 +181,13 @@ message CreateServiceRequest {
   // (with run.image) lives in the deploy repo. It must pass the image rules
   // (no "latest"; an allowed registry). Deploy it with StartDeploy.
   string image = 10;
+  // An existing repo of the organization to connect instead of a template or
+  // an image ("github.com/acme/tool"): the service is registered with it, and
+  // a pull request adds its forge.yaml, Forge's build-and-deploy workflow and,
+  // when it has none, a Dockerfile. Merging it is the first deploy. The owner
+  // team must have write access to the repo, unless an admin connects it.
+  // run_options may set port and health.
+  string repo_url = 11;
 }
 
 // RunOptions are forge.yaml's run options (see the README, "Run options").
@@ -284,6 +291,9 @@ message CreatePlan {
   // The new repo, or for a file template the repo the files go to.
   string repo_url = 2;
   repeated string files = 3;
+  // For a connected repo: the language of the Dockerfile Forge proposes
+  // ("go", "node", "python"), or "" when the repo has its own.
+  string dockerfile = 4;
 }
 
 // ProposedChange is the pull request a file template opened in its target repo.
@@ -292,4 +302,11 @@ message ProposedChange {
   string branch = 2;
   string pull_request_url = 3;
   repeated string files = 4;
+  // For a connected repo: the service it was registered as.
+  Service service = 5;
+  // For a connected repo: as CreatePlan.dockerfile.
+  string dockerfile = 6;
+  // For a connected repo whose registry is not ghcr.io: the workflow logs in
+  // with the repo secrets FORGE_REGISTRY_USERNAME and FORGE_REGISTRY_PASSWORD.
+  bool needs_registry_secrets = 7;
 }

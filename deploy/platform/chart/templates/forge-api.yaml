@@ -109,6 +109,12 @@ spec:
             {{- with .Values.allowedRegistries }}
             - {name: FORGE_ALLOWED_REGISTRIES, value: {{ . | quote }}}
             {{- end }}
+            {{- with .Values.ci.runner }}
+            - {name: FORGE_CI_RUNNER, value: {{ . | quote }}}
+            {{- end }}
+            {{- with .Values.ci.deployRunner }}
+            - {name: FORGE_CI_DEPLOY_RUNNER, value: {{ . | quote }}}
+            {{- end }}
             {{- if or .Values.previews.enabled .Values.deploys.enabled }}
             - {name: FORGE_PREVIEW_PULL_SECRET, value: {{ printf "%s/%s" .Release.Namespace (include "forge.pullSecret" .) | quote }}}
             {{- end }}

@@ -732,6 +732,7 @@ spec:
             - {name: FORGE_TEMPLATES_REPO, value: "acme/forge-templates"}
             - {name: FORGE_CLI_REPO, value: "showmino/forge"}
             - {name: FORGE_IMAGE_REGISTRY, value: "acr.acme.example"}
+            - {name: FORGE_CI_RUNNER, value: "ubuntu-latest"}
             - {name: FORGE_PREVIEW_PULL_SECRET, value: "forge/registry"}
             - {name: FORGE_PREVIEWS, value: "1"}
             - {name: FORGE_PREVIEW_GATEWAY, value: "forge/forge-previews"}

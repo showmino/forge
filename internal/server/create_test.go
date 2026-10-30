@@ -37,6 +37,8 @@ type fakeRepos struct {
 	// access is each repo's teams and their roles; grantErr fails a grant.
 	access   map[string]map[string]string
 	grantErr error
+	// trees are the files of the repos a connect reads, by repo.
+	trees map[string]map[string]string
 }
 
 func (f *fakeRepos) SetTeamRepoPermission(_ context.Context, org, slug, owner, repo, permission string) error {
