@@ -371,7 +371,11 @@ a pull request in the repo (branch `forge/connect`) that adds `forge.yaml`,
 Forge's workflow `.github/workflows/forge.yml` (build
 `<registry>/<org>/<service>:<sha7>`, then on `main` `forge deploy start --env
 staging` with the job's OIDC token) and `forge-release.yml`. Merging it is
-the first deploy. The owning team must be able to write to the repo (an admin
+the first deploy. When the repo's own Dockerfile sets no `USER`, runs as
+root or names its user, the pull request says so: a deploy (or preview) of
+an image CI built that runs as root, or as a named user, fails before
+anything is written (`image_runs_as_root`), as its pod would not start. The
+owning team must be able to write to the repo (an admin
 may connect any); Forge changes no one's access to it. The workflow's runners
 are forge-api's `--ci-runner` and `--ci-deploy-runner` (the chart's
 `ci.runner` and `ci.deployRunner`, default `ubuntu-latest`); the deploy

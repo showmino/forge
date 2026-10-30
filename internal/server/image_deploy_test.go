@@ -204,6 +204,7 @@ func TestImageMustRunAsNonRoot(t *testing.T) {
 		{"0", "runs as root"},
 		{"root:root", "runs as root"},
 		{"0:101", "runs as root"},
+		{"00", "runs as root"},
 		{"nginx", `runs as the user "nginx"`},
 		{"101", ""},
 		{"101:101", ""},
@@ -227,10 +228,10 @@ func TestImageMustRunAsNonRoot(t *testing.T) {
 		}
 	}
 
-	// A new tag is checked too: tool-5 runs as 101, its tag 9 as root.
-	images.AddDigest("docker.io/acme/tool:9", digest(9))
-	images.SetUser(digest(9), "")
-	_, err := f.client.StartDeploy(ctx, as("writer", &forgev1.StartDeployRequest{Service: "services/tool-5", Env: "staging", Ref: "9"}))
+	// A new tag is checked too: tool-6 runs as 101, its tag 9 as root.
+	images.AddDigest("docker.io/acme/tool:9", digest(20))
+	images.SetUser(digest(20), "")
+	_, err := f.client.StartDeploy(ctx, as("writer", &forgev1.StartDeployRequest{Service: "services/tool-6", Env: "staging", Ref: "9"}))
 	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "runs as root") {
 		t.Errorf("deploy a root tag: %v", err)
 	}

@@ -201,3 +201,23 @@ func TestSecretDeniedItems(t *testing.T) {
 		}
 	}
 }
+
+// A repo's CI built an image that runs as root: the deploy stops before
+// anything is written, and says how to fix the Dockerfile.
+func TestDeployRefusesARootImage(t *testing.T) {
+	t.Parallel()
+	f := newDeployFixture(t, false, nil)
+	f.images.SetUser("ghcr.io/showmino/payments:1a2b3c4", "")
+	op := f.deployRef(t, "staging", "")
+	if op.GetError().GetCode() != "image_runs_as_root" || !strings.Contains(op.GetError().GetMessage(), "USER 65532") {
+		t.Fatalf("deploy: %v", op.GetError())
+	}
+	if _, err := f.repo.Read(context.Background(), valuesPath("payments", "staging"), ""); err == nil {
+		t.Error("a refused deploy wrote its values")
+	}
+	// Fixed (a non-root user), it deploys.
+	f.images.SetUser("ghcr.io/showmino/payments:1a2b3c4", "65532:65532")
+	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
+		t.Errorf("a non-root image: %v", op.GetError())
+	}
+}

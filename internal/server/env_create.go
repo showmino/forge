@@ -122,6 +122,9 @@ func (e *Environments) createWork(p envPlan) Work {
 		if err := waitForImage(ctx, e.o.GitHub, e.o.Images, p.source, e.o.ImageTimeout, e.o.ImagePoll, emit); err != nil {
 			return err
 		}
+		if err := runsAsNonRoot(ctx, e.o.Images, p.image, emit); err != nil {
+			return err
+		}
 		ann := map[string]string{
 			annRef: p.ref, annCommit: p.commit, annImage: p.image, annCreator: p.creator,
 			annExpire: e.o.Now().Add(p.ttl).UTC().Format(time.RFC3339), annState: stateCreating,

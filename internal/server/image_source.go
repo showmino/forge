@@ -33,14 +33,21 @@ type ImageUsers interface {
 	User(ctx context.Context, image string) (string, error)
 }
 
+// imageAdvice is what checkUser says to someone running an image built
+// elsewhere; builtAdvice to someone whose repo builds it.
+const (
+	imageAdvice = "Forge runs every service as a non-root user: use an image built to run as one, with a numeric USER " +
+		"(such as nginxinc/nginx-unprivileged instead of nginx), or build one"
+	builtAdvice = "Forge runs every service as a non-root user: give the last stage of the repo's Dockerfile a numeric USER, " +
+		"such as USER 65532:65532 (only /tmp is writable; name other folders in forge.yaml's run.writable), and push again"
+)
+
 // checkUser refuses an image whose user the service chart cannot run:
 // every service runs with runAsNonRoot, which needs a user given by a
-// number other than 0.
-func checkUser(image, user string) error {
-	const advice = "Forge runs every service as a non-root user: use an image built to run as one, with a numeric USER " +
-		"(such as nginxinc/nginx-unprivileged instead of nginx), or build one"
+// number other than 0. advice says what to do instead.
+func checkUser(image, user, advice string) error {
 	uid, _, _ := strings.Cut(user, ":")
-	if uid == "" || uid == "0" || uid == "root" {
+	if uid == "root" || strings.Trim(uid, "0") == "" {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s runs as root (its image sets no non-root USER). %s", image, advice))
 	}
 	if n, err := strconv.ParseUint(uid, 10, 32); err != nil || n == 0 {
@@ -126,7 +133,7 @@ func (d *Deploys) pinImage(ctx context.Context, svc, image string) (pinnedImage,
 		if err != nil {
 			return pinnedImage{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the user %s runs as: %w", full, err))
 		}
-		if err := checkUser(full, user); err != nil {
+		if err := checkUser(full, user, imageAdvice); err != nil {
 			return pinnedImage{}, err
 		}
 	}
@@ -289,4 +296,27 @@ func (d *Deploys) hasManifest(ctx context.Context, sid string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// runsAsNonRoot checks the user a service's CI-built image runs as, once it
+// exists: a root image would only fail when its pod starts. A user that
+// cannot be read is noted and the work goes on; Kubernetes checks it too.
+func runsAsNonRoot(ctx context.Context, images ImageChecker, image string, emit func(step, message string)) error {
+	users, ok := images.(ImageUsers)
+	if !ok {
+		return nil
+	}
+	user, err := users.User(ctx, image)
+	if err != nil {
+		emit("image", fmt.Sprintf("could not read the user %s runs as (%v); Kubernetes checks it when the pod starts", image, err))
+		return nil
+	}
+	if err := checkUser(image, user, builtAdvice); err != nil {
+		var ce *connect.Error
+		if errors.As(err, &ce) {
+			return &OpError{Code: "image_runs_as_root", Message: ce.Message()}
+		}
+		return err
+	}
+	return nil
 }

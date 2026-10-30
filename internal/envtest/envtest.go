@@ -119,8 +119,8 @@ type Images struct {
 	users map[string]string
 }
 
-// SetUser makes the image with digest run as user ("" is root, as an image
-// without a USER). An image SetUser did not name runs as 65532, a non-root
+// SetUser makes the image with digest (or the image named so) run as user
+// ("" is root, as an image without a USER). An image SetUser did not name runs as 65532, a non-root
 // user, so that tests about something else need not name one.
 func (i *Images) SetUser(digest, user string) {
 	i.mu.Lock()
@@ -132,10 +132,14 @@ func (i *Images) SetUser(digest, user string) {
 }
 
 // User answers like a registry for image (host/repo@digest or a name
-// AddDigest gave): the user SetUser gave its digest.
+// AddDigest gave): the user SetUser gave its digest, or the image itself
+// (SetUser(image, user) for an image Add made, such as a CI build).
 func (i *Images) User(_ context.Context, image string) (string, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if u, ok := i.users[image]; ok {
+		return u, nil
+	}
 	d, ok := i.digests[image]
 	if !ok {
 		return "", fmt.Errorf("%s: %w", image, registry.ErrNotFound)

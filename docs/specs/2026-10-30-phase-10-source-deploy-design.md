@@ -60,6 +60,20 @@ find, or a Python repo with no `main.py` or `app.py`, is refused with
 "add a Dockerfile". The pull request is a proposal: the team reviews the
 Dockerfile before it builds anything.
 
+## Images that run as root
+
+Every service runs with `runAsNonRoot`, so an image whose user is root, or
+a name, never starts. After the first connected repo's pod failed with
+"container has runAsNonRoot and image will run as root" (2026-10-30):
+
+- A connect reads the repo's own Dockerfile: when its last stage sets no
+  `USER`, runs as root or names its user, the `check_repo` step and the pull
+  request say so, before anything is merged.
+- A deploy and a preview check the user of the image CI built, once it
+  exists, with the pods' rule; a root or named user fails the operation
+  (`image_runs_as_root`) with how to fix the Dockerfile, before anything is
+  written. A user that cannot be read is noted, and the deploy goes on.
+
 ## The workflow's settings
 
 The workflow is Forge's, not a template's, so it cannot name one install's

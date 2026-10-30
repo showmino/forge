@@ -170,6 +170,9 @@ func (c *creator) fromRepo(ctx context.Context, req *forgev1.CreateServiceReques
 	if plan.Language != "" {
 		dockerfile = "no Dockerfile: Forge proposes one for " + plan.Language
 	}
+	if plan.UserNote != "" {
+		dockerfile += "; " + plan.UserNote
+	}
 	done("check_repo", fmt.Sprintf("github.com/%s/%s on %s, %s", owner, repo, branch, dockerfile))
 
 	started("render")
@@ -211,6 +214,9 @@ func (c *creator) fromRepo(ctx context.Context, req *forgev1.CreateServiceReques
 		servicePrefix, id, req.GetOwnerTeam(), actorOf(ctx), id, strings.Join(files, "\n- "))
 	if plan.Language != "" {
 		body += fmt.Sprintf("\nThe repo has no Dockerfile, so Forge proposes one for %s. Check it before merging: it runs as a non-root user with a read-only filesystem (only /tmp is writable), and the app must listen on $PORT.\n", plan.Language)
+	}
+	if plan.UserNote != "" {
+		body += "\n**Before merging:** " + plan.UserNote + ". Forge runs every service as a non-root user with a read-only filesystem (only /tmp is writable); a deploy of an image that runs as root is refused.\n"
 	}
 	if plan.RegistrySecrets {
 		body += fmt.Sprintf("\nThe workflow logs in to %s with the repo secrets FORGE_REGISTRY_USERNAME and FORGE_REGISTRY_PASSWORD: add them before merging.\n", registry)
