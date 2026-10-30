@@ -1,7 +1,9 @@
 # Two forge-api pods
 
-Status: design, waiting for the owner's go-ahead (asked for on 2026-10-30:
-"2 replicas for the API").
+Status: **dropped by the owner on 2026-10-30.** Not built; forge-api stays
+one pod (`replicas: 1`, `Recreate`). Kept as the record of what a second
+pod would take, should it come up again. The dashboard (`web.replicas`) and
+forgegate.io (`run.replicas`) got their two pods the same day.
 
 ## Why
 
