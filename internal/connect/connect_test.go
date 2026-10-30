@@ -207,6 +207,9 @@ func TestPlanNotesTheDockerfilesUser(t *testing.T) {
 		"FROM alpine\nUSER 65532:65532\n":                                 "",
 		"FROM gcr.io/distroless/static:nonroot\nCOPY app /\nUSER 65532\n": "",
 		"from alpine\nuser 1000 \n":                                       "",
+		"FROM alpine\nARG UID=1000\nUSER ${UID}\n":                        "",
+		"FROM alpine\nUSER \\\n  1000\n":                                  "",
+		"FROM alpine\nUSER 00\n":                                          "runs as root",
 	} {
 		out, err := Plan(repo{"Dockerfile": docker}.input())
 		if err != nil {

@@ -299,7 +299,9 @@ func or(s, def string) string {
 func userNote(dockerfile []byte) string {
 	const fix = "add USER 65532:65532 (a number) to its last stage, or its pods will not start"
 	user, seen := "", false
-	for _, line := range strings.Split(string(dockerfile), "\n") {
+	// A line ending in a backslash goes on in the next one.
+	text := strings.ReplaceAll(strings.ReplaceAll(string(dockerfile), "\r\n", "\n"), "\\\n", " ")
+	for _, line := range strings.Split(text, "\n") {
 		line, _, _ = strings.Cut(line, "#")
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
@@ -318,7 +320,10 @@ func userNote(dockerfile []byte) string {
 	switch {
 	case !seen:
 		return "its Dockerfile's last stage sets no USER, so it runs as root unless its base image sets a non-root one (such as distroless :nonroot): " + fix
-	case uid == "0" || uid == "root":
+	case strings.Contains(uid, "$"):
+		// A build argument: its value is the build's to say.
+		return ""
+	case uid == "root" || strings.Trim(uid, "0") == "":
 		return "its Dockerfile's last stage runs as root: " + fix
 	case !plainUID.MatchString(uid):
 		return fmt.Sprintf("its Dockerfile's last stage runs as the user %q, a name, and Kubernetes can only check a user given by number: %s", user, fix)

@@ -47,7 +47,7 @@ const (
 // number other than 0. advice says what to do instead.
 func checkUser(image, user, advice string) error {
 	uid, _, _ := strings.Cut(user, ":")
-	if uid == "" || uid == "0" || uid == "root" {
+	if uid == "root" || strings.Trim(uid, "0") == "" {
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s runs as root (its image sets no non-root USER). %s", image, advice))
 	}
 	if n, err := strconv.ParseUint(uid, 10, 32); err != nil || n == 0 {
