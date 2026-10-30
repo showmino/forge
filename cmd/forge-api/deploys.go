@@ -144,7 +144,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	var charts server.ChartChecker
 	if f.charts {
 		reg, _ := images.(chartrepo.Registry)
-		charts = &chartrepo.Client{Registry: reg}
+		charts = &chartrepo.Client{Registry: reg, Trusted: chartRepos}
 	}
 	// The promotion rules: compiled here, with no request to bound them.
 	rules, err := policy.New(context.Background())

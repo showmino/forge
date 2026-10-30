@@ -82,6 +82,9 @@ func ValidChartVersion(v string) error {
 	return nil
 }
 
+// Check checks the chart as forge.yaml's rules do, values included.
+func (c *Chart) Check() error { return c.validate() }
+
 func (c *Chart) validate() error {
 	if err := ValidChartRepo(c.Repo); err != nil {
 		return err

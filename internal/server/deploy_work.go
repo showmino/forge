@@ -322,12 +322,13 @@ func (d *Deploys) commit(ctx context.Context, path string, build func() ([]byte,
 // for good: a revision then counts when it is deployCommit or when the values
 // file at that revision equals content, what we committed.
 func (d *Deploys) awaitSync(ctx context.Context, svc, env, deployCommit string, content []byte, emit func(string, string)) error {
-	return d.awaitApp(ctx, svc, env, svc+"-"+env, valuesPath(svc, env), deployCommit, content, "sync", emit)
+	return d.awaitApp(ctx, svc, env, svc+"-"+env, deployCommit, map[string][]byte{valuesPath(svc, env): content}, "sync", emit)
 }
 
-// awaitApp waits until Argo CD's application app has synced path's content
-// (committed in deployCommit) and is healthy, reporting as step.
-func (d *Deploys) awaitApp(ctx context.Context, svc, env, app, path, deployCommit string, content []byte, step string, emit func(string, string)) error {
+// awaitApp waits until Argo CD's application app has synced files (path to
+// content, committed in deployCommit) and is healthy, reporting as step. A
+// revision counts when it is deployCommit or holds every one of files.
+func (d *Deploys) awaitApp(ctx context.Context, svc, env, app, deployCommit string, files map[string][]byte, step string, emit func(string, string)) error {
 	timeout := time.NewTimer(d.o.SyncTimeout)
 	defer timeout.Stop()
 	last := ""
@@ -343,16 +344,26 @@ func (d *Deploys) awaitApp(ctx context.Context, svc, env, app, path, deployCommi
 		for _, rev := range revs {
 			same, done := checked[rev]
 			if !done {
-				data, err := d.o.Repo.Read(ctx, path, rev)
-				switch {
-				case errors.Is(err, github.ErrNotFound):
-					checked[rev] = false
-				case err != nil:
-					continue // try again
-				default:
-					same = bytes.Equal(data, content)
-					checked[rev] = same
+				same, done = true, true
+				for path, content := range files {
+					data, err := d.o.Repo.Read(ctx, path, rev)
+					if errors.Is(err, github.ErrNotFound) {
+						same = false
+						break
+					}
+					if err != nil {
+						done = false // try again
+						break
+					}
+					if !bytes.Equal(data, content) {
+						same = false
+						break
+					}
 				}
+				if !done {
+					continue
+				}
+				checked[rev] = same
 			}
 			if same {
 				return true
@@ -367,18 +378,21 @@ func (d *Deploys) awaitApp(ctx context.Context, svc, env, app, path, deployCommi
 			msg = "reading the Argo CD application: " + clip(err.Error())
 		} else {
 			atRev := atRevision(st.Revisions)
-			if refused := chartRefused(svc, env, st.Message); refused != nil && app == chartApp(svc, env) {
-				return refused
+			// Only a refusal of the sync of this very deploy: an earlier one
+			// stays in the status until Argo CD syncs again.
+			if app == chartApp(svc, env) && st.Refused != "" && atRevision(st.RefusedAt) {
+				if refused := chartRefused(svc, env, st.Refused); refused != nil {
+					return refused
+				}
 			}
 			if atRev && st.Sync == "Synced" && st.Health == "Healthy" {
-				switch {
-				case path == valuesPath(svc, env) && step == "sync":
+				if content, ok := files[valuesPath(svc, env)]; ok && step == "sync" {
 					url := "http://" + d.host(svc, env)
 					if v, err := parseValues(content); err == nil && v.Host != "" {
 						url = hostURL(v.Host, v.isPublic())
 					}
 					emit(step, url)
-				default:
+				} else {
 					emit(step, app+" is Synced and Healthy")
 				}
 				return nil

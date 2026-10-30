@@ -392,6 +392,11 @@ type AppStatus struct {
 	Sync, Health, Message string
 	// Revisions are the synced revisions, one per source.
 	Revisions []string
+	// Refused is what Argo CD refused to sync in its last sync, which failed,
+	// and RefusedAt that sync's revisions: an object the project does not
+	// allow is named per resource, not in the sync's own message.
+	Refused   string
+	RefusedAt []string
 }
 
 // Application reads Argo CD's status for name in argoNamespace. A missing
@@ -427,6 +432,25 @@ func (c *Cluster) Application(ctx context.Context, argoNamespace, name string) (
 	if phase, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "phase"); phase == "Failed" || phase == "Error" {
 		if m, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "message"); m != "" {
 			msgs = append(msgs, m)
+		}
+		var refused []string
+		rs, _, _ := unstructured.NestedSlice(u.Object, "status", "operationState", "syncResult", "resources")
+		for _, r := range rs {
+			rm, _ := r.(map[string]any)
+			if status, _ := rm["status"].(string); status != "SyncFailed" {
+				continue
+			}
+			if m, _ := rm["message"].(string); m != "" {
+				refused = append(refused, m)
+			}
+		}
+		if len(refused) > 0 {
+			st.Refused = strings.Join(refused, "; ")
+			msgs = append(msgs, st.Refused)
+			st.RefusedAt, _, _ = unstructured.NestedStringSlice(u.Object, "status", "operationState", "syncResult", "revisions")
+			if rev, _, _ := unstructured.NestedString(u.Object, "status", "operationState", "syncResult", "revision"); rev != "" {
+				st.RefusedAt = append(st.RefusedAt, rev)
+			}
 		}
 	}
 	res, _, _ := unstructured.NestedSlice(u.Object, "status", "resources")

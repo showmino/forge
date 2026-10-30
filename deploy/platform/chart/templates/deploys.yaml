@@ -166,6 +166,13 @@ spec:
             app.kubernetes.io/managed-by: forge
             forge.dev/service: '{{`{{ index .path.segments 1 }}`}}'
             forge.dev/deploy-env: '{{`{{ .path.basename }}`}}'
+            {{- if .Values.deploys.charts.enabled }}
+            # A chart's pods are not Forge's: Kubernetes refuses privileged
+            # pods, host networking and host paths in every service's
+            # namespace, and warns about anything short of restricted.
+            pod-security.kubernetes.io/enforce: baseline
+            pod-security.kubernetes.io/warn: restricted
+            {{- end }}
       ignoreDifferences:
         - group: apps
           kind: Deployment

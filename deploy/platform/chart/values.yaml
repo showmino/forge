@@ -238,7 +238,12 @@ deploys:
   # an AppProject of its own: namespaced resources only, in its namespace
   # only, and none of the kinds that would take an address, a DNS record, a
   # quota or a platform secret. Turning it on lets forge-services make
-  # AppProjects in the namespace argocd.
+  # AppProjects in the namespace argocd, labels every service's namespace with
+  # Kubernetes' baseline pod security, and adds the admission policy
+  # forge-service-addresses (Services there must be plain ClusterIPs; needs
+  # Kubernetes 1.30+). Turning it off again removes every chart service's
+  # workloads (the ApplicationSet goes, and its applications with it):
+  # delete those services first.
   charts:
     enabled: false
     # Chart repositories such services may use, such as

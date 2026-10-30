@@ -422,8 +422,14 @@ type Argo struct {
 	Lag time.Duration
 	// Refused maps an app's name to the message Argo CD gives when its
 	// project does not allow one of the chart's objects; the app then never
-	// syncs. Set it before Run.
+	// syncs. Set it before Run. Like Argo CD, the message is on the refused
+	// resource in operationState.syncResult, and the sync's own message says
+	// only that tasks were not valid.
 	Refused map[string]string
+	// StaleRefusal maps an app's name to such a message from an earlier sync
+	// of another revision, still in its operationState while the app syncs
+	// and is healthy.
+	StaleRefusal map[string]string
 
 	mu sync.Mutex
 }
@@ -546,12 +552,24 @@ func (a *Argo) sync(ctx context.Context, name, head string) error {
 		"sync":   map[string]any{"status": "Synced", "revisions": []any{"chart", head}},
 		"health": health,
 	}
+	failed := func(msg string, revs []any) map[string]any {
+		return map[string]any{
+			"phase": "Failed", "message": "one or more synchronization tasks are not valid",
+			"syncResult": map[string]any{
+				"revisions": revs,
+				"resources": []any{map[string]any{"kind": "ClusterRole", "name": "x", "status": "SyncFailed", "message": msg}},
+			},
+		}
+	}
 	if refused != "" {
 		status = map[string]any{
-			"sync":       map[string]any{"status": "OutOfSync", "revisions": []any{"chart", head}},
-			"health":     map[string]any{"status": "Missing"},
-			"conditions": []any{map[string]any{"type": "SyncError", "message": refused}},
+			"sync":           map[string]any{"status": "OutOfSync", "revisions": []any{"chart", head}},
+			"health":         map[string]any{"status": "Missing"},
+			"operationState": failed(refused, []any{"chart", head}),
 		}
+	}
+	if stale := a.StaleRefusal[name]; stale != "" {
+		status["operationState"] = failed(stale, []any{"chart", "0000000000000000000000000000000000000001"})
 	}
 	apps := a.Dynamic.Resource(Applications).Namespace(a.Namespace)
 	app := &unstructured.Unstructured{Object: map[string]any{

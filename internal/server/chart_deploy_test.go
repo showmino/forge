@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -204,6 +205,19 @@ func TestChartNotAllowed(t *testing.T) {
 	}
 }
 
+// A refusal of an earlier sync, still in the app's status, does not fail a
+// deploy that Argo CD has since synced.
+func TestChartStaleRefusal(t *testing.T) {
+	t.Parallel()
+	f := newChartFixture(t, func(_ *DeployOptions, a *envtest.Argo) {
+		a.StaleRefusal = map[string]string{"podinfo-staging-chart": "resource rbac.authorization.k8s.io:ClusterRole is not permitted in project forge-chart-podinfo-staging."}
+	})
+	if _, err := f.create(t, podinfoRequest("podinfo")); err != nil {
+		t.Fatal(err)
+	}
+	f.deployImage(t, "podinfo", "staging", "")
+}
+
 func TestChartRefusedMessages(t *testing.T) {
 	t.Parallel()
 	for msg, want := range map[string]string{
@@ -262,5 +276,10 @@ func TestChartRefusals(t *testing.T) {
 	}
 	if _, err := f.client.StartDeploy(context.Background(), as("writer", &forgev1.StartDeployRequest{Service: "services/podinfo", Env: "staging", ChartValues: "[1, 2]"})); connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Errorf("chart values that are a list: %v", err)
+	}
+	// Values that, with the environments', would not fit forge.yaml.
+	big := "a: " + strings.Repeat("x", manifest.MaxChartValues-5) + "\n"
+	if _, err := f.client.StartDeploy(context.Background(), as("writer", &forgev1.StartDeployRequest{Service: "services/podinfo", Env: "staging", ChartValues: big})); connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(fmt.Sprint(err), "at most") {
+		t.Errorf("values too big with the environments': %v", err)
 	}
 }

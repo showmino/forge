@@ -22,11 +22,12 @@ import (
 // Services that run a published Helm chart (phase 11). Their forge.yaml, with
 // chart:, lives in the deploy repo as an image service's does. Each
 // environment's directory then holds, next to values.yaml (Forge's own chart:
-// the address, the quota, the DNS record, and the record of the deploy),
-// chart.json (where the chart is, read by the forge-charts ApplicationSet)
-// and chart-values.yaml (its values). Argo CD runs the chart as
-// <service>-<env>-chart, in the AppProject forge-charts, which allows only
-// namespaced resources.
+// the address, the quota, the DNS record, the chart's AppProject and the
+// record of the deploy), chart.json (where the chart is, read by the
+// forge-charts ApplicationSet) and chart-values.yaml (its values). Argo CD
+// runs the chart as <service>-<env>-chart, in the AppProject
+// forge-chart-<service>-<env>, which allows a short list of workload kinds in
+// that namespace only.
 
 // ChartChecker finds a chart's version in its repository: nil when it is
 // there, an error wrapping chartrepo.ErrNotFound when it is not.
@@ -165,6 +166,10 @@ func (d *Deploys) chartSource(ctx context.Context, sid string, mf *manifest.Mani
 	if values != nil {
 		c.Values, retag = values, true
 	}
+	// With new values, as forge.yaml will hold them once the deploy is done.
+	if err := c.Check(); err != nil {
+		return src, false, invalidArg("%v", err)
+	}
 	if err := d.checkChart(ctx, sid, &c); err != nil {
 		return src, false, err
 	}
@@ -254,10 +259,11 @@ func (d *Deploys) applyChart(ctx context.Context, svc, env string, v deployValue
 		return stands(err)
 	}
 	emit("chart", fmt.Sprintf("forge-deploys %s: %s", shortSHA(chartCommit), v.Chart.ref()))
-	if err := d.awaitApp(ctx, svc, env, svc+"-"+env, valuesPath(svc, env), commit, content, "address", emit); err != nil {
+	if err := d.awaitApp(ctx, svc, env, svc+"-"+env, commit, map[string][]byte{valuesPath(svc, env): content}, "address", emit); err != nil {
 		return stands(err)
 	}
-	return stands(d.awaitApp(ctx, svc, env, chartApp(svc, env), chartPath(svc, env), chartCommit, source, "sync", emit))
+	// Both chart files: a deploy of new values has the same chart.json.
+	return stands(d.awaitApp(ctx, svc, env, chartApp(svc, env), chartCommit, files, "sync", emit))
 }
 
 // commitFiles writes files in one commit on the deploy repo's head,

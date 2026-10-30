@@ -8,9 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -32,17 +36,27 @@ type Registry interface {
 type Client struct {
 	// Registry answers for oci:// repositories; nil refuses them.
 	Registry Registry
-	// HTTP defaults to a client with a 30s timeout that follows redirects
-	// only to https.
+	// HTTP, when set, replaces the client for https:// repositories (tests).
+	// The default has a 30s timeout, follows redirects only to https, and
+	// connects to no private, loopback or link-local address, unless the
+	// repository is in Trusted.
 	HTTP *http.Client
+	// Trusted are repositories the platform lists by name: they may be on
+	// its own network.
+	Trusted []string
 }
 
-func (c *Client) http() *http.Client {
+func (c *Client) http(repo string) *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if !slices.Contains(c.Trusted, repo) {
+		dialer.Control = publicOnly
+	}
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: dialer.DialContext, TLSHandshakeTimeout: 10 * time.Second},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if req.URL.Scheme != "https" || len(via) >= 5 {
 				return errors.New("redirected off https")
@@ -50,6 +64,32 @@ func (c *Client) http() *http.Client {
 			return nil
 		},
 	}
+}
+
+// publicOnly refuses a connection to an address inside a network: the chart
+// repository is named by whoever creates a service.
+func publicOnly(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return fmt.Errorf("%s is not an address", host)
+	}
+	if !Public(ip) {
+		return fmt.Errorf("%s is not a public address: a chart repository on the platform's own network must be listed by the platform", ip)
+	}
+	return nil
+}
+
+// sharedSpace is 100.64.0.0/10, carrier-grade NAT, which clusters use too.
+var sharedSpace = netip.MustParsePrefix("100.64.0.0/10")
+
+// Public reports whether ip is a public unicast address.
+func Public(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !sharedSpace.Contains(ip)
 }
 
 // Has returns nil when repo has the chart name at version, ErrNotFound
@@ -85,7 +125,7 @@ func (c *Client) index(ctx context.Context, repo, name, version string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.http().Do(req)
+	resp, err := c.http(repo).Do(req)
 	if err != nil {
 		return fmt.Errorf("read the chart repository's index: %w", err)
 	}
@@ -109,7 +149,8 @@ func (c *Client) index(ctx context.Context, repo, name, version string) error {
 		} `yaml:"entries"`
 	}
 	if err := yaml.Unmarshal(data, &idx); err != nil {
-		return fmt.Errorf("the chart repository's index.yaml is not valid: %w", err)
+		// Not the parser's words: they quote the document.
+		return errors.New("the chart repository's index.yaml is not valid YAML")
 	}
 	for _, e := range idx.Entries[name] {
 		if e.Version == version || "v"+e.Version == version || e.Version == "v"+version {

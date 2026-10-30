@@ -51,7 +51,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: forge-chart-podinfo-staging
+  name: "forge-chart-podinfo-staging"
   namespace: argocd
 spec:
   description: "The chart podinfo of the Forge service podinfo in staging"
@@ -60,15 +60,26 @@ spec:
   destinations:
     - {server: https://kubernetes.default.svc, namespace: "podinfo-staging"}
   clusterResourceWhitelist: []
+  # Workloads and what they need, nothing else: no RBAC (a Role would let
+  # the chart's own pods make routes, DNS records or secrets items later), no
+  # routes, Ingresses, Endpoints or EndpointSlices (Forge gives the service
+  # its address, and the route must lead to the chart's own pods), no quotas,
+  # and none of the cluster's other kinds (Istio, cert-manager, monitoring,
+  # secrets operators). A Service must be a plain ClusterIP: the platform's
+  # admission policy refuses the other types in Forge's namespaces.
   namespaceResourceWhitelist:
-    - {group: "*", kind: "*"}
-  namespaceResourceBlacklist:
-    - {group: gateway.networking.k8s.io, kind: "*"}
-    - {group: networking.k8s.io, kind: Ingress}
-    - {group: extensions, kind: Ingress}
-    - {group: "", kind: ResourceQuota}
-    - {group: "", kind: LimitRange}
-    - {group: kro.run, kind: "*"}
-    - {group: onepassword.com, kind: "*"}
-    - {group: external-secrets.io, kind: "*"}
-    - {group: argoproj.io, kind: "*"}
+    - {group: "", kind: ConfigMap}
+    - {group: "", kind: Secret}
+    - {group: "", kind: Service}
+    - {group: "", kind: ServiceAccount}
+    - {group: "", kind: PersistentVolumeClaim}
+    - {group: "", kind: Pod}
+    - {group: apps, kind: Deployment}
+    - {group: apps, kind: StatefulSet}
+    - {group: apps, kind: DaemonSet}
+    - {group: apps, kind: ReplicaSet}
+    - {group: batch, kind: Job}
+    - {group: batch, kind: CronJob}
+    - {group: autoscaling, kind: HorizontalPodAutoscaler}
+    - {group: policy, kind: PodDisruptionBudget}
+    - {group: networking.k8s.io, kind: NetworkPolicy}

@@ -377,9 +377,13 @@ chart's Argo CD project), labels the namespace so that Kubernetes refuses
 privileged pods (`pod-security.kubernetes.io/enforce: baseline`), then
 writes `chart.json` and `chart-values.yaml`, which the `forge-charts`
 ApplicationSet turns into `<name>-<env>-chart` in the project
-`forge-chart-<name>-<env>`: namespaced resources in that namespace only, and
-no routes, quotas, DNS records or secrets operators' objects. A chart that
-needs more fails its deploy with `chart_not_allowed`, naming the object. The
+`forge-chart-<name>-<env>`: in that namespace only, and only workload kinds
+(ConfigMap, Secret, Service, ServiceAccount, PersistentVolumeClaim, Pod,
+Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, HPA, PDB,
+NetworkPolicy; no RBAC, routes or Endpoints). The admission policy
+`forge-service-addresses` keeps every Service in a service's namespace a
+plain ClusterIP. A chart that needs more fails its deploy with
+`chart_not_allowed`, naming the object. The
 release is named after the service, and `--expose` names its Service that
 gets the address. `forge deploy start <name> --env staging --ref 6.8.0`
 upgrades it, and `--values <file>` there deploys new values; both are written

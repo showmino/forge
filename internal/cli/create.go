@@ -28,8 +28,8 @@ func newCreateCmd(f *Factory) *cobra.Command {
 	var port int
 	var run runFlags
 	cmd := &cobra.Command{
-		Use:   "create <name> (--template <template>[@version] | --image <image>) --team <team>",
-		Short: "Create a service from a template or an image",
+		Use:   "create <name> (--template <template>[@version] | --image <image> | --chart <chart>) --team <team>",
+		Short: "Create a service from a template, an image or a Helm chart",
 		Long: `Create a service from a template: the Forge API renders the template,
 creates the private repo github.com/<org>/<name>, pushes the first commit
 (which starts its CI) and registers the service in the catalog. If a step

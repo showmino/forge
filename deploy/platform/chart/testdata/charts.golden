@@ -1084,6 +1084,11 @@ spec:
             app.kubernetes.io/managed-by: forge
             forge.dev/service: '{{ index .path.segments 1 }}'
             forge.dev/deploy-env: '{{ .path.basename }}'
+            # A chart's pods are not Forge's: Kubernetes refuses privileged
+            # pods, host networking and host paths in every service's
+            # namespace, and warns about anything short of restricted.
+            pod-security.kubernetes.io/enforce: baseline
+            pod-security.kubernetes.io/warn: restricted
       ignoreDifferences:
         - group: apps
           kind: Deployment
@@ -1128,6 +1133,47 @@ spec:
             matchLabels:
               app.kubernetes.io/managed-by: forge
               forge.dev/deploy-env: production
+---
+# Source: forge/templates/charts.yaml
+# A route leads to the Service chart.expose names, which the chart writes:
+# in a service's namespace a Service must be a plain ClusterIP, so that its
+# address cannot lead to another namespace (ExternalName) or past the
+# address model (externalIPs, LoadBalancer, NodePort). Forge's own Services
+# are all plain ClusterIPs. Needs Kubernetes 1.30 or later.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: forge-service-addresses
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - {key: forge.dev/deploy-env, operator: Exists}
+    resourceRules:
+      - {apiGroups: [""], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [services]}
+  validations:
+    - expression: "!has(object.spec.type) || object.spec.type == 'ClusterIP'"
+      message: "a Service in a Forge service's namespace must be of type ClusterIP: Forge gives the service its address"
+    - expression: "!has(object.spec.externalIPs) || size(object.spec.externalIPs) == 0"
+      message: "a Service in a Forge service's namespace may not have externalIPs"
+---
+# Source: forge/templates/charts.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: forge-service-addresses
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  policyName: forge-service-addresses
+  validationActions: [Deny]
 ---
 # Source: forge/templates/tests/forge-test.yaml
 apiVersion: v1

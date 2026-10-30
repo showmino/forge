@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +68,52 @@ func TestHasIndex(t *testing.T) {
 	}
 	if err := c.Has(ctx, "http://charts.example.com", "a", "1.0.0"); err == nil {
 		t.Error("http repository accepted")
+	}
+}
+
+func TestPublicOnly(t *testing.T) {
+	t.Parallel()
+	for addr, want := range map[string]bool{
+		"140.82.112.3": true, "2606:4700::1": true,
+		"10.0.0.5": false, "192.168.1.2": false, "172.16.0.1": false, "127.0.0.1": false, "169.254.169.254": false,
+		"100.64.0.10": false, "::1": false, "fd00::1": false, "fe80::1": false, "0.0.0.0": false, "::ffff:10.0.0.1": false,
+	} {
+		if got := Public(netip.MustParseAddr(addr)); got != want {
+			t.Errorf("Public(%s) = %v, want %v", addr, got, want)
+		}
+	}
+	// The default client refuses to connect to a test server on loopback.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("entries: {}")) }))
+	t.Cleanup(srv.Close)
+	err := (&Client{}).Has(context.Background(), srv.URL, "a", "1.0.0")
+	if err == nil || !strings.Contains(err.Error(), "not a public address") {
+		t.Errorf("loopback repository: %v", err)
+	}
+}
+
+func TestIndexLimits(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/big/index.yaml":
+			_, _ = w.Write([]byte("entries:\n" + strings.Repeat("#", maxIndex+1)))
+		case "/away/index.yaml":
+			http.Redirect(w, r, "http://charts.example.com/index.yaml", http.StatusFound)
+		case "/secret/index.yaml":
+			_, _ = w.Write([]byte("password: hunter2\nentries: [\n"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	base := srv.Client()
+	c := &Client{HTTP: &http.Client{Transport: base.Transport, CheckRedirect: (&Client{}).http("").CheckRedirect}}
+	ctx := context.Background()
+	if err := c.Has(ctx, srv.URL+"/big", "a", "1.0.0"); err == nil || !strings.Contains(err.Error(), "MiB") {
+		t.Errorf("big index: %v", err)
+	}
+	if err := c.Has(ctx, srv.URL+"/away", "a", "1.0.0"); err == nil || !strings.Contains(err.Error(), "off https") {
+		t.Errorf("redirect to http: %v", err)
+	}
+	if err := c.Has(ctx, srv.URL+"/secret", "a", "1.0.0"); err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("a bad index is quoted: %v", err)
 	}
 }

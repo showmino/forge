@@ -1,9 +1,9 @@
 {{- /* A service that runs a published chart gets an Argo CD project of its
 own, which its chart's application (<name>-<env>-chart, from the
-forge-charts ApplicationSet) runs in: namespaced resources only, in this
-namespace only, and none of the kinds that would take an address, a DNS
-record, a quota or a platform secret. A chart, or a value such as
-namespaceOverride, can then reach no other service's namespace. */ -}}
+forge-charts ApplicationSet) runs in: a short list of workload kinds, in
+this namespace only. A chart, or a value such as namespaceOverride, can
+then reach no other service's namespace, take no address, DNS record or
+platform secret, and grant itself nothing. */ -}}
 {{- with .Values.chart }}
 {{- if not (has $.Values.env (list "staging" "production")) }}
 {{- fail (printf "env %q must be staging or production" $.Values.env) }}
@@ -11,7 +11,7 @@ namespaceOverride, can then reach no other service's namespace. */ -}}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: {{ printf "forge-chart-%s-%s" $.Values.name $.Values.env }}
+  name: {{ printf "forge-chart-%s-%s" $.Values.name $.Values.env | quote }}
   namespace: {{ $.Values.chartProject.namespace | default "argocd" }}
 spec:
   description: {{ printf "The chart %s of the Forge service %s in %s" .name $.Values.name $.Values.env | quote }}
@@ -27,16 +27,27 @@ spec:
   destinations:
     - {server: https://kubernetes.default.svc, namespace: {{ printf "%s-%s" $.Values.name $.Values.env | quote }}}
   clusterResourceWhitelist: []
+  # Workloads and what they need, nothing else: no RBAC (a Role would let
+  # the chart's own pods make routes, DNS records or secrets items later), no
+  # routes, Ingresses, Endpoints or EndpointSlices (Forge gives the service
+  # its address, and the route must lead to the chart's own pods), no quotas,
+  # and none of the cluster's other kinds (Istio, cert-manager, monitoring,
+  # secrets operators). A Service must be a plain ClusterIP: the platform's
+  # admission policy refuses the other types in Forge's namespaces.
   namespaceResourceWhitelist:
-    - {group: "*", kind: "*"}
-  namespaceResourceBlacklist:
-    - {group: gateway.networking.k8s.io, kind: "*"}
-    - {group: networking.k8s.io, kind: Ingress}
-    - {group: extensions, kind: Ingress}
-    - {group: "", kind: ResourceQuota}
-    - {group: "", kind: LimitRange}
-    - {group: kro.run, kind: "*"}
-    - {group: onepassword.com, kind: "*"}
-    - {group: external-secrets.io, kind: "*"}
-    - {group: argoproj.io, kind: "*"}
+    - {group: "", kind: ConfigMap}
+    - {group: "", kind: Secret}
+    - {group: "", kind: Service}
+    - {group: "", kind: ServiceAccount}
+    - {group: "", kind: PersistentVolumeClaim}
+    - {group: "", kind: Pod}
+    - {group: apps, kind: Deployment}
+    - {group: apps, kind: StatefulSet}
+    - {group: apps, kind: DaemonSet}
+    - {group: apps, kind: ReplicaSet}
+    - {group: batch, kind: Job}
+    - {group: batch, kind: CronJob}
+    - {group: autoscaling, kind: HorizontalPodAutoscaler}
+    - {group: policy, kind: PodDisruptionBudget}
+    - {group: networking.k8s.io, kind: NetworkPolicy}
 {{- end }}

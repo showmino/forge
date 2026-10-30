@@ -48,26 +48,64 @@ Each environment's directory in the deploy repo holds three files:
 `pod-security.kubernetes.io/enforce: baseline` (and `warn: restricted`), so
 Kubernetes refuses privileged pods, host networking and host paths.
 
-### Why a project per service
+### What a chart may do
 
-A shared project would allow every `*-staging` and `*-production` namespace,
-so a chart (or a value like `namespaceOverride`) could write into another
-team's service. The project made for each service allows its namespace only,
-no cluster-scoped resources, and none of: Gateway API objects, Ingresses,
-ResourceQuota, LimitRange, kro objects (DNS records), 1Password and External
-Secrets objects, Argo CD objects. To make these projects, `forge-services`
-may now create AppProjects in `argocd` (only with `deploys.charts.enabled`);
-their content is Forge's chart's, not the deploy repo's.
+Each chart service has an AppProject of its own, `forge-chart-<service>-<env>`,
+made by Forge's chart in `forge-services`:
 
-A chart that needs more fails: forge-api reads Argo CD's refusal ("resource
-...:ClusterRole is not permitted", "namespace ... is not permitted") and
-fails the deploy with `chart_not_allowed`, naming the object, and what to do
-(turn it off in the values, or have the platform team install the chart).
+- **One namespace:** its only destination is `<service>-<env>`. A shared
+  project would allow every `*-staging` and `*-production` namespace, so a
+  chart (or a value like `namespaceOverride`) could write into another team's
+  service.
+- **An allow list of kinds:** ConfigMap, Secret, Service, ServiceAccount,
+  PersistentVolumeClaim, Pod; Deployment, StatefulSet, DaemonSet, ReplicaSet;
+  Job, CronJob; HorizontalPodAutoscaler; PodDisruptionBudget; NetworkPolicy.
+  Nothing cluster-scoped. Not RBAC: a Role would let the chart's own pods
+  make routes, DNS records or secrets items at run time. Not Endpoints or
+  EndpointSlices, Ingresses or Gateway API objects, quotas, nor the cluster's
+  other kinds (Istio, cert-manager, monitoring, secrets operators). A chart
+  that needs one of them fails, and stays something the platform team
+  installs by hand.
+- **A plain address:** the route leads to the Service `chart.expose` names,
+  which the chart writes. The platform chart's ValidatingAdmissionPolicy
+  `forge-service-addresses` (Kubernetes 1.30+) refuses, in every namespace
+  labelled `forge.dev/deploy-env`, a Service that is not a plain ClusterIP
+  (ExternalName, LoadBalancer, NodePort, externalIPs). Without Endpoints in
+  the allow list, a Service without a selector leads nowhere.
+- **Pod security:** with charts on, `forge-services` labels every service's
+  namespace `pod-security.kubernetes.io/enforce: baseline` and `warn:
+  restricted` (its managed namespace metadata, so a recreated namespace has
+  it too), and forge-api labels it again before writing `chart.json`.
+- To make the projects, `forge-services` may create AppProjects in `argocd`
+  (only with `deploys.charts.enabled`).
+
+A chart that needs more fails: forge-api reads Argo CD's refusal from the
+failed sync's per-resource results ("resource ...:ClusterRole is not
+permitted", "namespace ... is not permitted"), only when that sync was of this
+deploy's commit, and fails the deploy with `chart_not_allowed`, naming the
+object and what to do.
+
+### Chosen not to change
+
+- `forge-services` may write every kind it allows into `argocd` too, not only
+  AppProjects: Argo CD ties destinations to a project, not to kinds. What it
+  writes there is what Forge's own chart renders, which names no namespace
+  but the AppProject's; the deploy repo holds values, not templates. A
+  separate project and ApplicationSet for the AppProjects would delete a
+  project and its chart application at the same time on a teardown, which
+  leaves the application stuck (it happened on 2026-10-25 and 2026-10-26).
+- Turning charts off (`deploys.charts.enabled: false`) removes the
+  ApplicationSet and with it every chart service's workloads: delete those
+  services first (the values' comment says so).
+- forge-api checks an HTTPS chart repository's address only when it connects
+  itself: behind an egress proxy (`HTTPS_PROXY`), the proxy connects.
 
 ## The operations
 
 - **Deploy:** `values.yaml`, wait for the namespace, label it, then
-  `chart.json` and `chart-values.yaml`, then wait for both applications.
+  `chart.json` and `chart-values.yaml`, then wait for both applications (the
+  chart's at a revision that holds both files: a deploy of new values has
+  the same `chart.json`).
   Steps: resolve, release, commit, namespace, chart, address, sync. The
   version is the chart's version; there is no repo to tag. `--ref` deploys
   another version and `--values` (StartDeployRequest `chart_values`) new
@@ -90,15 +128,18 @@ forge-api `--charts` (`FORGE_CHARTS`) and `--allowed-chart-repos`
 `policy/charts.rego` refuses repositories outside the list and repositories on
 an address or a one-word host unless listed. An OCI chart is looked up with the
 image registry client (`<repo>/<name>:<version>`, `+` as `_`); an HTTPS one in
-its `index.yaml`.
+its `index.yaml` (at most 32 MiB, redirects to https only, and no private,
+loopback or link-local address unless the repository is listed).
 
 ## Not checked on a cluster
 
 Built and tested against the fakes (`envtest.Argo` makes the chart
-applications and can refuse one). Not run against a real Argo CD: the files
-generator's parameters, an HTTPS chart with an empty `path`, the AppProject
-made from another application, and Argo CD keeping the pod-security labels
-next to its managed namespace metadata need the exit gate on the cluster.
+applications, can refuse one as Argo CD does, per resource, and keep a
+refusal of an earlier sync). Had an independent review; its findings are
+fixed or listed above. Not run against a real Argo CD: the files generator's
+parameters, an HTTPS chart with an empty `path`, the AppProject made from
+another application, where Argo CD puts a refused object's message, and the
+admission policy need the exit gate on the cluster.
 
 ## Exit gate
 
