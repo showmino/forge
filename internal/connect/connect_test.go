@@ -194,3 +194,30 @@ func TestPlanRefuses(t *testing.T) {
 		}
 	}
 }
+
+// The repo's own Dockerfile is read for the user its last stage runs as:
+// Forge runs every service as a non-root user, so a root one gets a note.
+func TestPlanNotesTheDockerfilesUser(t *testing.T) {
+	t.Parallel()
+	for docker, want := range map[string]string{
+		"FROM golang AS build\nUSER 1000\nFROM scratch\n":                 "sets no USER",
+		"FROM alpine\nUSER root\n":                                        "runs as root",
+		"FROM alpine\nUSER 0:0 # root\n":                                  "runs as root",
+		"FROM node:24\nUSER node\n":                                       `user "node", a name`,
+		"FROM alpine\nUSER 65532:65532\n":                                 "",
+		"FROM gcr.io/distroless/static:nonroot\nCOPY app /\nUSER 65532\n": "",
+		"from alpine\nuser 1000 \n":                                       "",
+	} {
+		out, err := Plan(repo{"Dockerfile": docker}.input())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (want == "") != (out.UserNote == "") || !strings.Contains(out.UserNote, want) {
+			t.Errorf("%q: note %q, want %q", docker, out.UserNote, want)
+		}
+	}
+	// A proposed Dockerfile is non-root already: no note.
+	if out, _ := Plan(repo{"go.mod": "module x\n", "main.go": ""}.input()); out.UserNote != "" {
+		t.Errorf("proposed Dockerfile: %q", out.UserNote)
+	}
+}

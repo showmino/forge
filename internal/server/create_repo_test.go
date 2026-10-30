@@ -248,3 +248,24 @@ func TestConnectRunnerLabels(t *testing.T) {
 		}
 	}
 }
+
+// A repo whose own Dockerfile runs as root is connected, with a note in the
+// step and the pull request: the deploy would refuse its image.
+func TestConnectRepoNotesARootDockerfile(t *testing.T) {
+	t.Parallel()
+	repos := newFakeRepos()
+	repos.addRepo("tool", map[string]string{"Dockerfile": "FROM alpine\nCMD [\"./app\"]\n"})
+	repos.give("tool", "billing", "push")
+	e := newCreateEnv(t, nil, repos)
+	msgs, err := e.create(context.Background(), "member", connectRequest("tool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, last := steps(msgs)
+	if last.GetChange() == nil || !strings.Contains(strings.Join(got, "\n"), "sets no USER") {
+		t.Errorf("steps: %v", got)
+	}
+	if !strings.Contains(repos.proposals[0].Body, "**Before merging:** its Dockerfile's last stage sets no USER") {
+		t.Errorf("body: %s", repos.proposals[0].Body)
+	}
+}

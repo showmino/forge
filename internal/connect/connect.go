@@ -69,6 +69,9 @@ type Result struct {
 	// RegistrySecrets is set when the workflow logs in to the registry with
 	// the repo secrets FORGE_REGISTRY_USERNAME and FORGE_REGISTRY_PASSWORD.
 	RegistrySecrets bool
+	// UserNote says what is wrong with the user the repo's own Dockerfile
+	// runs as, or "" when its last stage names a numeric non-root USER.
+	UserNote string
 }
 
 //go:embed files/*
@@ -90,7 +93,11 @@ func Plan(in Input) (*Result, error) {
 		run.Port = in.Port
 	}
 	run.Health = in.Health
-	if !has(DockerPath) {
+	if has(DockerPath) {
+		if data, err := in.Read(DockerPath); err == nil {
+			res.UserNote = userNote(data)
+		}
+	} else {
 		d, err := dockerfile(in, has)
 		if err != nil {
 			return nil, err
@@ -285,3 +292,38 @@ func or(s, def string) string {
 	}
 	return s
 }
+
+// userNote reads the user a Dockerfile's last stage runs as and says what
+// stops Forge running it, or "" for a numeric non-root USER. Forge runs every
+// service with runAsNonRoot, which needs a numeric user other than 0.
+func userNote(dockerfile []byte) string {
+	const fix = "add USER 65532:65532 (a number) to its last stage, or its pods will not start"
+	user, seen := "", false
+	for _, line := range strings.Split(string(dockerfile), "\n") {
+		line, _, _ = strings.Cut(line, "#")
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch strings.ToUpper(fields[0]) {
+		case "FROM":
+			user, seen = "", false
+		case "USER":
+			if len(fields) > 1 {
+				user, seen = fields[1], true
+			}
+		}
+	}
+	uid, _, _ := strings.Cut(user, ":")
+	switch {
+	case !seen:
+		return "its Dockerfile's last stage sets no USER, so it runs as root unless its base image sets a non-root one (such as distroless :nonroot): " + fix
+	case uid == "0" || uid == "root":
+		return "its Dockerfile's last stage runs as root: " + fix
+	case !plainUID.MatchString(uid):
+		return fmt.Sprintf("its Dockerfile's last stage runs as the user %q, a name, and Kubernetes can only check a user given by number: %s", user, fix)
+	}
+	return ""
+}
+
+var plainUID = regexp.MustCompile(`^[1-9][0-9]*$`)

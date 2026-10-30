@@ -169,6 +169,9 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		if err := waitForImage(ctx, d.o.GitHub, d.o.Images, src, d.o.ImageTimeout, d.o.ImagePoll, emit); err != nil {
 			return err
 		}
+		if err := runsAsNonRoot(ctx, d.o.Images, src.image, emit); err != nil {
+			return err
+		}
 		// Only now: a version is for a build that exists.
 		version, err := d.cutVersion(ctx, src.owner, src.repo, src.commit, env, bump, emit)
 		if err != nil {
