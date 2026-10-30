@@ -40,6 +40,8 @@ type DeployRepo interface {
 	Head(ctx context.Context) (string, string, error)
 	CommitFile(ctx context.Context, parent, tree, path string, content []byte, message string) (string, error)
 	DeleteFile(ctx context.Context, parent, tree, path, message string) (string, error)
+	// CommitFiles writes several files in one commit; a nil content removes one.
+	CommitFiles(ctx context.Context, parent, tree string, files map[string][]byte, message string) (string, error)
 	History(ctx context.Context, path string, limit int) ([]github.CommitInfo, error)
 }
 
@@ -54,6 +56,13 @@ type DeployOptions struct {
 	// AllowedRegistries are the hosts such images may come from (the image
 	// rules); empty allows any.
 	AllowedRegistries []string
+	// Charts lets services run a published Helm chart (phase 11): the
+	// platform has the forge-charts ApplicationSet. ChartChecker finds a
+	// chart's version; AllowedChartRepos are the repositories charts may
+	// come from (the chart rules), empty allows any.
+	Charts            bool
+	ChartChecker      ChartChecker
+	AllowedChartRepos []string
 	Repo              DeployRepo
 	Catalog           *Catalog
 	Operations        *Operations
@@ -242,7 +251,9 @@ type deployValues struct {
 	Jobs        []manifest.Job      `yaml:"jobs,omitempty"`
 	Writable    []string            `yaml:"writable,omitempty"`
 	Autoscaling *deployAutoscaling  `yaml:"autoscaling,omitempty"`
-	Forge       deployRecord        `yaml:"forge"`
+	// Chart is set for a service that runs a published chart (chart_source.go).
+	Chart *deployChart `yaml:"chart,omitempty"`
+	Forge deployRecord `yaml:"forge"`
 }
 
 // deployAutoscaling is the range KEDA keeps the Deployment in.
@@ -474,7 +485,7 @@ func (d *Deploys) GetDeployment(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, svc+"-"+env)
+	st, err := d.appStatus(ctx, svc, env, v)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("argo cd: %w", err))
 	}
@@ -557,7 +568,7 @@ func (d *Deploys) listService(ctx context.Context, head, svc, env string) ([]*fo
 		if err != nil {
 			return nil, err
 		}
-		st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, svc+"-"+e)
+		st, err := d.appStatus(ctx, svc, e, v)
 		if err != nil {
 			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("argo cd: %w", err))
 		}
@@ -719,6 +730,11 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if err := d.secretsAllowed(v); err != nil {
 		return nil, err
 	}
+	if v.Chart != nil {
+		if err := d.chartAllowed(ctx, svc, env, v.Chart); err != nil {
+			return nil, err
+		}
+	}
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
 		return nil, err
 	}
@@ -785,6 +801,20 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	v.Env = to
 	v.setAddress(addr)
 	v.forEnv(to)
+	if v.Chart != nil {
+		// The chart and its shared values go as staging ran them; the next
+		// environment's own values come from forge.yaml as it is now.
+		mc, err := d.manifestChart(ctx, svc)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the forge.yaml of %s in the deploy repo: %w", svc, err))
+		}
+		c := *v.Chart
+		c.EnvValues = mc.EnvValues(to)
+		v.Chart, v.Replicas = &c, 0
+		if err := d.chartAllowed(ctx, svc, to, &c); err != nil {
+			return nil, err
+		}
+	}
 	if err := d.secretsAllowed(v); err != nil {
 		return nil, err
 	}

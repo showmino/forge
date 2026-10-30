@@ -330,6 +330,42 @@ func (r *Repo) DeleteFile(_ context.Context, parent, _, p, message string) (stri
 	return sha, nil
 }
 
+// CommitFiles commits files in one commit on parent, which must be the
+// head; a nil content removes the path, which must then exist.
+func (r *Repo) CommitFiles(_ context.Context, parent, _ string, files map[string][]byte, message string) (string, error) {
+	r.mu.Lock()
+	hook := r.BeforeCommit
+	r.BeforeCommit = nil
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.init()
+	head := r.commits[len(r.commits)-1]
+	if head.sha != parent {
+		return "", github.ErrNotFastForward
+	}
+	next := make(map[string][]byte, len(head.files)+len(files))
+	for k, v := range head.files {
+		next[k] = v
+	}
+	for p, c := range files {
+		if c == nil {
+			if _, ok := next[p]; !ok {
+				return "", fmt.Errorf("%s: %w", p, github.ErrNotFound)
+			}
+			delete(next, p)
+			continue
+		}
+		next[p] = c
+	}
+	sha := fmt.Sprintf("%040x", len(r.commits))
+	r.commits = append(r.commits, repoCommit{sha: sha, files: next, message: message, time: time.Now()})
+	return sha, nil
+}
+
 // History returns the commits that changed path, newest first.
 func (r *Repo) History(_ context.Context, p string, limit int) ([]github.CommitInfo, error) {
 	r.mu.Lock()
@@ -384,6 +420,10 @@ type Argo struct {
 	// Lag is how long Argo takes to notice a new head; change it while
 	// running with SetLag.
 	Lag time.Duration
+	// Refused maps an app's name to the message Argo CD gives when its
+	// project does not allow one of the chart's objects; the app then never
+	// syncs. Set it before Run.
+	Refused map[string]string
 
 	mu sync.Mutex
 }
@@ -422,6 +462,7 @@ func (a *Argo) Run(ctx context.Context) {
 	defer t.Stop()
 	seen := map[string]time.Time{} // head -> first seen
 	synced := map[string]string{}  // app -> head last written
+	from := map[string]string{}    // app -> the file it comes from
 	for {
 		select {
 		case <-ctx.Done():
@@ -434,8 +475,7 @@ func (a *Argo) Run(ctx context.Context) {
 		}
 		if time.Since(seen[head]) >= a.lag() {
 			for name := range synced {
-				svc, env := name[:strings.LastIndex(name, "-")], name[strings.LastIndex(name, "-")+1:]
-				if slices.Contains(paths, "services/"+svc+"/"+env+"/values.yaml") {
+				if slices.Contains(paths, from[name]) {
 					continue
 				}
 				err := a.Dynamic.Resource(Applications).Namespace(a.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
@@ -446,12 +486,18 @@ func (a *Argo) Run(ctx context.Context) {
 		}
 		for _, p := range paths {
 			parts := strings.Split(p, "/")
-			if len(parts) != 4 || parts[0] != "services" || path.Base(p) != "values.yaml" {
+			// values.yaml is forge-services' app, chart.json forge-charts'.
+			if len(parts) != 4 || parts[0] != "services" || (path.Base(p) != "values.yaml" && path.Base(p) != "chart.json") {
 				continue
 			}
 			svc, env := parts[1], parts[2]
 			name := svc + "-" + env
-			a.ensureNamespace(ctx, name, svc, env)
+			if path.Base(p) == "chart.json" {
+				name += "-chart"
+			} else {
+				a.ensureNamespace(ctx, name, svc, env)
+			}
+			from[name] = p
 			if time.Since(seen[head]) < a.lag() || synced[name] == head {
 				continue
 			}
@@ -491,6 +537,7 @@ func (a *Argo) sync(ctx context.Context, name, head string) error {
 	a.mu.Lock()
 	reason, bad := a.Unhealthy[name]
 	a.mu.Unlock()
+	refused := a.Refused[name]
 	if bad {
 		health = map[string]any{"status": "Degraded"}
 		a.ensurePod(ctx, name, reason)
@@ -498,6 +545,13 @@ func (a *Argo) sync(ctx context.Context, name, head string) error {
 	status := map[string]any{
 		"sync":   map[string]any{"status": "Synced", "revisions": []any{"chart", head}},
 		"health": health,
+	}
+	if refused != "" {
+		status = map[string]any{
+			"sync":       map[string]any{"status": "OutOfSync", "revisions": []any{"chart", head}},
+			"health":     map[string]any{"status": "Missing"},
+			"conditions": []any{map[string]any{"type": "SyncError", "message": refused}},
+		}
 	}
 	apps := a.Dynamic.Resource(Applications).Namespace(a.Namespace)
 	app := &unstructured.Unstructured{Object: map[string]any{

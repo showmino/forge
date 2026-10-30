@@ -171,7 +171,7 @@ func TestConnectRepoRefuses(t *testing.T) {
 		{"a repo the App cannot see", "writer", with("missing", nil), connect.CodeFailedPrecondition, "install the App"},
 		{"connected already", "member", with("done", nil), connect.CodeFailedPrecondition, "register it with forge service register"},
 		{"nothing to build", "member", with("docs", nil), connect.CodeFailedPrecondition, "add a Dockerfile"},
-		{"a template too", "member", with("tool", func(r *forgev1.CreateServiceRequest) { r.Template = "templates/svc" }), connect.CodeInvalidArgument, "one of a template, an image or a repo"},
+		{"a template too", "member", with("tool", func(r *forgev1.CreateServiceRequest) { r.Template = "templates/svc" }), connect.CodeInvalidArgument, "one of a template, an image, a repo or a chart"},
 		{"run options", "member", with("tool", func(r *forgev1.CreateServiceRequest) { r.RunOptions = &forgev1.RunOptions{Replicas: 2} }), connect.CodeInvalidArgument, "only port and health"},
 	} {
 		_, err := e.create(ctx, tc.token, tc.req)

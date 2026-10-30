@@ -42,6 +42,11 @@ spec:
     {{- end }}
     - {server: https://kubernetes.default.svc, namespace: "*-staging"}
     - {server: https://kubernetes.default.svc, namespace: "*-production"}
+    {{- if .Values.deploys.charts.enabled }}
+    # A service that runs a chart: Forge's chart makes the chart's own
+    # project here (forge-chart-<service>-<env>; see charts.yaml).
+    - {server: https://kubernetes.default.svc, namespace: argocd}
+    {{- end }}
   clusterResourceWhitelist:
     - {group: "", kind: Namespace}
   namespaceResourceWhitelist:
@@ -60,6 +65,9 @@ spec:
     {{- if .Values.apps.publicDomains }}
     # The DNS record of a public address (apps.publicDomains).
     - {group: kro.run, kind: CloudflareRecordsApplication}
+    {{- end }}
+    {{- if .Values.deploys.charts.enabled }}
+    - {group: argoproj.io, kind: AppProject}
     {{- end }}
     # Not deployed by the chart: Argo CD leaves out of an application's tree
     # every kind its project does not allow, so without these the UI shows a
@@ -122,6 +130,17 @@ spec:
                   annotations: {{ .Values.apps.ingress.annotations | toJson }}
                   tls: {{ .Values.apps.ingress.tls }}
                   domain: {{ include "forge.appsDomain" . | quote }}
+              {{- if .Values.deploys.charts.enabled }}
+              # The project of a chart service's chart (charts.yaml).
+              chartProject:
+                namespace: argocd
+                sourceRepos:
+                  {{- range .Values.deploys.charts.allowedRepos }}
+                  - {{ . | quote }}
+                  - {{ printf "%s/*" . | quote }}
+                  {{- end }}
+                deployRepo: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+              {{- end }}
         - repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
           targetRevision: main
           ref: values

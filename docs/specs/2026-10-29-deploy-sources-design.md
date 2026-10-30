@@ -131,6 +131,10 @@ Install a published chart, with values, through the same track.
   values; each environment keeps its own `environments.<env>.values`.
 - **Policy:** allowed chart repositories, like registries in phase 9.
 
+As built: `2026-10-30-phase-11-helm-charts-design.md` (a project per
+service instead of one shared project, so a chart reaches only its own
+namespace).
+
 **Exit gate:** podinfo is installed as a service, reachable at its address,
 promoted, upgraded to a newer chart version and rolled back; a chart that
 needs a ClusterRole is refused with a message that names it.
@@ -184,6 +188,6 @@ production in one step.
    at `services/<name>/forge.yaml`, as above (not a small repo per service).
 4. **Source deploy builds:** a pull request that adds Forge's build
    workflow, as above (not builds in the cluster).
-5. **Charts (open, decided before phase 11):** namespaced resources only, as
-   proposed? Charts that need cluster-wide objects would stay something the
-   platform team installs by hand.
+5. **Charts:** namespaced resources only, as proposed (the owner, 2026-10-30).
+   Charts that need cluster-wide objects stay something the platform team
+   installs by hand.

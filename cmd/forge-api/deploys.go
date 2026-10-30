@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/showmino/forge/internal/chartrepo"
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/server"
@@ -47,6 +48,9 @@ type deployFlags struct {
 	// allowedRegistries is --allowed-registries: where images of services
 	// without a repo may come from.
 	allowedRegistries string
+	// charts is --charts, allowedChartRepos --allowed-chart-repos.
+	charts            bool
+	allowedChartRepos string
 }
 
 // deploys returns the deploy service, or nil when deploys are off. It reuses
@@ -126,6 +130,22 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 	// Images of services without a repo: their digests come from the same
 	// registry client that checks the services' own images.
 	digests, _ := images.(server.ImageDigester)
+	// Charts: an OCI chart is looked up with the same registry client.
+	var chartRepos []string
+	for _, r := range strings.Split(f.allowedChartRepos, ",") {
+		if r = strings.TrimSpace(r); r == "" {
+			continue
+		}
+		if err := manifest.ValidChartRepo(r); err != nil {
+			return nil, fmt.Errorf("--allowed-chart-repos: %w", err)
+		}
+		chartRepos = append(chartRepos, r)
+	}
+	var charts server.ChartChecker
+	if f.charts {
+		reg, _ := images.(chartrepo.Registry)
+		charts = &chartrepo.Client{Registry: reg}
+	}
 	// The promotion rules: compiled here, with no request to bound them.
 	rules, err := policy.New(context.Background())
 	if err != nil {
@@ -137,6 +157,7 @@ func deploys(f deployFlags, app *github.App, previewDomain string, cluster *serv
 		PublicDomains: public, DNSTunnel: f.publicTunnel, HostTaken: server.ResolvesInDNS, ArgoURL: argoURL,
 		SecretVaults: vaults, SecretDeniedItems: denied, SecretBackend: f.secretBackend,
 		Cluster: cluster, GitHub: gh, Images: images, Digests: digests, AllowedRegistries: allowed,
+		Charts: f.charts, ChartChecker: charts, AllowedChartRepos: chartRepos,
 		Repo:    &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"},
 		Catalog: catalog, Operations: ops, Resources: f.resources, Releases: gh,
 		Org: org, Registry: f.registry, Domain: domain, SyncTimeout: sync, NamespaceTimeout: nsTimeout, Log: log,

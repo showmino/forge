@@ -30,7 +30,8 @@ func (d *Deploys) promotionAllowed(ctx context.Context, svc, from, to string, sr
 	if v, err := parseValues(checked); err != nil || !reflect.DeepEqual(v, src) {
 		return connect.NewError(connect.CodeAborted, fmt.Errorf("%s changed while the promotion was checked; try again", from))
 	}
-	st, err := d.o.Cluster.Application(ctx, d.o.ArgoNamespace, svc+"-"+from)
+	// For a service that runs a chart, its chart's application counts too.
+	st, err := d.appStatus(ctx, svc, from, src)
 	if err != nil {
 		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("argo cd, so the promotion could not be checked: %w", err))
 	}

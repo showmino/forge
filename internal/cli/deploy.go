@@ -86,7 +86,7 @@ service name defaults to forge.yaml's.`
 }
 
 func newDeployStartCmd(f *Factory) *cobra.Command {
-	var env, ref, bump string
+	var env, ref, bump, values string
 	var dryRun, wait bool
 	cmd := &cobra.Command{
 		Use:   "start [service] --env staging|production",
@@ -98,10 +98,16 @@ production gets a final version (v0.3.1), each with a GitHub release.
 A service without a repo (forge create --image) runs its image's tag: --ref
 is the tag to run (default the one its forge.yaml names), and a new tag is
 written into that forge.yaml. The tag is pinned to its digest, so promoting
-moves exactly what staging ran, and the version is the tag.`,
+moves exactly what staging ran, and the version is the tag.
+
+A service that runs a chart (forge create --chart) runs its chart's version:
+--ref is the version to run (default the one its forge.yaml names), and
+--values a YAML file of new chart values for every environment. Both are
+written into that forge.yaml once the deploy has succeeded.`,
 		Example: `  forge deploy start payments --env staging
   forge deploy start --env staging --ref v1.4.2    # in a service repo
-  forge deploy start web --env staging --ref 1.28  # a service that runs nginx`,
+  forge deploy start web --env staging --ref 1.28  # a service that runs nginx
+  forge deploy start podinfo --env staging --ref 6.8.0 --values podinfo.yaml`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if env == "" {
@@ -120,6 +126,12 @@ moves exactly what staging ran, and the version is the tag.`,
 					ref = sha // in GitHub Actions: the commit the job runs at
 				}
 			}
+			var chartValues string
+			if values != "" {
+				if chartValues, err = readValues("--values", values); err != nil {
+					return err
+				}
+			}
 			format, err := f.Format()
 			if err != nil {
 				return err
@@ -132,6 +144,7 @@ moves exactly what staging ran, and the version is the tag.`,
 			}
 			resp, err := c.Deploys.StartDeploy(ctx, connect.NewRequest(&forgev1.StartDeployRequest{
 				Service: "services/" + svc, Env: env, Ref: ref, RequestId: client.NewRequestID(), ValidateOnly: dryRun, Bump: level,
+				ChartValues: chartValues,
 			}))
 			if err != nil {
 				return err
@@ -148,7 +161,8 @@ moves exactly what staging ran, and the version is the tag.`,
 		},
 	}
 	cmd.Flags().StringVar(&env, "env", "", "staging or production")
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit (default $GITHUB_SHA in GitHub Actions, else main); for a service without a repo, the image tag")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit (default $GITHUB_SHA in GitHub Actions, else main); for a service without a repo, the image tag or the chart version")
+	cmd.Flags().StringVar(&values, "values", "", "for a service that runs a chart: a YAML file of new chart values for every environment")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check and resolve without deploying")
 	cmd.Flags().BoolVar(&wait, "wait", true, "watch the deploy until it ends")
 	cmd.Flags().StringVar(&bump, "bump", "", "for a first deploy of a commit to production: patch (default), minor or major")

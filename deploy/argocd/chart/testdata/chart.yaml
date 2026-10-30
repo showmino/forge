@@ -1,0 +1,31 @@
+name: podinfo
+env: staging
+image: ""
+port: 9898
+health: ""
+replicas: 1
+host: podinfo-staging.showmino.com
+listener: public-showmino-com
+dns:
+  name: podinfo-staging
+  zone: showmino-com
+  tunnel: production
+chart:
+  repo: oci://ghcr.io/stefanprodan/charts
+  name: podinfo
+  version: 6.7.1
+  values:
+    replicaCount: 2
+  expose:
+    service: podinfo
+    port: 9898
+forge:
+  service: services/podinfo
+  env: staging
+  ref: 6.7.1
+  commit: 6.7.1
+  actor: ana@example.com
+  operation: operations/op_000000000001
+  kind: deploy
+  time: "2026-10-30T12:00:00Z"
+  version: 6.7.1

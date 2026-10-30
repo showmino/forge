@@ -1,0 +1,9 @@
+# want: deploys.charts.allowedRepos: "http://charts.example.com" must be oci://<registry>/<path> or https://<host>/<path>
+apps:
+  domain: apps.acme.example
+  pullSecret: ghcr
+deploys:
+  enabled: true
+  charts:
+    enabled: true
+    allowedRepos: [http://charts.example.com]

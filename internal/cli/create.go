@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -20,6 +22,7 @@ import (
 
 func newCreateCmd(f *Factory) *cobra.Command {
 	var tmpl, team, image, health string
+	var chart, chartRepo, chartVersion, expose, valuesFile, stagingValues, productionValues string
 	var owners, sets, writable []string
 	var dryRun, deploy bool
 	var port int
@@ -53,24 +56,47 @@ set. The image must run as a non-root user given by number (its USER): a
 root image is refused. The root filesystem is read-only except /tmp:
 --writable names more folders the image writes, each an empty folder. forge then deploys it to staging and watches the deploy (--deploy=false
 does not); with -o json or yaml it prints the deployment. Deploy a new tag
-with 'forge deploy start <name> --env staging --ref <tag>'.`,
+with 'forge deploy start <name> --env staging --ref <tag>'.
+
+With --chart, the service runs a published Helm chart (--chart-repo
+oci://... or https://..., --chart-version one exact version) and gets no
+repo: its forge.yaml, with chart, is kept in the deploy repo. --expose
+<service>:<port> names the chart's Service that gets the address (the
+chart's release is named after the service). --values, --staging-values and
+--production-values are YAML files of the chart's values. The chart may make
+only resources inside its namespace, and its pods may not be privileged. forge
+then deploys it to staging and watches the deploy, as for --image. Deploy a
+new version with 'forge deploy start <name> --env staging --ref <version>',
+and new values with --values there.`,
 		Example: `  forge create payments --template go-grpc --team billing
   forge create ledger --template go-grpc@v1.0.0 --team billing --owner ana@example.com --set port=9090
   forge create shop --template nextjs --team web --replicas 2 --env LOG_LEVEL=info \
     --secret stripe=vaults/Apps/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
   forge create payments --template go-grpc --team billing --dry-run
-  forge create web --image nginxinc/nginx-unprivileged:1.27 --health / --team web`,
+  forge create web --image nginxinc/nginx-unprivileged:1.27 --health / --team web
+  forge create podinfo --chart podinfo --chart-repo oci://ghcr.io/stefanprodan/charts --chart-version 6.7.1 \
+    --expose podinfo:9898 --values podinfo.yaml --team web`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			if !manifest.ValidID(id) {
 				return exitcode.Usagef("%q is not a valid service name (lowercase letters, digits and '-')", id)
 			}
+			sources := 0
+			for _, s := range []string{tmpl, image, chart} {
+				if s != "" {
+					sources++
+				}
+			}
 			switch {
-			case tmpl == "" && image == "":
-				return exitcode.Usagef("--template or --image is required").WithHint("see 'forge template list'")
-			case tmpl != "" && image != "":
-				return exitcode.Usagef("--template and --image: use one, not both")
+			case sources == 0:
+				return exitcode.Usagef("--template, --image or --chart is required").WithHint("see 'forge template list'")
+			case sources > 1:
+				return exitcode.Usagef("--template, --image and --chart: use one")
+			case chart == "" && (chartRepo != "" || chartVersion != "" || expose != "" || valuesFile != "" || stagingValues != "" || productionValues != ""):
+				return exitcode.Usagef("--chart-repo, --chart-version, --expose and the values files are for --chart")
+			case chart != "" && (len(sets) > 0 || port != 0 || health != "" || len(writable) > 0):
+				return exitcode.Usagef("--set, --port, --health and --writable do not apply to a chart: set them in its values")
 			case image != "" && len(sets) > 0:
 				return exitcode.Usagef("--set is for a template's parameters; an image has none")
 			case tmpl != "" && (port != 0 || health != "" || len(writable) > 0):
@@ -113,6 +139,16 @@ with 'forge deploy start <name> --env staging --ref <tag>'.`,
 			c, err := f.Client(ctx, true)
 			if err != nil {
 				return err
+			}
+			if chart != "" {
+				src, err := chartSource(chart, chartRepo, chartVersion, expose, valuesFile, stagingValues, productionValues)
+				if err != nil {
+					return err
+				}
+				return f.createFromImage(ctx, c, format, &forgev1.CreateServiceRequest{
+					ServiceId: id, Chart: src, OwnerTeam: team, Owners: owners,
+					RequestId: client.NewRequestID(), ValidateOnly: dryRun, RunOptions: runOptions,
+				}, deploy)
 			}
 			if image != "" {
 				return f.createFromImage(ctx, c, format, &forgev1.CreateServiceRequest{
@@ -185,7 +221,14 @@ with 'forge deploy start <name> --env staging --ref <tag>'.`,
 	fl.IntVar(&port, "port", 0, "with --image: the port it listens on (default 8080)")
 	fl.StringVar(&health, "health", "", "with --image: the path its readiness is probed at (default /healthz)")
 	fl.StringSliceVar(&writable, "writable", nil, "with --image: folders it writes besides /tmp, such as /var/cache/nginx (repeatable)")
-	fl.BoolVar(&deploy, "deploy", true, "with --image: deploy it to staging and watch the deploy")
+	fl.BoolVar(&deploy, "deploy", true, "with --image or --chart: deploy it to staging and watch the deploy")
+	fl.StringVar(&chart, "chart", "", "a published Helm chart to run instead of a template, by name; the service gets no repo")
+	fl.StringVar(&chartRepo, "chart-repo", "", "with --chart: its repository, oci://<registry>/<path> or https://<host>/<path>")
+	fl.StringVar(&chartVersion, "chart-version", "", "with --chart: one exact version, such as 6.7.1")
+	fl.StringVar(&expose, "expose", "", "with --chart: the chart's Service that gets the address, as <service>:<port>")
+	fl.StringVar(&valuesFile, "values", "", "with --chart: a YAML file of the chart's values")
+	fl.StringVar(&stagingValues, "staging-values", "", "with --chart: a YAML file of values for staging only, over --values")
+	fl.StringVar(&productionValues, "production-values", "", "with --chart: a YAML file of values for production only, over --values")
 	run.register(fl)
 	return cmd
 }
@@ -268,7 +311,7 @@ func (f *Factory) completeParams(t *forgev1.Template, raw map[string]string) err
 var stepVerbs = map[string]string{
 	"fetch": "fetched template", "render": "rendered", "create_repo": "created",
 	"grant_team": "gave access to", "push": "pushed initial commit", "register": "registered", "pull_request": "opened pull request",
-	"check_repo": "checked",
+	"check_repo": "checked", "check_chart": "checked",
 }
 
 // errMayStillFinish wraps a stream error after the server may have started
@@ -352,8 +395,8 @@ func (f *Factory) printPlan(format output.Format, tmpl string, file bool, p *for
 	return nil
 }
 
-// createFromImage creates a service that runs an image and, when deploy is
-// set, deploys it to staging and watches the deploy.
+// createFromImage creates a service that runs an image or a chart and, when
+// deploy is set, deploys it to staging and watches the deploy.
 func (f *Factory) createFromImage(ctx context.Context, c *client.Client, format output.Format, req *forgev1.CreateServiceRequest, deploy bool) error {
 	sc, err := f.StreamClient(ctx)
 	if err != nil {
@@ -372,8 +415,12 @@ func (f *Factory) createFromImage(ctx context.Context, c *client.Client, format 
 		if format != output.Table {
 			return output.Print(f.IO.Out, format, output.View{Names: final.GetPlan().GetFiles(), Data: final.GetPlan()})
 		}
+		runs := req.GetImage()
+		if ch := req.GetChart(); ch != nil {
+			runs = fmt.Sprintf("chart %s %s from %s", ch.GetName(), ch.GetVersion(), ch.GetRepo())
+		}
 		_, err := fmt.Fprintf(f.IO.Out, "Would create services/%s, running %s, with its forge.yaml in the deploy repo:\n  %s\n",
-			id, req.GetImage(), strings.Join(final.GetPlan().GetFiles(), "\n  "))
+			id, runs, strings.Join(final.GetPlan().GetFiles(), "\n  "))
 		return err
 	case final.GetFailure() != nil:
 		fl := final.GetFailure()
@@ -401,4 +448,43 @@ func (f *Factory) createFromImage(ctx context.Context, c *client.Client, format 
 		return exitcode.From(err).WithHint(fmt.Sprintf("services/%s is created; deploy it with 'forge deploy start %s --env staging'", id, id))
 	}
 	return f.finishDeploy(ctx, sc, format, resp.Msg.GetOperation(), id, "staging", true)
+}
+
+// chartSource is the --chart flags as a create's chart.
+func chartSource(name, repo, version, expose, values, staging, production string) (*forgev1.ChartSource, error) {
+	if repo == "" || version == "" || expose == "" {
+		return nil, exitcode.Usagef("--chart needs --chart-repo, --chart-version and --expose")
+	}
+	svc, p, ok := strings.Cut(expose, ":")
+	port, err := strconv.Atoi(p)
+	if !ok || svc == "" || err != nil || port < 1 || port > 65535 {
+		return nil, exitcode.Usagef("--expose %q must be <service>:<port>, such as podinfo:9898", expose)
+	}
+	src := &forgev1.ChartSource{Repo: repo, Name: name, Version: version, ExposeService: svc, ExposePort: int32(port)} //nolint:gosec // checked above
+	for _, v := range []struct {
+		flag, path string
+		to         *string
+	}{{"--values", values, &src.Values}, {"--staging-values", staging, &src.StagingValues}, {"--production-values", production, &src.ProductionValues}} {
+		if v.path == "" {
+			continue
+		}
+		data, err := readValues(v.flag, v.path)
+		if err != nil {
+			return nil, err
+		}
+		*v.to = data
+	}
+	return src, nil
+}
+
+// readValues reads a YAML file of chart values.
+func readValues(flag, path string) (string, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // the user names the file to send
+	if err != nil {
+		return "", exitcode.Usagef("%s: %v", flag, err)
+	}
+	if len(data) > manifest.MaxChartValues {
+		return "", exitcode.Usagef("%s: %s takes %d bytes; at most %d", flag, path, len(data), manifest.MaxChartValues)
+	}
+	return string(data), nil
 }

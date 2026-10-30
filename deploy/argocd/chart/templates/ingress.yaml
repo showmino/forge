@@ -37,6 +37,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ .Values.name }}
-                port: {number: 80}
+                name: {{ include "forge.backendName" . }}
+                port: {number: {{ include "forge.backendPort" . }}}
 {{- end }}

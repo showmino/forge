@@ -1,0 +1,82 @@
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: forge
+spec:
+  hard:
+    # Room for the app and, next to it, a database of up to three instances.
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    pods: "15"
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: forge
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {cpu: 500m, memory: 512Mi}
+---
+# Source: forge-chart/templates/chartproject.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: forge-chart-podinfo-staging
+  namespace: argocd
+spec:
+  description: "The chart podinfo of the Forge service podinfo in staging"
+  sourceRepos:
+    - "*"
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: "podinfo-staging"}
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: "*", kind: "*"}
+  namespaceResourceBlacklist:
+    - {group: gateway.networking.k8s.io, kind: "*"}
+    - {group: networking.k8s.io, kind: Ingress}
+    - {group: extensions, kind: Ingress}
+    - {group: "", kind: ResourceQuota}
+    - {group: "", kind: LimitRange}
+    - {group: kro.run, kind: "*"}
+    - {group: onepassword.com, kind: "*"}
+    - {group: external-secrets.io, kind: "*"}
+    - {group: argoproj.io, kind: "*"}
+---
+# Source: forge-chart/templates/dns.yaml
+# The public address's DNS record: the platform's CloudflareRecordsApplication
+# makes a proxied CNAME <name>.<the zone's domain> to the cluster's Cloudflare
+# tunnel (a Crossplane Record underneath). It goes when the service goes. The
+# object is named after the zone too, so that a service which moves to another
+# domain gets a new object and the old record is removed with the old one.
+apiVersion: kro.run/v1alpha1
+kind: CloudflareRecordsApplication
+metadata:
+  name: "podinfo-staging-showmino-com"
+spec:
+  name: "podinfo-staging"
+  environment: "production"
+  dnsZones:
+    zones: "showmino-com"
+---
+# Source: forge-chart/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: podinfo
+spec:
+  parentRefs:
+    # A public address attaches to the Gateway's public listener; an internal
+    # one to the listener of its environment.
+    - {name: forge-previews, namespace: forge, sectionName: public-showmino-com}
+  hostnames: ["podinfo-staging.showmino.com"]
+  rules:
+    - backendRefs:
+        - {name: podinfo, port: 9898}

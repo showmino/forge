@@ -606,6 +606,27 @@ func (c *Cluster) WaitServiceNamespace(ctx context.Context, service, env string,
 	}
 }
 
+// Pod Security Admission levels of a namespace that runs a published chart:
+// enforced, pods may not be privileged, share the node's network, PIDs or
+// files, or add capabilities beyond the defaults; Kubernetes warns about
+// anything short of the restricted level.
+const (
+	podSecurityEnforce = "pod-security.kubernetes.io/enforce"
+	podSecurityWarn    = "pod-security.kubernetes.io/warn"
+)
+
+// RestrictPodSecurity labels <service>-<env>, which must be Forge's, so
+// that Kubernetes refuses privileged pods in it: a chart's pods are not
+// Forge's, and run as the chart says.
+func (c *Cluster) RestrictPodSecurity(ctx context.Context, service, env string) error {
+	if err := c.checkServiceNamespace(ctx, service, env); err != nil {
+		return err
+	}
+	patch := []byte(`{"metadata":{"labels":{"` + podSecurityEnforce + `":"baseline","` + podSecurityWarn + `":"restricted"}}}`)
+	_, err := c.Kube.CoreV1().Namespaces().Patch(ctx, service+"-"+env, types.MergePatchType, patch, metav1.PatchOptions{})
+	return err
+}
+
 // WriteServicePullSecret copies the pull secret into <service>-<env>.
 func (c *Cluster) WriteServicePullSecret(ctx context.Context, service, env string) error {
 	if err := c.checkServiceNamespace(ctx, service, env); err != nil {

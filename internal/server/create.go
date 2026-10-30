@@ -96,9 +96,21 @@ func validateCreate(req *forgev1.CreateServiceRequest) error {
 			sources++
 		}
 	}
+	if req.GetChart() != nil {
+		sources++
+	}
 	switch {
 	case sources > 1:
-		return invalid("ask for one of a template, an image or a repo")
+		return invalid("ask for one of a template, an image, a repo or a chart")
+	case req.GetChart() != nil:
+		if req.GetTemplateVersion() != "" || len(req.GetParameters()) > 0 {
+			return invalid("template_version and parameters are for a template; a chart has none")
+		}
+		if ro := req.GetRunOptions(); ro != nil && !proto.Equal(ro, &forgev1.RunOptions{
+			Domain: ro.GetDomain(), NetworkOnly: ro.GetNetworkOnly(), StagingNetworkOnly: ro.GetStagingNetworkOnly(),
+		}) {
+			return invalid("a chart takes only the address from run_options (domain, network_only, staging_network_only); set the rest in its values")
+		}
 	case req.GetRepoUrl() != "":
 		if req.GetTemplateVersion() != "" || len(req.GetParameters()) > 0 {
 			return invalid("template_version and parameters are for a template; a repo has none")
@@ -151,6 +163,13 @@ func (c *creator) run(ctx context.Context, req *forgev1.CreateServiceRequest, st
 		}
 	case req.GetImage() != "":
 		if err := c.imageCreateReady(); err != nil {
+			return err
+		}
+	case req.GetChart() != nil:
+		if err := c.imageCreateReady(); err != nil {
+			return err
+		}
+		if err := c.deploys.chartsReady(); err != nil {
 			return err
 		}
 	default:
@@ -213,6 +232,8 @@ func (c *creator) create(ctx context.Context, req *forgev1.CreateServiceRequest,
 		return c.fromRepo(ctx, req, stream)
 	case req.GetImage() != "":
 		return c.fromImage(ctx, req, stream)
+	case req.GetChart() != nil:
+		return c.fromChart(ctx, req, stream)
 	}
 	return c.scaffold(ctx, req, stream)
 }

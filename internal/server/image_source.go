@@ -158,7 +158,7 @@ func (d *Deploys) serviceImages() string {
 // tag ref when one is given. retag reports that ref changes the image: once
 // the deploy has succeeded, the tag is written into forge.yaml, so that the
 // next deploy runs it too.
-func (d *Deploys) imageSource(ctx context.Context, sid, ref string) (src source, retag bool, err error) {
+func (d *Deploys) imageSource(ctx context.Context, sid, ref string, chartValues map[string]any) (src source, retag bool, err error) {
 	data, err := d.o.Repo.Read(ctx, manifestPath(sid), "")
 	if errors.Is(err, github.ErrNotFound) {
 		return src, false, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
@@ -170,6 +170,12 @@ func (d *Deploys) imageSource(ctx context.Context, sid, ref string) (src source,
 	mf, err := manifest.Parse(data)
 	if err != nil {
 		return src, false, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s in the deploy repo is invalid: %w", manifestPath(sid), err))
+	}
+	if mf.IsChart() {
+		return d.chartSource(ctx, sid, mf, ref, chartValues)
+	}
+	if chartValues != nil {
+		return src, false, invalidArg("%s%s runs an image, not a chart: chart values do not apply", servicePrefix, sid)
 	}
 	image := mf.RunImage()
 	if image == "" {
@@ -198,7 +204,7 @@ func (d *Deploys) imageSource(ctx context.Context, sid, ref string) (src source,
 
 // resolve is what a deploy of service at ref runs: from its repo, or for a
 // service without one, the image its forge.yaml in the deploy repo names.
-func (d *Deploys) resolve(ctx context.Context, service, ref string) (source, bool, error) {
+func (d *Deploys) resolve(ctx context.Context, service, ref string, chartValues map[string]any) (source, bool, error) {
 	sid, ok := strings.CutPrefix(service, servicePrefix)
 	if !ok || sid == "" {
 		return source{}, false, invalidArg("service %q must be services/<name>", service)
@@ -208,7 +214,10 @@ func (d *Deploys) resolve(ctx context.Context, service, ref string) (source, boo
 		return source{}, false, err
 	}
 	if repoless {
-		return d.imageSource(ctx, sid, ref)
+		return d.imageSource(ctx, sid, ref, chartValues)
+	}
+	if chartValues != nil {
+		return source{}, false, invalidArg("%s has a repo: chart values are for a service that runs a chart", service)
 	}
 	src, err := resolveSource(ctx, d.o.Catalog, d.o.GitHub, d.o.Org, d.o.Registry, service, ref)
 	return src, false, err

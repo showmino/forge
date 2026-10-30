@@ -39,3 +39,13 @@ jobs: []
 writable: []
 # Production only: {min: 2, max: 6}; KEDA then sets the replica count.
 autoscaling: null
+# A service that runs a published chart (forge.yaml chart:): Forge renders
+# only the address, the quota and the DNS record, and the route goes to
+# chart.expose. The chart itself is another Argo CD application.
+#   chart: {repo: oci://ghcr.io/stefanprodan/charts, name: podinfo, version: 6.7.1, expose: {service: podinfo, port: 9898}}
+chart: null
+# The Argo CD project of a chart service's chart, set by the platform (the
+# ApplicationSet): where projects live, the chart repositories allowed (an
+# OCI one twice: the repository, and <repository>/* for its charts), and the
+# deploy repo its values come from.
+chartProject: {namespace: argocd, sourceRepos: [], deployRepo: ""}

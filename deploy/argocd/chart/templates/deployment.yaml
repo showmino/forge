@@ -1,3 +1,6 @@
+{{- /* A service that runs a chart (chart.expose set) has no pods of Forge's:
+the chart brings them, in an Argo CD application of its own. */ -}}
+{{- if not .Values.chart }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -57,3 +60,4 @@ spec:
             {{- range $i, $p := .Values.writable }}
             - {name: writable-{{ $i }}, mountPath: {{ $p | quote }}}
             {{- end }}
+{{- end }}

@@ -364,6 +364,30 @@ into that `forge.yaml`; a rollback leaves `forge.yaml` as it is.
 Such a service has no previews (they are made from a branch), and deleting it
 also removes its `forge.yaml` from the deploy repo. See
 `docs/specs/2026-10-29-deploy-sources-design.md`, phase 9.
+`forge create <name> --chart <chart> --chart-repo <repo> --chart-version
+<version> --expose <service>:<port> --team <team>` makes a service without a
+repo that runs a published Helm chart (`oci://ghcr.io/stefanprodan/charts`,
+`podinfo`, `6.7.1`); `--values`, `--staging-values` and `--production-values`
+are YAML files of its values. Its `forge.yaml`, with `chart`, lives in the
+deploy repo. forge-api checks the chart rules (`policy/charts.rego`: the
+repositories `--allowed-chart-repos` allows) and finds the version in its
+repository. A deploy writes the environment's `values.yaml` (Forge's own
+chart then makes only the address, the quota, the DNS record and the
+chart's Argo CD project), labels the namespace so that Kubernetes refuses
+privileged pods (`pod-security.kubernetes.io/enforce: baseline`), then
+writes `chart.json` and `chart-values.yaml`, which the `forge-charts`
+ApplicationSet turns into `<name>-<env>-chart` in the project
+`forge-chart-<name>-<env>`: namespaced resources in that namespace only, and
+no routes, quotas, DNS records or secrets operators' objects. A chart that
+needs more fails its deploy with `chart_not_allowed`, naming the object. The
+release is named after the service, and `--expose` names its Service that
+gets the address. `forge deploy start <name> --env staging --ref 6.8.0`
+upgrades it, and `--values <file>` there deploys new values; both are written
+into `forge.yaml` once deployed. Promote copies the version and the shared
+values, with production's own values from `forge.yaml`; rollback restores
+both. forge-api runs it with `--charts` (`FORGE_CHARTS=1`, the chart's
+`deploys.charts.enabled`). See
+`docs/specs/2026-10-30-phase-11-helm-charts-design.md`.
 `forge service connect github.com/<org>/<repo> --team <team>` connects an
 existing repo of the organization that has a Dockerfile, or Go, Node or
 Python code Forge proposes one for: forge-api registers the service and opens

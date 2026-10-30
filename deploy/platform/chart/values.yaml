@@ -233,6 +233,18 @@ deploys:
   # Existing namespaces named like *-staging or *-production that are not
   # Forge's: Argo CD never deploys a service into them.
   excludedNamespaces: []
+  # Services that run a published Helm chart (forge create --chart). Each
+  # environment gets a second Argo CD application, <service>-<env>-chart, in
+  # an AppProject of its own: namespaced resources only, in its namespace
+  # only, and none of the kinds that would take an address, a DNS record, a
+  # quota or a platform secret. Turning it on lets forge-services make
+  # AppProjects in the namespace argocd.
+  charts:
+    enabled: false
+    # Chart repositories such services may use, such as
+    # [oci://ghcr.io/stefanprodan/charts, https://charts.example.com]. Empty
+    # allows any.
+    allowedRepos: []
 
 # Resources: `forge resource` plans and applies a service's databases
 # (CloudNativePG clusters, the operator must be installed) with OpenTofu Jobs
