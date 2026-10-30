@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -86,6 +87,11 @@ type Options struct {
 func New(o Options) (http.Handler, error) {
 	if o.Authenticator == nil {
 		return nil, errors.New("server: an Authenticator is required")
+	}
+	for flag, label := range map[string]string{"--ci-runner": o.CIRunner, "--ci-deploy-runner": o.CIDeployRunner} {
+		if label != "" && !runnerLabel.MatchString(label) {
+			return nil, fmt.Errorf("server: %s %q must be one runner label, such as ubuntu-latest or self-hosted", flag, label)
+		}
 	}
 	if o.Catalog == nil {
 		o.Catalog = NewCatalog(nil)

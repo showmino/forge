@@ -133,6 +133,12 @@ func TestProposeFiles(t *testing.T) {
 	if url, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); err != nil || url != "https://github.com/showmino/lz/pull/3" {
 		t.Errorf("retry: %q %v", url, err)
 	}
+	// A fresh proposal never takes over a branch, even one with a pull request.
+	fresh := p
+	fresh.Fresh = true
+	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", fresh); !errors.Is(err, ErrBranchExists) {
+		t.Errorf("fresh over an open pull request: %v", err)
+	}
 	// A branch without a pull request is someone else's: refused.
 	f.mu.Lock()
 	f.refs["forge/stale"] = "cx"

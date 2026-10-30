@@ -252,12 +252,17 @@ func dockerfile(in Input, has func(string) bool) (docker, error) {
 	return docker{}, fmt.Errorf("no Dockerfile, and no go.mod, package.json, requirements.txt or pyproject.toml at its root: add a Dockerfile: %w", ErrNoDockerfile)
 }
 
-// commands are the <name> of each cmd/<name>/main.go, sorted.
+// plainName is a folder name that is safe to write into a Dockerfile's RUN.
+var plainName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// commands are the <name> of each cmd/<name>/main.go, sorted. A name with
+// anything but letters, digits, '.', '_' and '-' is left out: it would go
+// into the Dockerfile's shell.
 func commands(paths []string) []string {
 	var out []string
 	for _, p := range paths {
 		if rest, ok := strings.CutPrefix(p, "cmd/"); ok {
-			if name, file, ok := strings.Cut(rest, "/"); ok && file == "main.go" {
+			if name, file, ok := strings.Cut(rest, "/"); ok && file == "main.go" && plainName.MatchString(name) && name != "." && name != ".." {
 				out = append(out, name)
 			}
 		}

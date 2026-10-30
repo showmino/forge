@@ -92,6 +92,11 @@ func (c *creator) fromRepo(ctx context.Context, req *forgev1.CreateServiceReques
 		return nil, err
 	}
 	defer release()
+	releaseRepo, err := c.claimRepo(owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseRepo()
 	if exists, err := c.catalog.has(ctx, servicePrefix+id); err != nil {
 		return nil, err
 	} else if exists {
@@ -210,10 +215,13 @@ func (c *creator) fromRepo(ctx context.Context, req *forgev1.CreateServiceReques
 	if plan.RegistrySecrets {
 		body += fmt.Sprintf("\nThe workflow logs in to %s with the repo secrets FORGE_REGISTRY_USERNAME and FORGE_REGISTRY_PASSWORD: add them before merging.\n", registry)
 	}
+	body += "\nThe deploy job needs the organization variable FORGE_API_URL, and a runner that reaches the Forge API there.\n"
 	url, err := c.repos.ProposeFiles(work, owner, repo, github.Proposal{
 		Branch: connectBranch, Title: "Connect " + id + " to Forge", Body: body,
 		Message: "Connect " + id + " to Forge\n\nAdded by Forge: forge.yaml and its build-and-deploy workflow.",
 		Files:   push,
+		// Anyone with push may have made forge/connect: never take it as ours.
+		Fresh: true,
 	})
 	if err != nil {
 		// Without the pull request the service cannot deploy: take it out
@@ -241,3 +249,7 @@ func (c *creator) fromRepo(ctx context.Context, req *forgev1.CreateServiceReques
 	w.send(final)
 	return final, nil
 }
+
+// runnerLabel is one GitHub Actions runner label, written into a connected
+// repo's workflow as runs-on.
+var runnerLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)

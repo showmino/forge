@@ -21,6 +21,10 @@ var ErrBranchExists = errors.New("the branch already exists")
 type Proposal struct {
 	Branch, Title, Body, Message string
 	Files                        []File
+	// Fresh refuses a branch that exists, even with an open pull request,
+	// which ProposeFiles otherwise takes as its own earlier try: for a
+	// branch anyone with push could have made, such as forge/connect.
+	Fresh bool
 }
 
 // ProposeFiles commits p's files on top of the default branch to a new
@@ -79,7 +83,7 @@ func (c *Client) ProposeFiles(ctx context.Context, owner, repo string, p Proposa
 	err = c.doJSON(ctx, http.MethodPost, git+"/refs", map[string]any{"ref": "refs/heads/" + p.Branch, "sha": commit.SHA}, nil)
 	var se *StatusError
 	if errors.As(err, &se) && se.Status == http.StatusUnprocessableEntity && strings.Contains(se.Body, "already exists") {
-		if url, ok, ferr := c.openPull(ctx, owner, repo, p.Branch); ferr == nil && ok {
+		if url, ok, ferr := c.openPull(ctx, owner, repo, p.Branch); ferr == nil && ok && !p.Fresh {
 			return url, nil
 		}
 		return "", fmt.Errorf("%s in %s/%s: %w", p.Branch, owner, repo, ErrBranchExists)

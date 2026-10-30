@@ -102,7 +102,7 @@ func TestConnectRepo(t *testing.T) {
 		t.Errorf("catalog: %v %v", s, err)
 	}
 	p := repos.proposals[0]
-	if p.repo != "showmino/tool" || p.Branch != "forge/connect" || len(p.Files) != 3 || !strings.Contains(string(p.Files[0].Content), "port: 9090") {
+	if p.repo != "showmino/tool" || p.Branch != "forge/connect" || !p.Fresh || len(p.Files) != 3 || !strings.Contains(string(p.Files[0].Content), "port: 9090") {
 		t.Errorf("proposal: %+v", p)
 	}
 	// Forge changes no one's access to the repo.
@@ -217,5 +217,34 @@ func TestConnectRepoRollsBack(t *testing.T) {
 	r.RequestId = "next"
 	if msgs, err := e.create(ctx, "member", r); err != nil || msgs[len(msgs)-1].GetChange() == nil {
 		t.Errorf("connect again: %v %v", msgs, err)
+	}
+}
+
+// Two connects of one repo at once: the second waits its turn, so that no
+// repo becomes the repo of two services.
+func TestConnectClaimsTheRepo(t *testing.T) {
+	t.Parallel()
+	c := &creator{}
+	release, err := c.claimRepo("showmino", "Tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.claimRepo("Showmino", "tool"); connect.CodeOf(err) != connect.CodeAborted || !strings.Contains(err.Error(), "being connected already") {
+		t.Errorf("second claim: %v", err)
+	}
+	release()
+	if _, err := c.claimRepo("showmino", "tool"); err != nil {
+		t.Errorf("after release: %v", err)
+	}
+}
+
+// A runner label goes into every connected repo's workflow: one label, plain.
+func TestConnectRunnerLabels(t *testing.T) {
+	t.Parallel()
+	for label, ok := range map[string]bool{"ubuntu-latest": true, "kube-runners": true, "self-hosted, linux": false, "a\nb": false, "${{ x }}": false} {
+		_, err := New(Options{Authenticator: StaticAuthenticator{}, CIRunner: label})
+		if (err == nil) != ok {
+			t.Errorf("%q: %v", label, err)
+		}
 	}
 }
