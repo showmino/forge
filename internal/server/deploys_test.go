@@ -478,3 +478,72 @@ func TestImageName(t *testing.T) {
 		}
 	}
 }
+
+// repoReads counts the deploy repo's reads.
+type repoReads struct {
+	DeployRepo
+	reads atomic.Int64
+}
+
+func (r *repoReads) Read(ctx context.Context, p, ref string) ([]byte, error) {
+	r.reads.Add(1)
+	return r.DeployRepo.Read(ctx, p, ref)
+}
+
+func (r *repoReads) History(ctx context.Context, p string, limit int) ([]github.CommitInfo, error) {
+	r.reads.Add(1)
+	return r.DeployRepo.History(ctx, p, limit)
+}
+
+// Listing deployments reads each service's values from the deploy repo once
+// per commit of it: a second list at the same commit reads nothing, and a
+// change by anyone is seen on the next list.
+func TestListDeploymentsReadsTheRepoOncePerCommit(t *testing.T) {
+	t.Parallel()
+	var counted *repoReads
+	f := newDeployFixture(t, false, func(o *DeployOptions, _ *envtest.Argo) {
+		counted = &repoReads{DeployRepo: o.Repo}
+		o.Repo = counted
+	})
+	for _, name := range []string{"orders", "search", "mail"} {
+		if _, err := f.catalog.RegisterService(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{
+			ServiceId: name, Service: &forgev1.Service{OwnerTeam: "billing", RepoUrl: "https://github.com/showmino/" + name},
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resp, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, resp.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatalf("op: %v", op.GetError())
+	}
+	list := func() []*forgev1.Deployment {
+		t.Helper()
+		got, err := f.client.ListDeployments(context.Background(), as("reader", &forgev1.ListDeploymentsRequest{}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Msg.GetDeployments()
+	}
+	if got := list(); len(got) != 1 || got[0].GetImage() != "ghcr.io/showmino/payments:1a2b3c4" {
+		t.Fatalf("first list: %v", got)
+	}
+	counted.reads.Store(0)
+	if got := list(); len(got) != 1 {
+		t.Fatalf("second list: %v", got)
+	}
+	if n := counted.reads.Load(); n != 0 {
+		t.Errorf("a second list at the same commit read the repo %d times", n)
+	}
+	// Someone else changes the deploy repo.
+	data, err := f.repo.Read(context.Background(), "services/payments/staging/values.yaml", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.Push("services/payments/staging/values.yaml", []byte(strings.ReplaceAll(string(data), "payments:1a2b3c4", "payments:9f8e7d6")), "by hand")
+	if got := list(); len(got) != 1 || got[0].GetImage() != "ghcr.io/showmino/payments:9f8e7d6" {
+		t.Errorf("after a change: %v", got)
+	}
+}
