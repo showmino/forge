@@ -66,6 +66,7 @@ spec:
             - {name: http, containerPort: 9090}
           env:
             - {name: PORT, value: "9090"}
+            - {name: FORGE_ENVIRONMENT, value: "staging"}
           readinessProbe:
             httpGet: {path: /ready, port: 9090}
             periodSeconds: 5

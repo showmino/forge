@@ -1,7 +1,10 @@
-{{/* The app's environment variables: PORT, DATABASE_URL, run.env (vars) and the
-fields of run.secrets. The Deployment and the CronJobs share them. */}}
+{{/* The app's environment variables: PORT, FORGE_ENVIRONMENT, DATABASE_URL,
+run.env (vars) and the fields of run.secrets. The Deployment and the CronJobs
+share them. FORGE_ENVIRONMENT (staging or production) lets an app pick its
+dependencies' addresses for the environment it runs in. */}}
 {{- define "forge.env" -}}
 - {name: PORT, value: "{{ .Values.port }}"}
+- {name: FORGE_ENVIRONMENT, value: {{ required "env" .Values.env | quote }}}
 {{- with .Values.database }}
 # The connection string CloudNativePG keeps for the service's database.
 - name: DATABASE_URL
