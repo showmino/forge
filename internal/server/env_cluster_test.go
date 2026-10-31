@@ -59,7 +59,8 @@ func TestClusterLifecycle(t *testing.T) {
 		t.Errorf("container: %+v", ctr)
 	case ctr.ReadinessProbe.HTTPGet.Path != "/ready" || ctr.LivenessProbe.HTTPGet.Path != "/ready" || ctr.ReadinessProbe.HTTPGet.Port.IntValue() != 9090:
 		t.Errorf("probes: %+v", ctr.ReadinessProbe)
-	case len(ctr.Env) != 1 || ctr.Env[0].Name != "PORT" || ctr.Env[0].Value != "9090":
+	case len(ctr.Env) != 2 || ctr.Env[0].Name != "PORT" || ctr.Env[0].Value != "9090" ||
+		ctr.Env[1].Name != "FORGE_ENVIRONMENT" || ctr.Env[1].Value != "preview":
 		t.Errorf("env: %+v", ctr.Env)
 	case pod.SecurityContext == nil || !*pod.SecurityContext.RunAsNonRoot:
 		t.Error("runAsNonRoot")

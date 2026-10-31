@@ -294,10 +294,15 @@ func deployment(w EnvWorkload) *appsv1.Deployment {
 					// the writable paths.
 					Volumes: volumes,
 					Containers: []corev1.Container{{
-						Name:           w.Service,
-						Image:          w.Image,
-						Ports:          []corev1.ContainerPort{{Name: "http", ContainerPort: w.Port}},
-						Env:            []corev1.EnvVar{{Name: "PORT", Value: strconv.Itoa(int(w.Port))}},
+						Name:  w.Service,
+						Image: w.Image,
+						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: w.Port}},
+						// FORGE_ENVIRONMENT tells the app where it runs, as the
+						// deploy chart does for staging and production.
+						Env: []corev1.EnvVar{
+							{Name: "PORT", Value: strconv.Itoa(int(w.Port))},
+							{Name: "FORGE_ENVIRONMENT", Value: "preview"},
+						},
 						ReadinessProbe: probe(0),
 						LivenessProbe:  probe(10),
 						SecurityContext: &corev1.SecurityContext{
