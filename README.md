@@ -13,8 +13,8 @@ live. Resources (databases) are built and switched off on the cluster;
 TechDocs is designed. [`docs/index.md`](docs/index.md) has the design.
 
 **Working on Forge**, as a person or as a coding agent: read
-[`AGENTS.md`](AGENTS.md) first. It has the rules (the cluster is production),
-the commands and the conventions, and points to the runbook.
+[`AGENTS.md`](AGENTS.md) first. It has the rules (what needs the owner's OK, merging, secrets),
+the commands and the conventions, and where an install's runbook lives.
 
 ## Install
 
