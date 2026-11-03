@@ -10,7 +10,7 @@ Implements Phase 2 of the [Forge CLI design doc](../index.md): `forge template l
 
 | Question | Decision |
 | --- | --- |
-| Template format | A new Forge format: `template.yaml` with typed parameters, plus a `skeleton/` rendered with Go `text/template`. No Backstage compatibility or importer; Forge will replace Backstage. |
+| Template format | A new Forge format: `template.yaml` with typed parameters, plus a `skeleton/` rendered with Go `text/template`. No compatibility with or importer from other template formats. |
 | What `forge create` does | The API fetches the template, renders it, creates the GitHub repo, pushes the first commit (which starts CI) and registers the service. The CLI sends parameters and shows progress. |
 | GitHub access | A "Forge" GitHub App installed on the `showmino` org. |
 | Template repo | One repo, `showmino/forge-templates`, one directory per template, released together by repo-wide semver tags. |
