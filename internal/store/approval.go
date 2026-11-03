@@ -30,9 +30,11 @@ type Approval struct {
 	Commit      string
 	RunID       int64
 	RunURL      string
-	// RequestedBy is the GitHub user who started the run.
-	RequestedBy string
-	State       string
+	// RequestedBy is the GitHub user who started the run (its actor), and
+	// TriggeredBy who started the attempt that asked (triggering_actor).
+	// Neither may approve it.
+	RequestedBy, TriggeredBy string
+	State                    string
 	// DecidedBy is the GitHub user who approved or rejected it.
 	DecidedBy, Reason string
 	// DispatchError is why the production run could not be started.
@@ -54,8 +56,9 @@ type ApprovalQuery struct {
 // ApprovalStore keeps approvals.
 type ApprovalStore interface {
 	// CreateApproval stores a, a pending approval, and marks every other
-	// pending approval of the same service and environment superseded, in
-	// one step.
+	// approval of the same service and environment that is pending, or
+	// approved but not claimed, superseded, in one step: only the newest
+	// commit can deploy.
 	CreateApproval(ctx context.Context, a Approval) error
 	// GetApproval returns the approval id, or ErrNotFound.
 	GetApproval(ctx context.Context, id string) (Approval, error)

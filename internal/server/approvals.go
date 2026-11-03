@@ -23,9 +23,12 @@ import (
 
 const approvalPrefix = "approvals/"
 
-// Dispatcher starts a repo's workflow (*github.Client on GitHub).
+// Dispatcher starts a repo's workflow and reads its default branch and
+// that branch's head (*github.Client on GitHub).
 type Dispatcher interface {
 	DispatchWorkflow(ctx context.Context, owner, repo, workflow, ref string, inputs map[string]string) error
+	DefaultBranch(ctx context.Context, owner, repo string) (string, error)
+	ResolveRef(ctx context.Context, owner, repo, ref string) (string, error)
 }
 
 var _ Dispatcher = (*github.Client)(nil)
@@ -36,7 +39,9 @@ type ApprovalOptions struct {
 	Catalog *Catalog
 	// Infra names the shared workflow (the only one that may ask and claim)
 	// and the repo's workflow Forge starts on approval.
-	Infra    *infrastructure.Config
+	Infra *infrastructure.Config
+	// Dispatch reaches GitHub; without it nothing can be asked for, as the
+	// asking commit cannot be checked against its branch.
 	Dispatch Dispatcher
 	Org      string
 	// SelfApproval reports whether the team of the service may approve its
@@ -74,14 +79,22 @@ func (a *Approvals) ready() error {
 }
 
 // fromSharedWorkflow checks a CI caller is a job of the shared workflow, in
-// an infrastructure repo of the catalog, and returns its service.
-func (a *Approvals) fromSharedWorkflow(ctx context.Context) (*Workload, *forgev1.Service, error) {
+// an infrastructure repo of the catalog, run by event, and returns its
+// service. Only a push asks, so its actor is who pushed the commit; only a
+// workflow_dispatch (Forge's, on approval) claims.
+func (a *Approvals) fromSharedWorkflow(ctx context.Context, event string) (*Workload, *forgev1.Service, error) {
 	w := workloadOf(ctx)
 	if w == nil {
 		return nil, nil, connect.NewError(connect.CodePermissionDenied, errors.New("only a job of the shared workflow, with its GitHub Actions token, may do this"))
 	}
 	if w.JobWorkflowRef != a.o.Infra.Workflow {
 		return nil, nil, workloadDenied(w, "do this only from the shared workflow %s, not from %q", a.o.Infra.Workflow, w.JobWorkflowRef)
+	}
+	if w.EventName != event {
+		return nil, nil, workloadDenied(w, "do this only in a run started by %s, not by %q", event, w.EventName)
+	}
+	if a.o.Dispatch == nil {
+		return nil, nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("this Forge API cannot reach GitHub (no GitHub App): approvals need it"))
 	}
 	svc, err := a.o.Catalog.get(ctx, servicePrefix+w.Service)
 	if err != nil {
@@ -97,7 +110,7 @@ func (a *Approvals) RequestApproval(ctx context.Context, _ *connect.Request[forg
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	w, svc, err := a.fromSharedWorkflow(ctx)
+	w, svc, err := a.fromSharedWorkflow(ctx, "push")
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +120,17 @@ func (a *Approvals) RequestApproval(ctx context.Context, _ *connect.Request[forg
 	}
 	if w.Actor == "" {
 		return nil, workloadDenied(w, "ask for an approval only with a token that names who started the run (actor)")
+	}
+	// Only the branch's newest commit: a re-run of an old push must not ask
+	// to deploy an older commit over a newer one.
+	owner, repo, _ := strings.Cut(w.Repository, "/")
+	branch, head, err := a.head(ctx, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	if head != w.SHA {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+			"%s is not the newest commit of %s (%s is): only the newest asks for production's approval", shortSHA(w.SHA), branch, shortSHA(head)))
 	}
 	// A re-run of the same job asks again: it gets the approval it has.
 	pending, err := a.o.Store.ListApprovals(ctx, store.ApprovalQuery{Service: w.Service, State: store.ApprovalPending, Limit: 1})
@@ -119,7 +143,7 @@ func (a *Approvals) RequestApproval(ctx context.Context, _ *connect.Request[forg
 	}
 	ap := store.Approval{
 		ID: newApprovalID(), Service: w.Service, Environment: infrastructure.Production, Commit: w.SHA,
-		RunID: w.RunID, RequestedBy: w.Actor, State: store.ApprovalPending, CreatedAt: a.o.Now().UTC(),
+		RunID: w.RunID, RequestedBy: w.Actor, TriggeredBy: w.TriggeringActor, State: store.ApprovalPending, CreatedAt: a.o.Now().UTC(),
 	}
 	if w.RunID != 0 {
 		ap.RunURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d", w.Repository, w.RunID)
@@ -131,6 +155,17 @@ func (a *Approvals) RequestApproval(ctx context.Context, _ *connect.Request[forg
 	noteAuditDetail(ctx, "commit", ap.Commit)
 	a.o.Log.InfoContext(ctx, "approval asked", "approval", ap.ID, "service", ap.Service, "commit", ap.Commit, "by", ap.RequestedBy)
 	return connect.NewResponse(&forgev1.RequestApprovalResponse{Approval: a.proto(ap, svc)}), nil
+}
+
+// head returns the default branch of owner/repo and its newest commit.
+func (a *Approvals) head(ctx context.Context, owner, repo string) (branch, sha string, err error) {
+	if branch, err = a.o.Dispatch.DefaultBranch(ctx, owner, repo); err != nil {
+		return "", "", connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the default branch of github.com/%s/%s: %w", owner, repo, err))
+	}
+	if sha, err = a.o.Dispatch.ResolveRef(ctx, owner, repo, branch); err != nil {
+		return "", "", connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the head of %s in github.com/%s/%s: %w", branch, owner, repo, err))
+	}
+	return branch, sha, nil
 }
 
 // load returns the approval name and its service.
@@ -239,7 +274,8 @@ func (a *Approvals) ApproveApproval(ctx context.Context, req *connect.Request[fo
 	if err != nil {
 		return nil, err
 	}
-	if strings.EqualFold(login, ap.RequestedBy) {
+	// Neither who pushed the commit nor who started this attempt of the run.
+	if strings.EqualFold(login, ap.RequestedBy) || (ap.TriggeredBy != "" && strings.EqualFold(login, ap.TriggeredBy)) {
 		self := false
 		if a.o.SelfApproval != nil {
 			if self, err = a.o.SelfApproval(ctx, ap.Service); err != nil {
@@ -262,7 +298,8 @@ func (a *Approvals) ApproveApproval(ctx context.Context, req *connect.Request[fo
 	default:
 		return nil, a.decideErr(req.Msg.GetName(), ap, store.ErrNotPending)
 	}
-	ap = a.dispatch(ctx, ap, svc)
+	// The run is started even if the caller goes away now.
+	ap = a.dispatch(context.WithoutCancel(ctx), ap, svc)
 	a.o.Log.InfoContext(ctx, "approval approved", "approval", ap.ID, "service", ap.Service, "commit", ap.Commit, "by", login, "dispatch_error", ap.DispatchError)
 	return connect.NewResponse(&forgev1.ApproveApprovalResponse{Approval: a.proto(ap, svc)}), nil
 }
@@ -277,7 +314,11 @@ func (a *Approvals) dispatch(ctx context.Context, ap store.Approval, svc *forgev
 	case !ok:
 		msg = fmt.Sprintf("%s has no GitHub repo in %s", svc.GetName(), a.o.Org)
 	default:
-		if err := a.o.Dispatch.DispatchWorkflow(ctx, owner, repo, a.o.Infra.RepoWorkflowFile(), "main", map[string]string{"approval": approvalPrefix + ap.ID}); err != nil {
+		branch, err := a.o.Dispatch.DefaultBranch(ctx, owner, repo)
+		if err == nil {
+			err = a.o.Dispatch.DispatchWorkflow(ctx, owner, repo, a.o.Infra.RepoWorkflowFile(), branch, map[string]string{"approval": approvalPrefix + ap.ID})
+		}
+		if err != nil {
 			msg = fmt.Sprintf("start %s in github.com/%s/%s: %v", a.o.Infra.RepoWorkflowFile(), owner, repo, err)
 		}
 	}
@@ -323,7 +364,7 @@ func (a *Approvals) ClaimApproval(ctx context.Context, req *connect.Request[forg
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	w, svc, err := a.fromSharedWorkflow(ctx)
+	w, svc, err := a.fromSharedWorkflow(ctx, "workflow_dispatch")
 	if err != nil {
 		return nil, err
 	}
@@ -334,6 +375,12 @@ func (a *Approvals) ClaimApproval(ctx context.Context, req *connect.Request[forg
 	}
 	if ap.Service != w.Service {
 		return nil, workloadDenied(w, "only claim the approvals of %s%s", servicePrefix, w.Service)
+	}
+	// The run runs the default branch's workflow as it is now: only the
+	// approved commit's, so nothing unapproved deploys.
+	if w.SHA != ap.Commit {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+			"%s approves %s, but this run is at %s: the branch moved on, and its newest commit asks for its own approval", req.Msg.GetName(), shortSHA(ap.Commit), shortSHA(w.SHA)))
 	}
 	if ap, err = a.o.Store.ClaimApproval(ctx, ap.ID, a.o.Now().UTC()); err != nil {
 		if errors.Is(err, store.ErrNotPending) {

@@ -100,8 +100,10 @@ func (a *GitHubOIDCAuthenticator) Authenticate(ctx context.Context, token string
 		SHA        string `json:"sha"`
 		Actor      string `json:"actor"`
 		// run_id is a string in GitHub's tokens.
-		RunID          string `json:"run_id"`
-		JobWorkflowRef string `json:"job_workflow_ref"`
+		RunID           string `json:"run_id"`
+		JobWorkflowRef  string `json:"job_workflow_ref"`
+		EventName       string `json:"event_name"`
+		TriggeringActor string `json:"triggering_actor"`
 	}
 	if err := idt.Claims(&c); err != nil {
 		return nil, fmt.Errorf("invalid GitHub Actions token claims: %w", err)
@@ -137,7 +139,8 @@ func (a *GitHubOIDCAuthenticator) Authenticate(ctx context.Context, token string
 	return &Principal{
 		Subject:     "github:" + c.Repository,
 		Permissions: []string{PermDeploy(ids[0], "staging")},
-		Workload:    &Workload{Repository: c.Repository, Service: ids[0], SHA: c.SHA, Actor: c.Actor, RunID: runID, JobWorkflowRef: c.JobWorkflowRef},
+		Workload: &Workload{Repository: c.Repository, Service: ids[0], SHA: c.SHA, Actor: c.Actor, RunID: runID, JobWorkflowRef: c.JobWorkflowRef,
+			EventName: c.EventName, TriggeringActor: c.TriggeringActor},
 	}, nil
 }
 

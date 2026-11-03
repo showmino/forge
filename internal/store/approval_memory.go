@@ -13,7 +13,7 @@ func (m *Memory) CreateApproval(_ context.Context, a Approval) error {
 		m.approvals = map[string]Approval{}
 	}
 	for id, o := range m.approvals {
-		if o.Service == a.Service && o.Environment == a.Environment && o.State == ApprovalPending {
+		if o.Service == a.Service && o.Environment == a.Environment && (o.State == ApprovalPending || o.State == ApprovalApproved) {
 			o.State = ApprovalSuperseded
 			m.approvals[id] = o
 		}

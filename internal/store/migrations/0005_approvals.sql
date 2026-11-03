@@ -8,6 +8,7 @@ CREATE TABLE approvals (
     run_id         bigint NOT NULL DEFAULT 0,
     run_url        text NOT NULL DEFAULT '',
     requested_by   text NOT NULL,
+    triggered_by   text NOT NULL DEFAULT '',
     state          text NOT NULL,
     decided_by     text NOT NULL DEFAULT '',
     reason         text NOT NULL DEFAULT '',

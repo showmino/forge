@@ -29,7 +29,7 @@ func runApprovalSuite(t *testing.T, s ApprovalStore) {
 	at := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
 	mk := func(id, svc string, min int) Approval {
 		return Approval{ID: id, Service: svc, Environment: "production", Commit: "c-" + id, RunID: 7, RunURL: "https://github.com/x/actions/runs/7",
-			RequestedBy: "ana", State: ApprovalPending, CreatedAt: at.Add(time.Duration(min) * time.Minute)}
+			RequestedBy: "ana", TriggeredBy: "cy", State: ApprovalPending, CreatedAt: at.Add(time.Duration(min) * time.Minute)}
 	}
 	for _, a := range []Approval{mk("apr_1", "net", 0), mk("apr_2", "dns", 1), mk("apr_3", "net", 2)} {
 		if err := s.CreateApproval(ctx, a); err != nil {
@@ -40,7 +40,7 @@ func runApprovalSuite(t *testing.T, s ApprovalStore) {
 	if a, err := s.GetApproval(ctx, "apr_1"); err != nil || a.State != ApprovalSuperseded {
 		t.Errorf("apr_1: %+v %v, want superseded", a, err)
 	}
-	if a, err := s.GetApproval(ctx, "apr_2"); err != nil || a.State != ApprovalPending || a.Commit != "c-apr_2" || a.RunID != 7 || !a.CreatedAt.Equal(at.Add(time.Minute)) {
+	if a, err := s.GetApproval(ctx, "apr_2"); err != nil || a.State != ApprovalPending || a.Commit != "c-apr_2" || a.RunID != 7 || a.TriggeredBy != "cy" || !a.CreatedAt.Equal(at.Add(time.Minute)) {
 		t.Errorf("apr_2: %+v %v", a, err)
 	}
 	if _, err := s.GetApproval(ctx, "apr_x"); !errors.Is(err, ErrNotFound) {
@@ -92,12 +92,21 @@ func runApprovalSuite(t *testing.T, s ApprovalStore) {
 	if _, err := s.ClaimApproval(ctx, "apr_3", at); !errors.Is(err, ErrNotPending) {
 		t.Errorf("claim twice: %v", err)
 	}
-	// A new request does not touch a claimed approval.
-	if err := s.CreateApproval(ctx, mk("apr_4", "net", 3)); err != nil {
+	// A new request does not touch a claimed approval, but supersedes an
+	// approved one not claimed yet: an older commit never deploys after it.
+	if _, err := s.DecideApproval(ctx, "apr_2", ApprovalApproved, "bo", "", at); err != nil {
 		t.Fatal(err)
+	}
+	for _, a := range []Approval{mk("apr_4", "net", 3), mk("apr_5", "dns", 4)} {
+		if err := s.CreateApproval(ctx, a); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if a, _ := s.GetApproval(ctx, "apr_3"); a.State != ApprovalClaimed {
 		t.Errorf("claimed after a new request: %+v", a)
+	}
+	if a, _ := s.GetApproval(ctx, "apr_2"); a.State != ApprovalSuperseded {
+		t.Errorf("approved, not claimed, after a new request: %+v", a)
 	}
 }
 

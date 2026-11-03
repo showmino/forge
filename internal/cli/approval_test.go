@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -12,6 +13,20 @@ import (
 )
 
 const testSharedWorkflow = "showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main"
+
+const testInfraSHA = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+
+// noDispatch is GitHub for approvals: main is at testInfraSHA, and starting
+// a workflow fails, as without the App's Actions: write.
+type noDispatch struct{}
+
+func (noDispatch) DispatchWorkflow(context.Context, string, string, string, string, map[string]string) error {
+	return errors.New("403 Resource not accessible by integration")
+}
+func (noDispatch) DefaultBranch(context.Context, string, string) (string, error) { return "main", nil }
+func (noDispatch) ResolveRef(context.Context, string, string, string) (string, error) {
+	return testInfraSHA, nil
+}
 
 // serveApprovals serves approvals for the infrastructure repo infra-net of
 // team billing. Tokens: t-ci (its shared workflow, started by cy), t-team
@@ -32,10 +47,14 @@ func serveApprovals(t *testing.T, h *harness) {
 		t.Fatal(err)
 	}
 	h.catalog = server.NewCatalogWithStore(st, nil)
-	h.approvals = server.NewApprovals(server.ApprovalOptions{Store: st, Catalog: h.catalog, Infra: cfg, Org: "showmino"})
+	h.approvals = server.NewApprovals(server.ApprovalOptions{Store: st, Catalog: h.catalog, Infra: cfg, Org: "showmino", Dispatch: noDispatch{}})
+	ci := func(event string) server.Principal {
+		return server.Principal{Subject: "github:showmino/infra-net", Workload: &server.Workload{
+			Repository: "showmino/infra-net", Service: "infra-net", SHA: testInfraSHA, Actor: "cy", RunID: 7, JobWorkflowRef: testSharedWorkflow, EventName: event}}
+	}
 	h.startAPI(server.StaticAuthenticator{
-		"t-ci": {Subject: "github:showmino/infra-net", Workload: &server.Workload{
-			Repository: "showmino/infra-net", Service: "infra-net", SHA: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d", Actor: "cy", RunID: 7, JobWorkflowRef: testSharedWorkflow}},
+		"t-ci":      ci("push"),
+		"t-ci-run":  ci("workflow_dispatch"),
 		teamToken:   {Subject: "cy", Login: "cy", Groups: []string{"showmino:billing"}},
 		"t-mate":    {Subject: "dee", Login: "dee", Groups: []string{"showmino:billing"}},
 		readerToken: {Subject: "bo", Login: "bo", Groups: []string{"dev"}},
@@ -70,7 +89,7 @@ func TestApprovalCommands(t *testing.T) {
 		t.Errorf("self: %s", r)
 	}
 	h.env["FORGE_TOKEN"] = "t-mate"
-	// No GitHub App here: the approval stands, and says the run did not start.
+	// Starting the run fails here: the approval stands, and says so.
 	r = h.run("approval", "approve", name, "--reason", "plan reviewed")
 	if r.code == 0 || !strings.Contains(r.err, "could not be started") || !strings.Contains(r.err, "approve "+id) {
 		t.Errorf("approve: %s", r)
@@ -80,7 +99,7 @@ func TestApprovalCommands(t *testing.T) {
 		t.Errorf("get: %s", r)
 	}
 
-	h.env["FORGE_TOKEN"] = "t-ci"
+	h.env["FORGE_TOKEN"] = "t-ci-run"
 	r = h.run("approval", "claim", id)
 	if r.code != 0 || strings.TrimSpace(r.out) != "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d" {
 		t.Errorf("claim: %s", r)

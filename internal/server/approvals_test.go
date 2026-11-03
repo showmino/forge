@@ -18,11 +18,42 @@ import (
 
 const sharedWorkflow = "showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main"
 
-// fakeDispatch records the workflows Forge starts.
+// fakeDispatch records the workflows Forge starts; heads are the default
+// branch's head by repo (default envSHA), branches the default branch's name
+// (default main).
 type fakeDispatch struct {
-	mu    sync.Mutex
-	calls []string
-	err   error
+	mu       sync.Mutex
+	calls    []string
+	err      error
+	heads    map[string]string
+	branches map[string]string
+}
+
+func (f *fakeDispatch) DefaultBranch(_ context.Context, _, repo string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if b, ok := f.branches[repo]; ok {
+		return b, nil
+	}
+	return "main", nil
+}
+
+func (f *fakeDispatch) ResolveRef(_ context.Context, _, repo, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if h, ok := f.heads[repo]; ok {
+		return h, nil
+	}
+	return envSHA, nil
+}
+
+func (f *fakeDispatch) setHead(repo, sha string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.heads == nil {
+		f.heads = map[string]string{}
+	}
+	f.heads[repo] = sha
 }
 
 func (f *fakeDispatch) DispatchWorkflow(_ context.Context, owner, repo, workflow, ref string, inputs map[string]string) error {
@@ -86,23 +117,37 @@ targets: [{name: azure, environments: {production: {secret: s}}}]
 			},
 		})
 	}
-	ci := func(repo, sha, actor, wf string, run int64) *Principal {
+	ci := func(repo, sha, actor, wf string, run int64, event string) *Principal {
 		return &Principal{Subject: "github:showmino/" + repo, Permissions: []string{PermDeploy(repo, "staging")},
-			Workload: &Workload{Repository: "showmino/" + repo, Service: repo, SHA: sha, Actor: actor, RunID: run, JobWorkflowRef: wf}}
+			Workload: &Workload{Repository: "showmino/" + repo, Service: repo, SHA: sha, Actor: actor, RunID: run, JobWorkflowRef: wf,
+				EventName: event, TriggeringActor: actor}}
+	}
+	rerunBy := func(p *Principal, who string) Principal {
+		w := *p.Workload
+		w.TriggeringActor = who
+		q := *p
+		q.Workload = &w
+		return q
 	}
 	h, err := New(Options{
 		Authenticator: StaticAuthenticator{
-			"ana":       {Subject: "ana", Login: "ana", Groups: []string{"showmino:platform"}},
-			"bo":        {Subject: "bo", Login: "Bo", Groups: []string{"showmino:platform"}},
-			"cy":        {Subject: "cy", Login: "cy", Groups: []string{"showmino:web"}},
-			"admin":     {Subject: "dee", Login: "dee", Groups: []string{"showmino:admins"}},
-			"nologin":   {Subject: "eve", Groups: []string{"showmino:platform"}},
-			"ci":        *ci("infra-net", envSHA, "ana", sharedWorkflow, 41),
-			"ci-rerun":  *ci("infra-net", envSHA, "ana", sharedWorkflow, 41),
-			"ci-newer":  *ci("infra-net", ciOldSHA, "ana", sharedWorkflow, 42),
-			"ci-own-wf": *ci("infra-net", envSHA, "ana", "showmino/infra-net/.github/workflows/deploy.yml@refs/heads/main", 43),
-			"ci-dev":    *ci("infra-dev", envSHA, "ana", sharedWorkflow, 44),
-			"ci-pay":    *ci("payments", envSHA, "ana", sharedWorkflow, 45),
+			"ana":          {Subject: "ana", Login: "ana", Groups: []string{"showmino:platform"}},
+			"bo":           {Subject: "bo", Login: "Bo", Groups: []string{"showmino:platform"}},
+			"cy":           {Subject: "cy", Login: "cy", Groups: []string{"showmino:web"}},
+			"admin":        {Subject: "dee", Login: "dee", Groups: []string{"showmino:admins"}},
+			"nologin":      {Subject: "eve", Groups: []string{"showmino:platform"}},
+			"ci":           *ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"),
+			"ci-rerun":     *ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"),
+			"ci-rerun-bo":  rerunBy(ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"), "Bo"),
+			"ci-newer":     *ci("infra-net", ciOldSHA, "ana", sharedWorkflow, 42, "push"),
+			"ci-comment":   *ci("infra-net", envSHA, "cy", sharedWorkflow, 46, "issue_comment"),
+			"ci-own-wf":    *ci("infra-net", envSHA, "ana", "showmino/infra-net/.github/workflows/deploy.yml@refs/heads/main", 43, "push"),
+			"ci-dev":       *ci("infra-dev", envSHA, "ana", sharedWorkflow, 44, "push"),
+			"ci-pay":       *ci("payments", envSHA, "ana", sharedWorkflow, 45, "push"),
+			"ci-run":       *ci("infra-net", envSHA, "ana", sharedWorkflow, 50, "workflow_dispatch"),
+			"ci-run-newer": *ci("infra-net", ciOldSHA, "ana", sharedWorkflow, 51, "workflow_dispatch"),
+			"ci-run-own":   *ci("infra-net", envSHA, "ana", "showmino/infra-net/.github/workflows/deploy.yml@refs/heads/main", 52, "workflow_dispatch"),
+			"ci-run-dev":   *ci("infra-dev", envSHA, "ana", sharedWorkflow, 53, "workflow_dispatch"),
 		},
 		Authorizer: Authorizer{AdminGroups: []string{"showmino:admins"}, Org: "showmino"},
 		Catalog:    cat,
@@ -177,7 +222,7 @@ func TestApprovalFlow(t *testing.T) {
 	}
 
 	// The claim of a pending approval is refused: nothing deploys yet.
-	_, err = e.claim("ci", ap.GetName())
+	_, err = e.claim("ci-run", ap.GetName())
 	wantCode(t, "claim pending", err, connect.CodeFailedPrecondition, "is pending, not approved")
 
 	// A teammate approves (the login's case does not matter), and Forge
@@ -191,17 +236,21 @@ func TestApprovalFlow(t *testing.T) {
 	}
 
 	// The claim: only from the shared workflow, only the repo's own, once.
-	_, err = e.claim("ci-own-wf", ap.GetName())
+	_, err = e.claim("ci-run-own", ap.GetName())
 	wantCode(t, "claim from the repo's workflow", err, connect.CodePermissionDenied, "only from the shared workflow")
-	_, err = e.claim("ci-dev", ap.GetName())
+	_, err = e.claim("ci-run-dev", ap.GetName())
 	wantCode(t, "claim another repo's", err, connect.CodePermissionDenied, "only claim the approvals of services/infra-dev")
+	_, err = e.claim("ci", ap.GetName())
+	wantCode(t, "claim from a push", err, connect.CodePermissionDenied, "only in a run started by workflow_dispatch")
 	_, err = e.claim("admin", ap.GetName())
 	wantCode(t, "a person claims", err, connect.CodePermissionDenied, "only a job of the shared workflow")
-	got, err = e.claim("ci", ap.GetName())
+	_, err = e.claim("ci-run-newer", ap.GetName())
+	wantCode(t, "claim at another commit", err, connect.CodeFailedPrecondition, "the branch moved on")
+	got, err = e.claim("ci-run", ap.GetName())
 	if err != nil || got.GetState() != forgev1.Approval_STATE_CLAIMED || got.GetCommit() != envSHA || got.GetClaimTime() == nil {
 		t.Fatalf("claim: %v %v", got, err)
 	}
-	_, err = e.claim("ci", ap.GetName())
+	_, err = e.claim("ci-run", ap.GetName())
 	wantCode(t, "claim twice", err, connect.CodeFailedPrecondition, "is claimed, not approved")
 	_, err = e.approve("bo", ap.GetName())
 	wantCode(t, "approve a claimed one", err, connect.CodeFailedPrecondition, "is claimed")
@@ -216,6 +265,8 @@ func TestApprovalRequestRefuses(t *testing.T) {
 		msg   string
 	}{
 		{"ci-own-wf", connect.CodePermissionDenied, "only from the shared workflow " + sharedWorkflow},
+		{"ci-comment", connect.CodePermissionDenied, `only in a run started by push, not by "issue_comment"`},
+		{"ci-newer", connect.CodeFailedPrecondition, "is not the newest commit of main"},
 		{"ci-pay", connect.CodeFailedPrecondition, "services/payments is not an infrastructure repo"},
 		{"ci-dev", connect.CodeFailedPrecondition, "has no production environment"},
 		{"ana", connect.CodePermissionDenied, "only a job of the shared workflow"},
@@ -232,6 +283,7 @@ func TestApprovalSupersededRejectedAndListed(t *testing.T) {
 	t.Parallel()
 	e := newApprovalEnv(t, false)
 	old := e.request(t, "ci")
+	e.dispatch.setHead("infra-net", ciOldSHA) // a newer push
 	newer := e.request(t, "ci-newer")
 	if got := e.get(t, old.GetName()); got.GetState() != forgev1.Approval_STATE_SUPERSEDED {
 		t.Errorf("older: %v", got.GetState())
@@ -302,4 +354,52 @@ func TestApprovalsNotConfigured(t *testing.T) {
 	e := newApprovalEnv(t, true)
 	_, err := e.client.ListApprovals(context.Background(), as("cy", &forgev1.ListApprovalsRequest{}))
 	wantCode(t, "list", err, connect.CodeFailedPrecondition, "approvals are not configured")
+}
+
+// Who re-ran the asking job may not approve it either.
+func TestApprovalTriggeringActor(t *testing.T) {
+	t.Parallel()
+	e := newApprovalEnv(t, false)
+	ap := e.request(t, "ci-rerun-bo")
+	_, err := e.approve("bo", ap.GetName())
+	wantCode(t, "the one who re-ran it", err, connect.CodePermissionDenied, "you started this run")
+	if _, err := e.approve("admin", ap.GetName()); err != nil {
+		t.Errorf("an admin: %v", err)
+	}
+}
+
+// An approved run that never claimed is superseded by a newer commit's
+// request: it can neither be dispatched again nor claimed.
+func TestApprovalApprovedIsSuperseded(t *testing.T) {
+	t.Parallel()
+	e := newApprovalEnv(t, false)
+	old := e.request(t, "ci")
+	if _, err := e.approve("bo", old.GetName()); err != nil {
+		t.Fatal(err)
+	}
+	e.dispatch.setHead("infra-net", ciOldSHA)
+	e.request(t, "ci-newer")
+	if got := e.get(t, old.GetName()); got.GetState() != forgev1.Approval_STATE_SUPERSEDED {
+		t.Fatalf("old: %v", got.GetState())
+	}
+	_, err := e.approve("bo", old.GetName())
+	wantCode(t, "dispatch again", err, connect.CodeFailedPrecondition, "is superseded")
+	_, err = e.claim("ci-run", old.GetName())
+	wantCode(t, "claim", err, connect.CodeFailedPrecondition, "is superseded, not approved")
+}
+
+// Forge starts the run on the repo's default branch, whatever it is called.
+func TestApprovalDispatchesTheDefaultBranch(t *testing.T) {
+	t.Parallel()
+	e := newApprovalEnv(t, false)
+	e.dispatch.mu.Lock()
+	e.dispatch.branches = map[string]string{"infra-net": "trunk"}
+	e.dispatch.mu.Unlock()
+	ap := e.request(t, "ci")
+	if _, err := e.approve("bo", ap.GetName()); err != nil {
+		t.Fatal(err)
+	}
+	if calls := e.dispatch.all(); len(calls) != 1 || !strings.Contains(calls[0], "deploy.yml@trunk") {
+		t.Errorf("dispatched %v", calls)
+	}
 }

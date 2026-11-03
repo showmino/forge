@@ -8,13 +8,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const approvalColumns = `id, service, environment, commit_sha, run_id, run_url, requested_by, state,
+const approvalColumns = `id, service, environment, commit_sha, run_id, run_url, requested_by, triggered_by, state,
 	decided_by, reason, dispatch_error, created_at, decided_at, claimed_at`
 
 func scanApproval(row pgx.Row) (Approval, error) {
 	var a Approval
 	var decided, claimed *time.Time
-	err := row.Scan(&a.ID, &a.Service, &a.Environment, &a.Commit, &a.RunID, &a.RunURL, &a.RequestedBy, &a.State,
+	err := row.Scan(&a.ID, &a.Service, &a.Environment, &a.Commit, &a.RunID, &a.RunURL, &a.RequestedBy, &a.TriggeredBy, &a.State,
 		&a.DecidedBy, &a.Reason, &a.DispatchError, &a.CreatedAt, &decided, &claimed)
 	if decided != nil {
 		a.DecidedAt = *decided
@@ -27,14 +27,19 @@ func scanApproval(row pgx.Row) (Approval, error) {
 
 func (p *Postgres) CreateApproval(ctx context.Context, a Approval) error {
 	return pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
+		// One request of a service and environment at a time: two at once
+		// would each supersede the older rows but not each other's.
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext('approvals:' || $1 || '/' || $2))", a.Service, a.Environment); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE approvals SET state = $3
-			WHERE service = $1 AND environment = $2 AND state = $4`,
-			a.Service, a.Environment, ApprovalSuperseded, ApprovalPending); err != nil {
+			WHERE service = $1 AND environment = $2 AND state IN ($4, $5)`,
+			a.Service, a.Environment, ApprovalSuperseded, ApprovalPending, ApprovalApproved); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx, `INSERT INTO approvals (id, service, environment, commit_sha, run_id, run_url,
-			requested_by, state, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-			a.ID, a.Service, a.Environment, a.Commit, a.RunID, a.RunURL, a.RequestedBy, a.State, a.CreatedAt)
+			requested_by, triggered_by, state, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			a.ID, a.Service, a.Environment, a.Commit, a.RunID, a.RunURL, a.RequestedBy, a.TriggeredBy, a.State, a.CreatedAt)
 		return err
 	})
 }

@@ -501,12 +501,12 @@ func TestGitHubOIDCRunClaims(t *testing.T) {
 	a := newCIAuth(t, iss, cat, &fakeBranches{}, clk)
 	wf := "showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main"
 	p, err := a.Authenticate(context.Background(), iss.sign(t, nil, iss.claims(clk.Now(), map[string]any{
-		"actor": "ana", "run_id": "1234567890", "job_workflow_ref": wf,
+		"actor": "ana", "run_id": "1234567890", "job_workflow_ref": wf, "event_name": "push", "triggering_actor": "bo",
 	})))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w := p.Workload; w.Actor != "ana" || w.RunID != 1234567890 || w.JobWorkflowRef != wf {
+	if w := p.Workload; w.Actor != "ana" || w.RunID != 1234567890 || w.JobWorkflowRef != wf || w.EventName != "push" || w.TriggeringActor != "bo" {
 		t.Errorf("workload %+v", w)
 	}
 }

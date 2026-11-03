@@ -61,6 +61,11 @@ type Workload struct {
 	Actor          string
 	RunID          int64
 	JobWorkflowRef string
+	// EventName is what started the run (push, workflow_dispatch, ...), and
+	// TriggeringActor who started this attempt of it (a re-run's is the
+	// person who re-ran it).
+	EventName       string
+	TriggeringActor string
 }
 
 // PermDeploy is a CI caller's permission to deploy service to env.
