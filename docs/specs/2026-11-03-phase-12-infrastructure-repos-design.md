@@ -2,7 +2,8 @@
 
 Proposed on 2026-11-03, from a conversation with the owner. It replaces the
 phase 12 of `2026-10-29-deploy-sources-design.md` (the app catalog), which
-moves to phase 14. Needs the owner's go-ahead before code.
+moves to phase 14. The owner gave the go-ahead and confirmed the names the
+same day.
 
 ## Why
 
@@ -312,9 +313,9 @@ hand in GitHub is put back.
 - The proto shape, the dashboard's layout, the shared workflow's details
   (action versions, the plan comment), and where the shared workflow's repo is.
 
-## Names (the owner's to confirm)
+## Names (confirmed by the owner, 2026-11-03)
 
-Proposed: `--target` and `--environments` on `forge create`; `forge approval
+ `--target` and `--environments` on `forge create`; `forge approval
 approve | reject | list`; `forge approval exception request | list | revoke`;
 the dashboard page "Approvals". `target:` already means something else in
 `template.yaml` (the repo a file template writes to); users do not see that
