@@ -139,7 +139,11 @@ namespace).
 promoted, upgraded to a newer chart version and rolled back; a chart that
 needs a ClusterRole is refused with a message that names it.
 
-## Phase 12 · App catalog
+## Phase 12 · App catalog (now phase 14)
+
+On 2026-11-03 the owner moved this to phase 14, after the application
+builder; phase 12 is now infrastructure repos
+(`2026-11-03-phase-12-infrastructure-repos-design.md`).
 
 Ready-made apps, installed with one command or a few clicks.
 
