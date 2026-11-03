@@ -2,87 +2,56 @@
 
 This file is for every coding agent that works in this repository (GitHub
 Copilot, Claude Code, Codex, Cursor and others), and for people. It is the one
-place the working rules live: tool-specific files (`CLAUDE.md`,
+place the working rules for the code live: tool-specific files (`CLAUDE.md`,
 `.github/copilot-instructions.md`, `.claude/skills/forge/SKILL.md`) only point
 here. Read it before you change anything.
 
 ## What Forge is
 
-An internal developer platform that replaces Backstage for the `showmino`
-organization: the `forge` CLI, the `forge-api` server and the Protobuf
-contract they share, in one Go module (`github.com/showmino/forge`). It runs
-on the owner's k3s cluster.
+An internal developer platform: the `forge` CLI, the `forge-api` server and
+the Protobuf contract they share, in one Go module
+(`github.com/showmino/forge`), plus the `forge` Helm chart that installs it on
+Kubernetes.
 
 | Repo | What |
 | --- | --- |
-| `showmino/forge` (this one) | CLI, API, protos, the deploy chart, the cluster manifests (`deploy/k3s`) |
-| `showmino/forge-web` | The web dashboard: Next.js, a thin client of the same API. Every Forge runs it from the `forge` chart (`web.image.tag`); released by pushing a `vX.Y.Z` tag there. At showmino it is also a Forge service for staging only (`forge-staging.showmino.com`), never promoted: its production address would be the chart's |
-| `showmino/forge-templates` | The templates `forge create` scaffolds from (`go-grpc`, `nextjs`), versioned by repo-wide tags |
-| `showmino/forge-deploys` | The GitOps repo. Only forge-api writes to it; never edit it by hand |
-| `showmino/kubernetes` | The owner's cluster repo (Cloudflare tunnel, DNS records, Argo CD). Open a pull request there; the owner merges |
-| `showmino/forgegate` | Forge's public site, `https://forgegate.io`, itself a Forge service (public repo). The user documentation of Forge lives in its `docs/` |
-| `showmino/techdocs` | The organization's documentation, itself a Forge service. Its `docs/forge/` has one page on showmino's own install of Forge |
+| `showmino/forge` (this one) | CLI, API, protos, the `forge` chart, the older k3s manifests (`deploy/k3s`) |
+| `showmino/forge-web` | The web dashboard: Next.js, a thin client of the same API. Every Forge runs it from the `forge` chart (`web.image.tag`); released by pushing a `vX.Y.Z` tag there |
+| `showmino/forgegate` | Forge's public site, `https://forgegate.io`. The user documentation of Forge lives in its `docs/` |
 
 ## Read first
 
 | File | Read it for |
 | --- | --- |
 | `docs/index.md` | The approved design: commands, auth, API, output and exit codes, the phases and their exit gates. Read the relevant section before designing anything |
-| `showmino/forge-ops` `docs/agents/status.md` | How far the plan has got: what is built, what is live, what is left, known follow-ups |
-| `showmino/forge-ops` `docs/agents/verifying.md` | The runbook: what runs on the cluster right now, the render command that is live, how to check each feature |
 | `docs/specs/` | One design per phase or feature, as built |
 | `README.md` | The user-facing documentation |
 
-This repo is public. showmino's own install is in the private repo
-`showmino/kubernetes` (`apps/helm/forge/production/app.yaml`), and the agents' runbooks
-in the private repo `showmino/forge-ops`; keep a
-checkout of it next to this one (`../forge-ops`). Nothing about showmino's
-install goes back into this repo.
+This repo is public. Nothing about a particular install of Forge (its
+addresses, its cluster, its organization's teams) goes into it. **If you work
+on a machine that runs or reaches an install, read that install's runbook
+before you touch a cluster.** The owner's is in a private checkout next to
+this one, `../forge-ops/docs/agents/` (`operating.md` has the rules,
+`status.md` what is built and live, `verifying.md` how to roll out and check).
+When it is there, its rules apply on top of these.
 
 `docs/plans/` holds the step-by-step plans of earlier phases. They are history:
-they name files that have since moved (for example `.claude/skills/forge/…`,
-then `docs/agents/…`, now in `showmino/forge-ops`).
+they name files that have since moved.
 
 ## Rules
 
 These were set by the owner. They are not suggestions.
 
-### The cluster is production
-
-- The k3s cluster in the kube context is **production**. There is one cluster;
-  "staging" and "production" are environments inside it.
-- **Read-only commands are fine** (`kubectl get`, `diff`, `logs`,
-  `--dry-run=server`). **Anything that changes the cluster needs the owner's
-  explicit OK each time:** applying manifests, restarting a workload,
-  promoting a service to production, deleting anything.
-- A rollout follows one procedure, written out in `showmino/forge-ops`
-  `docs/agents/verifying.md`. What is live is the Argo CD Application `forge`
-  in `showmino/kubernetes` (`apps/helm/forge/production/app.yaml`, read by
-  the `helm-apps` ApplicationSet: the public `forge` chart at a fixed version
-  and showmino's values; plus the claim `apps/claims/gitapps/forge.yaml` for
-  the extra manifests in `infrastructure/forge/production/`), synced
-  automatically. A rollout is a pull request
-  there: change the version or the values, render the chart with them
-  (`helm template`), read `kubectl diff` and a `kubectl apply --dry-run=server`
-  of it, and put what changes in the pull request. The owner merges in
-  `showmino/kubernetes`; the merge is the rollout. Then verify. Never press
-  Sync or apply by hand.
-- Never write to the production database directly. Migrations run when
-  forge-api starts.
-- A reviewer or subagent you start gets no cluster access: tell it to run no
-  `kubectl`.
-
 ### What needs the owner's OK
 
 | Free to do | Ask first, every time |
 | --- | --- |
-| Create branches, push them, open pull requests in `forge`, `forge-web` and `forge-templates` | Any change to the cluster (see above) |
-| Merge a pull request to `main` there, once every check has passed (see below) | Creating a real service or repository (`forge create`) |
-| Tag a release after its change is merged | Deleting anything: a service, a branch (also a merged one), a repository, an image, a namespace |
-| Open a pull request in `showmino/kubernetes` | Merging in `showmino/kubernetes`; settings on GitHub (app permissions, OAuth apps, org variables) |
+| Create branches, push them, open pull requests here and in `forge-web` | Any change to a running install of Forge: a cluster, its database, a promotion to production |
+| Merge a pull request to `main`, once every check has passed (see below) | Deleting anything: a branch (also a merged one), a repository, an image, a release |
+| Tag a release after its change is merged | Settings on GitHub (app permissions, OAuth apps, org variables) |
 
-An approval covers what was asked and nothing more. "Yes" to a rollout is not
-a yes to the next one.
+An approval covers what was asked and nothing more. A reviewer or subagent
+you start gets no cluster access: tell it to run no `kubectl`.
 
 ### Merging
 
@@ -95,12 +64,6 @@ a yes to the next one.
   (`README.md`, `AGENTS.md`, ...): CI does not run for it at all (the owner's
   rule: checks on docs alone only cost time), and it merges once it contains
   the current `main`. Docs elsewhere (test data, templates) run CI as usual.
-  Rollout pull requests are in `showmino/kubernetes`, and the owner merges
-  them there.
-  In `forge-web` the
-  jobs `image` and `deploy` only run on a push to `main` and show as skipped
-  on a pull request; that is expected, and `test` must pass. Any other skip
-  is a stop.
 - **The checks run once, on the pull request, and not again after the merge**
   (the owner's rule: a second run of the same checks only costs time). That
   makes two things matter. `main` changes only through pull requests. And
@@ -120,29 +83,24 @@ a yes to the next one.
 - Each new feature, and each change to what a feature does (a command, a
   flag, a forge.yaml field, a chart value, a dashboard page, an error people
   will meet), also gets its user documentation in `showmino/forgegate`, under
-  `docs/` (the owner's rule, 2026-10-16; the docs moved there from
-  `showmino/techdocs` on 2026-10-27). It is part of the same work: open the
-  forgegate pull request alongside the forge, forge-web or forge-templates
-  one, not later.
+  `docs/` (the owner's rule, 2026-10-16). It is part of the same work: open
+  the forgegate pull request alongside the forge or forge-web one, not later.
 - The site is public and written for anyone who runs Forge: `my-org` and
-  `example.com`, never showmino's own addresses, vaults or LAN. What only
-  showmino's install has goes in techdocs' "Forge at showmino" page.
+  `example.com`, never a real install's addresses, vaults or network.
 - Write it for the people who use Forge: what to do and the commands to type,
   checked against the code. Update the page that covers the feature, and
   `18-command-reference.md` when a command or flag changes (it is the output
   of `forge <command> --help`). Run `forge docs lint` on the checkout.
 - A forgegate pull request follows the same merging rules as here (its CI
-  builds the site, and the build fails on a broken link). Merging it deploys
-  forgegate to staging; promoting it to production needs the owner's OK like
-  any other promotion.
+  builds the site, and the build fails on a broken link).
 
 ### Secrets
 
-- Never print, log, paste or commit: the GitHub App private key
-  (`mino-forge.*.private-key.pem` in the repo root, ignored by git), the
-  database URL or password, the OAuth client secret, ID tokens, session
-  tokens (`fgs_…`), run tokens. Name the key, never the value.
-- The credentials file (`~/.config/forge/credentials.json`) holds a live
+- Never print, log, paste or commit: a GitHub App private key (a `*.pem` in
+  the repo root is ignored by git), a database URL or password, an OAuth
+  client secret, ID tokens, session tokens (`fgs_…`), run tokens. Name the
+  key, never the value.
+- The CLI's credentials file (`~/.config/forge/credentials.json`) holds a live
   session. Read field names only.
 - Kubernetes Secrets: list their key names, not their data.
 
@@ -158,17 +116,16 @@ a yes to the next one.
   the end-to-end test on a throwaway cluster).
 - **Say what you did not check.** If a step needs the owner's browser or a
   setting on GitHub, say so and stop there. Report failures with their output.
-- Forge replaces Backstage. Do not design around Backstage.
 
 ## How to work here
 
 ```sh
-export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH   # on the owner's machine Go is not on the system PATH
+export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH   # if Go is not on your PATH
 make build test lint                                 # Go 1.27, golangci-lint v2.14.0, as CI
 make generate                                        # after a proto change; gen/ is committed and CI checks it
 make update-golden                                   # after an intended change of CLI output
 make chart-test                                      # the deploy chart against its goldens
-sh deploy/k3s/render_test.sh                         # the cluster manifests; NOT in CI, run it when deploy/k3s changes
+sh deploy/k3s/render_test.sh                         # the k3s manifests; NOT in CI, run it when deploy/k3s changes
 make db                                              # a local PostgreSQL for the store tests
 FORGE_TEST_DATABASE_URL='postgres://postgres:forge@localhost:55432/postgres?sslmode=disable' make test
 ```
@@ -178,17 +135,15 @@ Run `make test lint` before every commit. Write the test first.
 ### Decisions that are settled (do not reopen without the owner)
 
 - ConnectRPC, not grpc-gateway. One Go module.
-- Login is Dex with GitHub behind it; only members of `showmino` get in, and
-  writing needs the team `showmino:platform-engineering`. A login becomes a
-  Forge session (`fgs_…`), which is what clients send from then on.
+- Login is Dex with GitHub behind it; members of the configured GitHub
+  organization get in, and the admin groups (`--admin-groups`) may write. A
+  login becomes a Forge session (`fgs_…`), which is what clients send from
+  then on.
 - Argo CD only (Flux later). OpenTofu jobs run by the API (not Crossplane),
-  except DNS records, which use the owner's `CloudflareRecordsApplication`.
+  except DNS records, which the chart writes as a `CloudflareRecordsApplication`.
 - Templates live in a Git repo, versioned by tag.
 - The dashboard is a Next.js app from Forge's own `nextjs` template; it has
-  no endpoints of its own. The `forge` chart runs it (`web.image.tag`): that
-  is production. Since 2026-10-29 the forge-web Forge service is staging only
-  (`run.host: forge`, so `forge-staging.showmino.com`) and is never promoted: its production address would be `forge.showmino.com`, the chart's. A new version reaches
-  production as a `web.image.tag` pull request in `showmino/kubernetes`, and
+  no endpoints of its own. The `forge` chart runs it (`web.image.tag`), and
   the chart's default moves with a forge release.
 - Telemetry off. Releases are GitHub Releases, cut by pushing a `vX.Y.Z` tag.
 
@@ -225,8 +180,6 @@ The dashboard has a copy of the protos: after the change is merged here, run
 - Running lint with an older golangci-lint than v2.14.0 (it cannot read Go
   1.27 export data), or "fixing" the two `G117` nolints in
   `internal/auth/store.go`: storing the credential is intended.
-- Following the README's `k3s ctr images import` path on the cluster: the dev
-  machine is not a node. Images come from `ghcr.io`.
 - Giving a CI workload a new RPC by adding a permission: workloads pass the
   interceptor only for the procedures in `workloadProcedures` (`authn.go`),
   and each of those handlers must call its `ci_scope.go` check.
@@ -234,40 +187,29 @@ The dashboard has a copy of the protos: after the change is merged here, run
 - Changing the login's address without changing the GitHub OAuth app's
   callback URL to match: every new sign-in fails until both agree.
 - Giving a service's `forge.yaml` a field (`run.domain`, `run.host`) before
-  the forge-api that knows it is live: an older API rejects unknown fields
+  the forge-api that knows it is running: an older API rejects unknown fields
   and every deploy of that service fails.
-- Extracting the render command out of `verifying.md` with grep and running
-  it (2026-10-13). The match was an old setup block ending in
-  `| kubectl apply -f -`: it applied a render without deploys, the Gateway
-  lost its public listeners and every Forge service answered 404 for about
-  ten minutes, until the approved render was applied again. Write the render
-  command out yourself, send it to a file, and never run text taken from the
-  docs.
 
 ## What an agent can and cannot reach
 
 Knowing this file is not the same as having access.
 
-- **On the owner's machine** (an editor's agent mode, a terminal agent): you
-  have what the owner has: `kubectl` against production, the `forge` CLI with
-  a live session, `gh`, the App key file on disk. Every rule above applies in
-  full.
+- **On a machine with access to an install** (an editor's agent mode, a
+  terminal agent on the owner's machine): you may have `kubectl` against a
+  production cluster, the `forge` CLI with a live session, `gh`, an App key
+  on disk. The install's runbook (see "Read first") applies in full.
 - **In the cloud** (for example GitHub's coding agent, which works on a
   runner): you can read the repo, build, test and open a pull request. You
-  cannot reach the cluster, the LAN address of the API, or the App key, and
-  you must not try to work around that. Leave rollouts and anything that needs
-  the cluster to someone on the owner's machine, and say so in the pull
-  request. You may not see `showmino/forge-ops` either: then work from this
-  repo and say what you could not check. `.github/workflows/copilot-setup-steps.yml` installs the toolchain
-  for that environment.
+  cannot reach a cluster or its secrets, and you must not try to work around
+  that. Leave rollouts to someone on the owner's machine, and say so in the
+  pull request. `.github/workflows/copilot-setup-steps.yml` installs the
+  toolchain for that environment.
 
 ## Keeping this true
 
-- A change that alters a fact in `AGENTS.md`, `docs/agents/status.md` or
-  `docs/agents/verifying.md` (both in `showmino/forge-ops`) updates that file
-  in a pull request **opened together with** the change.
-  After a rollout, `verifying.md` gets the new image, the new render command
-  and what was checked.
+- A change that alters a fact in `AGENTS.md` updates it in the same pull
+  request. If it alters a fact in an install's runbook, open that pull
+  request together with the change.
 - A change to what users see also updates `docs/` in `showmino/forgegate`
   (see "Every feature is documented in forgegate" above).
   `README.md` here stays the reference next to the code.
@@ -276,4 +218,4 @@ Knowing this file is not the same as having access.
 - If you find something here that is no longer true, fix it, or tell the
   owner. Do not work around it silently.
 - When the owner sets a new rule, it goes into "Rules" above, with the reason
-  if they gave one.
+  if they gave one. A rule about one install goes into that install's runbook.
