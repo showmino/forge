@@ -419,6 +419,7 @@ data:
     providerConfig:
       kind: ClusterProviderConfig
       name: github
+    repoWorkflow: deploy.yml
     targets:
     - environments:
         production:
@@ -693,7 +694,7 @@ spec:
       labels: {app: forge-api}
       annotations:
         # forge-api reads the targets when it starts.
-        checksum/infrastructure: cca7420148c1ca5c6fae721916e03d0caba3a96ada4e2b8b56463482084a63b4
+        checksum/infrastructure: 8fde539dca7f9fac27f075b43b8acdc3e0950b0279c2880f90e7b2ae0c136263
     spec:
       serviceAccountName: forge-api
       securityContext:
@@ -832,6 +833,12 @@ spec:
             backend:
               service:
                 name: forge-web
+                port: {number: 80}
+          - path: /forge.v1.ApprovalService
+            pathType: Prefix
+            backend:
+              service:
+                name: forge-api
                 port: {number: 80}
           - path: /forge.v1.AuditService
             pathType: Prefix

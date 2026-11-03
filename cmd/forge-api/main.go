@@ -265,6 +265,16 @@ func run() error {
 		}
 		log.Info("infrastructure repos are on", "targets", len(infra.Targets), "workflow", infra.Workflow)
 	}
+	var approvals *server.Approvals
+	if infra != nil {
+		var dispatch server.Dispatcher
+		if gh, ok := repoHost(app).(server.Dispatcher); ok {
+			dispatch = gh
+		}
+		approvals = server.NewApprovals(server.ApprovalOptions{
+			Store: st, Catalog: catalog, Infra: infra, Dispatch: dispatch, Org: *githubOrg, Log: log,
+		})
+	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,
@@ -284,6 +294,7 @@ func run() error {
 		CIRunner:         *ciRunner,
 		CIDeployRunner:   *ciDeployRunner,
 		Infrastructure:   infra,
+		Approvals:        approvals,
 		MinClientVersion: *minClient,
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID, WebClientID: *webClientID},
 		Authenticator:    authn,

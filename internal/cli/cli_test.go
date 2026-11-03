@@ -55,6 +55,7 @@ type harness struct {
 	deploys       *server.Deploys
 	resources     *server.Resources
 	clusters      *server.Clusters
+	approvals     *server.Approvals
 	audit         *store.Memory
 }
 
@@ -108,6 +109,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Deploys:       h.deploys,
 		Resources:     h.resources,
 		Clusters:      h.clusters,
+		Approvals:     h.approvals,
 		Audit:         h.audit,
 		Sessions:      h.sessions,
 	})

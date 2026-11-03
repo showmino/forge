@@ -410,6 +410,21 @@ var auditActions = map[string]auditAction{
 		r := m.(*forgev1.DestroyEnvironmentRequest)
 		return "", r.GetName(), details("validate_only", flag(r.GetValidateOnly()))
 	}},
+	// The handler notes the service and the approval it made or decided.
+	forgev1connect.ApprovalServiceRequestApprovalProcedure: {"approval.request", func(any) (string, string, map[string]string) {
+		return "", "", nil
+	}},
+	forgev1connect.ApprovalServiceApproveApprovalProcedure: {"approval.approve", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.ApproveApprovalRequest)
+		return "", r.GetName(), details("reason", r.GetReason())
+	}},
+	forgev1connect.ApprovalServiceRejectApprovalProcedure: {"approval.reject", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.RejectApprovalRequest)
+		return "", r.GetName(), details("reason", r.GetReason())
+	}},
+	forgev1connect.ApprovalServiceClaimApprovalProcedure: {"approval.claim", func(m any) (string, string, map[string]string) {
+		return "", m.(*forgev1.ClaimApprovalRequest).GetName(), nil
+	}},
 	forgev1connect.DeployServiceStartDeployProcedure: {"deploy.start", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.StartDeployRequest)
 		s := serviceName(r.GetService())
@@ -456,6 +471,8 @@ var auditActions = map[string]auditAction{
 // auditReads lists every read procedure. A procedure in neither table fails
 // TestAuditCoversEveryProcedure, so new RPCs are classified on purpose.
 var auditReads = []string{
+	forgev1connect.ApprovalServiceGetApprovalProcedure,
+	forgev1connect.ApprovalServiceListApprovalsProcedure,
 	forgev1connect.ServiceCatalogServiceListServicesProcedure,
 	forgev1connect.ServiceCatalogServiceGetServiceProcedure,
 	forgev1connect.AuthServiceGetServerInfoProcedure,

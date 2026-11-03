@@ -26,7 +26,7 @@ metadata:
     {{- include "forge.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{- dict "namespace" $i.namespace "providerConfig" $i.providerConfig "workflow" $i.workflow "accessKinds" ($i.accessKinds | default list) "targets" $i.targets | toYaml | nindent 4 }}
+    {{- dict "namespace" $i.namespace "providerConfig" $i.providerConfig "workflow" $i.workflow "repoWorkflow" ($i.repoWorkflow | default "deploy.yml") "accessKinds" ($i.accessKinds | default list) "targets" $i.targets | toYaml | nindent 4 }}
 ---
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject

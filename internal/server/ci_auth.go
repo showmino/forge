@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,10 @@ func (a *GitHubOIDCAuthenticator) Authenticate(ctx context.Context, token string
 		Repository string `json:"repository"`
 		Ref        string `json:"ref"`
 		SHA        string `json:"sha"`
+		Actor      string `json:"actor"`
+		// run_id is a string in GitHub's tokens.
+		RunID          string `json:"run_id"`
+		JobWorkflowRef string `json:"job_workflow_ref"`
 	}
 	if err := idt.Claims(&c); err != nil {
 		return nil, fmt.Errorf("invalid GitHub Actions token claims: %w", err)
@@ -128,10 +133,11 @@ func (a *GitHubOIDCAuthenticator) Authenticate(ctx context.Context, token string
 	if c.Ref != "refs/heads/"+branch {
 		return nil, ciDenied("ref %q is not the default branch of %s (refs/heads/%s)", c.Ref, c.Repository, branch)
 	}
+	runID, _ := strconv.ParseInt(c.RunID, 10, 64) // 0 when missing: only approvals use it
 	return &Principal{
 		Subject:     "github:" + c.Repository,
 		Permissions: []string{PermDeploy(ids[0], "staging")},
-		Workload:    &Workload{Repository: c.Repository, Service: ids[0], SHA: c.SHA},
+		Workload:    &Workload{Repository: c.Repository, Service: ids[0], SHA: c.SHA, Actor: c.Actor, RunID: runID, JobWorkflowRef: c.JobWorkflowRef},
 	}, nil
 }
 

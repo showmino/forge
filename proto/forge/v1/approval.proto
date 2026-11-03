@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ApprovalService is the approval of an infrastructure repo's production
+// runs (phase 12). The shared workflow asks for one with its job's OIDC
+// token; a member of the owning team, not the person who started the run,
+// approves or rejects it; on approval Forge starts the repo's production run,
+// which claims the approval before it signs in. Names: "approvals/{id}".
+service ApprovalService {
+  // RequestApproval asks for production's approval of the calling job's
+  // commit. Only a CI token of an infrastructure repo, from the shared
+  // workflow, may call it. An approval still waiting for the same repo is
+  // superseded: only the newest commit can be approved.
+  rpc RequestApproval(RequestApprovalRequest) returns (RequestApprovalResponse) {}
+  // GetApproval returns one approval. A CI token reads only its own repo's.
+  rpc GetApproval(GetApprovalRequest) returns (GetApprovalResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // ListApprovals returns approvals, newest first.
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // ApproveApproval approves a waiting approval and starts the production
+  // run. The caller must be of the owning team (or an admin) and not the
+  // person who started the run. Approving one that is approved but not yet
+  // claimed starts the run again, for when starting it failed.
+  rpc ApproveApproval(ApproveApprovalRequest) returns (ApproveApprovalResponse) {}
+  // RejectApproval rejects a waiting approval.
+  rpc RejectApproval(RejectApprovalRequest) returns (RejectApprovalResponse) {}
+  // ClaimApproval is the production run's check, before it signs in: the
+  // approval must be approved, of the calling repo, and not claimed before.
+  // It returns the commit to deploy. Only a CI token from the shared
+  // workflow may call it, once.
+  rpc ClaimApproval(ClaimApprovalRequest) returns (ClaimApprovalResponse) {}
+}
+
+// Approval is one production run of an infrastructure repo, waiting for or
+// given its approval.
+message Approval {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    // Waiting for a member of the owning team.
+    STATE_PENDING = 1;
+    // Approved; the production run has been started.
+    STATE_APPROVED = 2;
+    STATE_REJECTED = 3;
+    // A newer commit asked for approval before this one was decided.
+    STATE_SUPERSEDED = 4;
+    // The production run claimed it: it is deploying, or has deployed.
+    STATE_CLAIMED = 5;
+  }
+  // "approvals/{id}".
+  string name = 1;
+  // "services/{service}".
+  string service = 2;
+  // The environment the run deploys to: production.
+  string environment = 3;
+  // The commit to deploy.
+  string commit = 4;
+  // The GitHub Actions run that asked, and its page.
+  int64 run_id = 5;
+  string run_url = 6;
+  // The GitHub user who started that run.
+  string requested_by = 7;
+  State state = 8;
+  // Who approved or rejected it (their GitHub user), and why.
+  string decided_by = 9;
+  string reason = 10;
+  google.protobuf.Timestamp create_time = 11;
+  google.protobuf.Timestamp decide_time = 12;
+  google.protobuf.Timestamp claim_time = 13;
+  // Why the production run could not be started, if it could not; approve
+  // again to retry.
+  string dispatch_error = 14;
+  // The team that owns the service, which approves.
+  string owner_team = 15;
+}
+
+message RequestApprovalRequest {}
+
+message RequestApprovalResponse {
+  Approval approval = 1;
+}
+
+message GetApprovalRequest {
+  string name = 1;
+}
+
+message GetApprovalResponse {
+  Approval approval = 1;
+}
+
+message ListApprovalsRequest {
+  // "services/{service}"; empty for every service.
+  string service = 1;
+  // Only approvals in this state; unspecified for every state.
+  Approval.State state = 2;
+  // At most this many; the server caps it at 200, and 0 means 50.
+  int32 page_size = 3;
+}
+
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+}
+
+message ApproveApprovalRequest {
+  string name = 1;
+  string reason = 2;
+}
+
+message ApproveApprovalResponse {
+  Approval approval = 1;
+}
+
+message RejectApprovalRequest {
+  string name = 1;
+  string reason = 2;
+}
+
+message RejectApprovalResponse {
+  Approval approval = 1;
+}
+
+message ClaimApprovalRequest {
+  string name = 1;
+}
+
+message ClaimApprovalResponse {
+  Approval approval = 1;
+}

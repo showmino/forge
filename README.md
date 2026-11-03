@@ -408,7 +408,14 @@ Secret) and variables, and the target's `access` (for Azure a federated
 credential whose subject is the shared workflow's). The
 `forge-infrastructure` ApplicationSet syncs them into
 `infrastructure.namespace`. Forge never deploys such a repo; deleting it
-removes the folder. See
+removes the folder. Its production runs wait in Forge: the shared workflow
+runs `forge approval request` with the job's token (only that workflow may),
+a member of the owning team who did not start the run approves it (`forge
+approval list --state pending`, `forge approval approve <id>`, the action
+`approval.decide`), and Forge starts the repo's `deploy.yml`
+(`infrastructure.repoWorkflow`) with the input `approval`; that run's
+`forge approval claim <id>` prints the commit to deploy, once. A newer
+commit's request supersedes a waiting one. See
 `docs/specs/2026-11-03-phase-12-infrastructure-repos-design.md`.
 `forge service connect github.com/<org>/<repo> --team <team>` connects an
 existing repo of the organization that has a Dockerfile, or Go, Node or

@@ -39,6 +39,10 @@ type Config struct {
 	// infrastructure repo calls, and the only one production's cloud access
 	// accepts.
 	Workflow string `yaml:"workflow"`
+	// RepoWorkflow is the workflow file of each infrastructure repo (under
+	// .github/workflows) that Forge starts, with the input approval, once
+	// production is approved; default deploy.yml.
+	RepoWorkflow string `yaml:"repoWorkflow,omitempty"`
 	// AccessKinds are the kinds the targets' access templates make, as
 	// "<group>/<Kind>"; the deploy repo's AppProject allows them.
 	AccessKinds []string `yaml:"accessKinds,omitempty"`
@@ -86,11 +90,12 @@ type AccessValues struct {
 }
 
 var (
-	dnsLabel   = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-	ghName     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,99}$`)
-	secretKey  = regexp.MustCompile(`^[-._a-zA-Z0-9]{1,253}$`)
-	workflowRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_./-]+\.ya?ml@refs/(heads|tags)/[A-Za-z0-9_./-]+$`)
-	kindRe     = regexp.MustCompile(`^[a-z0-9.-]+/[A-Z][A-Za-z0-9]*$`)
+	dnsLabel       = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	ghName         = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,99}$`)
+	secretKey      = regexp.MustCompile(`^[-._a-zA-Z0-9]{1,253}$`)
+	workflowRe     = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/\.github/workflows/[A-Za-z0-9_./-]+\.ya?ml@refs/(heads|tags)/[A-Za-z0-9_./-]+$`)
+	repoWorkflowRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.ya?ml$`)
+	kindRe         = regexp.MustCompile(`^[a-z0-9.-]+/[A-Z][A-Za-z0-9]*$`)
 )
 
 // Load reads and checks the config file.
@@ -132,6 +137,9 @@ func (c *Config) check() error {
 	}
 	if !workflowRe.MatchString(c.Workflow) {
 		return fmt.Errorf("workflow %q must be <owner>/<repo>/.github/workflows/<file>.yml@refs/heads/<branch> (or refs/tags/<tag>)", c.Workflow)
+	}
+	if c.RepoWorkflow != "" && !repoWorkflowRe.MatchString(c.RepoWorkflow) {
+		return fmt.Errorf("repoWorkflow %q must be a file name such as deploy.yml", c.RepoWorkflow)
 	}
 	for _, k := range c.AccessKinds {
 		if !kindRe.MatchString(k) {
@@ -274,3 +282,11 @@ func (c *Config) Subject(org, repo, env string) string {
 // token, whatever its environment's name, could match the subject a cloud
 // trusts.
 var SubjectClaims = []string{"job_workflow_ref", "repo", "context"}
+
+// RepoWorkflowFile is RepoWorkflow, or its default.
+func (c *Config) RepoWorkflowFile() string {
+	if c.RepoWorkflow == "" {
+		return "deploy.yml"
+	}
+	return c.RepoWorkflow
+}

@@ -271,6 +271,9 @@ infrastructure:
   # production's cloud access accepts:
   # <owner>/<repo>/.github/workflows/<file>.yml@refs/heads/<branch>.
   workflow: ""
+  # The workflow file of each infrastructure repo that Forge starts, with the
+  # input approval, once a production run is approved.
+  repoWorkflow: deploy.yml
   # The kinds the targets' access templates make, as <group>/<Kind>, such as
   # managedidentity.azure.m.upbound.io/FederatedIdentityCredential.
   accessKinds: []

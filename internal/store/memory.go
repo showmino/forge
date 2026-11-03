@@ -28,6 +28,10 @@ type Memory struct {
 
 	sesMu    sync.Mutex
 	sessions map[string]Session // by ID
+
+	aprMu     sync.Mutex
+	approvals map[string]Approval // by ID
+	aprOrder  []string            // IDs, oldest first
 }
 
 type memEntry struct {
