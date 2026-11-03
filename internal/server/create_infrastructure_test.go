@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/envtest"
@@ -37,6 +38,7 @@ const infraConfig = `
 namespace: forge-infrastructure
 providerConfig: {kind: ClusterProviderConfig, name: github}
 workflow: showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
+accessKinds: [managedidentity.azure.m.upbound.io/FederatedIdentityCredential]
 targets:
   - name: azure
     environments:
@@ -119,7 +121,7 @@ func TestCreateInfrastructure(t *testing.T) {
 			steps = append(steps, s.GetName())
 		}
 	}
-	if got := strings.Join(steps, ","); got != "fetch,render,create_repo,grant_team,push,oidc_subject,write_infrastructure,register,setup" {
+	if got := strings.Join(steps, ","); got != "fetch,render,create_repo,grant_team,oidc_subject,push,write_infrastructure,register,setup" {
 		t.Errorf("steps %s", got)
 	}
 	svc := msgs[len(msgs)-1].GetService()
@@ -129,7 +131,7 @@ func TestCreateInfrastructure(t *testing.T) {
 	if i := svc.GetInfrastructure(); i.GetTool() != "opentofu" || i.GetTarget() != "azure" || strings.Join(i.GetEnvironments(), ",") != "production" {
 		t.Errorf("infrastructure %v", i)
 	}
-	if got := strings.Join(e.repos.oidc["infra-net"], ","); got != "repo,context,job_workflow_ref" {
+	if got := strings.Join(e.repos.oidc["infra-net"], ","); got != "job_workflow_ref,repo,context" {
 		t.Errorf("OIDC claims %q", got)
 	}
 	rec, err := e.deploys.readInfrastructure(ctx, "infra-net")
@@ -141,7 +143,7 @@ func TestCreateInfrastructure(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"kind: Environment", "kind: EnvironmentDeploymentPolicy", "secretName: AZURE_CLIENT_ID",
-		"subject: repo:showmino/infra-net:environment:production:job_workflow_ref:showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main"} {
+		"subject: job_workflow_ref:showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:showmino/infra-net:environment:production"} {
 		if !strings.Contains(string(objs), want) {
 			t.Errorf("production.yaml has no %q:\n%s", want, objs)
 		}
@@ -215,6 +217,8 @@ func TestCreateInfrastructureRefuses(t *testing.T) {
 		{"target on a service template", e, with(func(r *forgev1.CreateServiceRequest) { r.Template = "templates/svc" }), connect.CodeInvalidArgument, "svc is not an infrastructure template"},
 		{"target with an image", e, with(func(r *forgev1.CreateServiceRequest) { r.Template, r.Image = "", "nginx:1.27" }), connect.CodeInvalidArgument, "target and environments are for an infrastructure template"},
 		{"not configured", newInfraEnv(t, true), infraRequest("infra-net"), connect.CodeFailedPrecondition, "no --infrastructure-config"},
+		{"run options", e, with(func(r *forgev1.CreateServiceRequest) { r.RunOptions = &forgev1.RunOptions{} }), connect.CodeInvalidArgument, "run options are for a service"},
+		{"team not a slug", e, with(func(r *forgev1.CreateServiceRequest) { r.OwnerTeam = "Platform Team" }), connect.CodeInvalidArgument, "must be a team's slug"},
 	} {
 		_, err := tt.env.create(ctx, "writer", tt.req)
 		if connect.CodeOf(err) != tt.code || !strings.Contains(err.Error(), tt.msg) {
@@ -246,7 +250,7 @@ func TestCreateInfrastructureRollsBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := msgs[len(msgs)-1].GetFailure()
-	if f == nil || f.GetStep() != "infrastructure" || !strings.Contains(f.GetMessage(), "Resource not accessible") || !f.GetRolledBack() {
+	if f == nil || f.GetStep() != "oidc_subject" || !strings.Contains(f.GetMessage(), "Resource not accessible") || !f.GetRolledBack() {
 		t.Fatalf("failure %v", msgs[len(msgs)-1])
 	}
 	if ok, _ := e.repos.RepoExists(ctx, "showmino", "infra-net"); ok {
@@ -257,5 +261,65 @@ func TestCreateInfrastructureRollsBack(t *testing.T) {
 	}
 	if ok, _ := e.catalog.has(ctx, "services/infra-net"); ok {
 		t.Error("it is in the catalog")
+	}
+}
+
+// A folder an earlier repo of the same name left behind refuses the name:
+// it would hand the new repo its environments and cloud access.
+func TestCreateInfrastructureLeftoverFolder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	e.repo.Push("infrastructure/infra-net/staging.yaml", []byte("kind: Environment\n"), "left behind")
+	_, err := e.create(ctx, "writer", infraRequest("infra-net"))
+	if connect.CodeOf(err) != connect.CodeAlreadyExists || !strings.Contains(err.Error(), "still has infrastructure/infra-net") {
+		t.Fatalf("leftover: %v", err)
+	}
+	// removeInfrastructure takes every file Forge may have written, with or
+	// without a record.
+	if err := e.deploys.removeInfrastructure(ctx, "infra-net"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.create(ctx, "writer", infraRequest("infra-net")); err != nil {
+		t.Errorf("after the cleanup: %v", err)
+	}
+}
+
+// A failure after the deploy repo was written takes the folder back, and
+// says when it could not.
+func TestCreateInfrastructureRollsBackTheFolder(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	// Someone registers the name while the repo is made: register fails.
+	e.repos.onCreate = func() { register(t, e.catalog, "infra-net") }
+	msgs, err := e.create(ctx, "writer", infraRequest("infra-net"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := msgs[len(msgs)-1].GetFailure()
+	if f == nil || f.GetStep() != "register" || !f.GetRolledBack() {
+		t.Fatalf("failure %v", msgs[len(msgs)-1])
+	}
+	if left, _ := e.deploys.infrastructureLeft(ctx, "infra-net"); len(left) != 0 {
+		t.Errorf("left in the deploy repo: %v", left)
+	}
+}
+
+// An infrastructure repo cannot move to another team: its target's rules and
+// its cloud access are its team's.
+func TestInfrastructureRepoKeepsItsTeam(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	if _, err := e.create(ctx, "writer", infraRequest("infra-net")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.catalog.UpdateService(writerCtx(), connect.NewRequest(&forgev1.UpdateServiceRequest{
+		Service:    &forgev1.Service{Name: "services/infra-net", OwnerTeam: "web"},
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"owner_team"}},
+	}))
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "cannot move to another team") {
+		t.Errorf("move: %v", err)
 	}
 }

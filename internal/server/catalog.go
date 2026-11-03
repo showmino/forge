@@ -378,6 +378,11 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		if err != nil {
 			return err
 		}
+		if cur.GetInfrastructure() != nil && slices.Contains(paths, "owner_team") && in.GetOwnerTeam() != cur.GetOwnerTeam() {
+			// Its target's rules, and its cloud access, were checked and
+			// written for the team it was made for.
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is an infrastructure repo of team %s: its target and cloud access are that team's, so it cannot move to another team", name, cur.GetOwnerTeam()))
+		}
 		if in.GetEtag() != "" && in.GetEtag() != cur.GetEtag() {
 			return connect.NewError(connect.CodeAborted, fmt.Errorf("%s changed since it was read (etag %s, now %s)", name, in.GetEtag(), cur.GetEtag()))
 		}

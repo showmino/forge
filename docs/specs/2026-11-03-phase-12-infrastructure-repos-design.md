@@ -190,12 +190,16 @@ the target has):
 1. Checks the caller may create for the team, the team may use the target,
    and each chosen environment has room (`maxRepos`).
 2. Creates the repo from the template, as for a service, and registers it.
-3. Sets the repo's OIDC subject claim (GitHub's per-repo customization, with
-   the App) to include `job_workflow_ref`, so a token says which workflow
-   asked for it. The subject of the production credential is then
-   `repo:<org>/<repo>:environment:production:job_workflow_ref:<infrastructure.workflow>`.
+3. Sets the repo's OIDC subject claims (GitHub's per-repo customization, with
+   the App, before the first push) to `job_workflow_ref`, `repo`, `context`,
+   so a token says which workflow asked for it. The subject of the
+   production credential is then
+   `job_workflow_ref:<infrastructure.workflow>:repo:<org>/<repo>:environment:production`.
    A repo whose own workflow skips the shared one cannot sign in to
-   production.
+   production, and since GitHub's default subject starts with `repo:`, a
+   reset setting fails closed whatever an environment is named. (The
+   installed Crossplane GitHub provider has no kind for this setting, so it
+   is not put back if changed; it fails closed instead.)
 4. Writes `infrastructure/<repo>/` in the deploy repo with one commit:
    `target.yaml` (target, environments) and the Crossplane objects:
    - an `Environment` (`repo.github.m.upbound.io`) per chosen environment,

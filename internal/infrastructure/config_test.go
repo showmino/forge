@@ -86,6 +86,7 @@ func TestParseRefuses(t *testing.T) {
 		"access namespace":   {"            name: {{ .Repo }}-{{ .Environment }}", "            name: x\n            namespace: other", "metadata.namespace"},
 		"access no name":     {"            name: {{ .Repo }}-{{ .Environment }}", "            labels: {}", "metadata.name"},
 		"bad access kind":    {"[managedidentity.azure.m.upbound.io/FederatedIdentityCredential]", "[FederatedIdentityCredential]", "accessKinds"},
+		"kind not listed":    {"accessKinds: [managedidentity.azure.m.upbound.io/FederatedIdentityCredential]", "accessKinds: []", "accessKinds does not list (add managedidentity.azure.m.upbound.io/FederatedIdentityCredential)"},
 		"target named twice": {"targets:\n", "targets:\n  - name: azure\n    environments: {staging: {secret: s}}\n", "named twice"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -103,7 +104,7 @@ func TestParseRefuses(t *testing.T) {
 
 func TestSubject(t *testing.T) {
 	c := mustParse(t, sample)
-	want := "repo:my-org/infra-net:environment:production:job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main"
+	want := "job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org/infra-net:environment:production"
 	if got := c.Subject("my-org", "infra-net", "production"); got != want {
 		t.Errorf("Subject = %s\nwant %s", got, want)
 	}

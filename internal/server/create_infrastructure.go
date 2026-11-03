@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"connectrpc.com/connect"
 	"gopkg.in/yaml.v3"
@@ -50,19 +51,37 @@ func (c *creator) infraReady() error {
 }
 
 // planInfrastructure checks the request's target and environments against
-// the target rules and renders what the deploy repo will hold.
-func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateServiceRequest) (*infraPlan, error) {
+// the target rules and renders what the deploy repo will hold. It holds the
+// target's lock until release is called, after the repo is registered: the
+// count of the target's repos (maxRepos) stays right while creates of it
+// run at the same time. forge-api runs as one pod.
+func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateServiceRequest) (p *infraPlan, release func(), err error) {
 	if err := c.infraReady(); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if req.GetRunOptions() != nil {
+		return nil, nil, invalid("run options are for a service: an infrastructure repo deploys itself and has no run")
+	}
+	team := req.GetOwnerTeam()
+	if !manifest.ValidID(team) {
+		return nil, nil, invalid(fmt.Sprintf("owner_team %q must be a team's slug", team))
 	}
 	name := req.GetTarget()
 	if name == "" {
-		return nil, invalid(fmt.Sprintf("an infrastructure template needs a target: one of %s", strings.Join(c.targetNames(), ", ")))
+		return nil, nil, invalid(fmt.Sprintf("an infrastructure template needs a target: one of %s", strings.Join(c.targetNames(), ", ")))
 	}
 	t, ok := c.infra.Target(name)
 	if !ok {
-		return nil, invalid(fmt.Sprintf("there is no target %q: the targets are %s", name, strings.Join(c.targetNames(), ", ")))
+		return nil, nil, invalid(fmt.Sprintf("there is no target %q: the targets are %s", name, strings.Join(c.targetNames(), ", ")))
 	}
+	mu, _ := c.targetLocks.LoadOrStore(t.Name, &sync.Mutex{})
+	unlock := mu.(*sync.Mutex).Unlock
+	mu.(*sync.Mutex).Lock()
+	defer func() {
+		if err != nil {
+			unlock()
+		}
+	}()
 	envs := req.GetEnvironments()
 	if len(envs) == 0 {
 		envs = t.EnvironmentNames()
@@ -81,26 +100,25 @@ func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateSer
 	}
 	full, err := c.fullEnvironments(ctx, t)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	team := req.GetOwnerTeam()
 	res, err := c.deploys.o.Policy.EvaluateTarget(ctx, policy.Target{
 		Service: req.GetServiceId(), Team: team, Target: t.Name, Teams: t.Teams,
 		Environments: ordered, Offered: t.EnvironmentNames(), Full: full,
 		Actor: policy.Actor{Kind: actorUser, Subject: subjectOf(ctx)},
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check the target rules: %w", err))
+		return nil, nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check the target rules: %w", err))
 	}
 	noteAuditDetail(ctx, "policy_rules", c.deploys.o.Policy.Fingerprint())
 	if res.Denied() {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("the target rules refuse it: %s", strings.Join(res.Deny, "; ")))
+		return nil, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("the target rules refuse it: %s", strings.Join(res.Deny, "; ")))
 	}
 	files, err := c.infra.Files(t, infrastructure.Repo{Org: c.org, Name: req.GetServiceId(), Team: team, Environments: ordered})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("target %s: %w", t.Name, err))
+		return nil, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("target %s: %w", t.Name, err))
 	}
-	return &infraPlan{target: t, envs: ordered, files: files}, nil
+	return &infraPlan{target: t, envs: ordered, files: files}, unlock, nil
 }
 
 func (c *creator) targetNames() []string {
@@ -127,27 +145,27 @@ func (c *creator) fullEnvironments(ctx context.Context, t infrastructure.Target)
 	return full, nil
 }
 
-// setUpInfrastructure ties the new repo's production sign-in to the shared
-// workflow and writes its Crossplane objects into the deploy repo. undo takes
-// back the deploy repo's part.
-func (c *creator) setUpInfrastructure(ctx context.Context, id string, p *infraPlan, started func(string), done func(string, string)) (undo func(), err error) {
+// setOIDCSubject makes the new repo's OIDC subject name the workflow, before
+// its first push: the scaffold's first run then already gets that subject.
+func (c *creator) setOIDCSubject(ctx context.Context, id string, started func(string), done func(string, string)) error {
 	started("oidc_subject")
 	if err := c.oidc.SetOIDCSubjectClaims(ctx, c.org, id, infrastructure.SubjectClaims); err != nil {
-		return nil, fmt.Errorf("make github.com/%s/%s's OIDC subject name the workflow: %w", c.org, id, err)
+		return fmt.Errorf("make github.com/%s/%s's OIDC subject name the workflow: %w", c.org, id, err)
 	}
 	done("oidc_subject", strings.Join(infrastructure.SubjectClaims, ", "))
+	return nil
+}
 
+// writeInfrastructure writes the repo's Crossplane objects into the deploy
+// repo.
+func (c *creator) writeInfrastructure(ctx context.Context, id string, p *infraPlan, started func(string), done func(string, string)) error {
 	started("write_infrastructure")
 	sha, err := c.deploys.commitFiles(ctx, p.files, fmt.Sprintf("set up the infrastructure repo %s for target %s (%s)", id, p.target.Name, actorOf(ctx)))
 	if err != nil {
-		return nil, fmt.Errorf("write %s in the deploy repo: %w", infrastructure.Folder(id), err)
+		return fmt.Errorf("write %s in the deploy repo: %w", infrastructure.Folder(id), err)
 	}
 	done("write_infrastructure", fmt.Sprintf("forge-deploys %s: %s (%s)", shortSHA(sha), infrastructure.Folder(id), strings.Join(p.envs, ", ")))
-	return func() {
-		if err := c.deploys.removeInfrastructure(ctx, id); err != nil {
-			c.log.WarnContext(ctx, "take back an infrastructure repo's setup", "service", id, "error", err)
-		}
-	}, nil
+	return nil
 }
 
 // infrastructureApp is the Argo CD application of an infrastructure repo's
@@ -190,17 +208,43 @@ func (d *Deploys) readInfrastructure(ctx context.Context, id string) (*infrastru
 	return &rec, nil
 }
 
+// infrastructureFiles are the paths in the deploy repo's folder of id that
+// Forge may have written, whatever its Record says.
+func infrastructureFiles(id string) []string {
+	out := []string{infrastructure.RecordPath(id)}
+	for _, env := range infrastructure.Environments {
+		out = append(out, infrastructure.Folder(id)+"/"+env+".yaml")
+	}
+	return out
+}
+
+// infrastructureLeft returns the files of the folder of id the deploy repo
+// holds.
+func (d *Deploys) infrastructureLeft(ctx context.Context, id string) ([]string, error) {
+	var there []string
+	for _, p := range infrastructureFiles(id) {
+		_, err := d.o.Repo.Read(ctx, p, "")
+		switch {
+		case err == nil:
+			there = append(there, p)
+		case !errors.Is(err, github.ErrNotFound):
+			return nil, fmt.Errorf("read %s in the deploy repo: %w", p, err)
+		}
+	}
+	return there, nil
+}
+
 // removeInfrastructure deletes the infrastructure repo id's folder from the
 // deploy repo: Argo CD then deletes its Crossplane objects, and Crossplane
 // its GitHub environments and cloud access. Safe to repeat.
 func (d *Deploys) removeInfrastructure(ctx context.Context, id string) error {
-	rec, err := d.readInfrastructure(ctx, id)
-	if err != nil || rec == nil {
+	there, err := d.infrastructureLeft(ctx, id)
+	if err != nil || len(there) == 0 {
 		return err
 	}
-	files := map[string][]byte{infrastructure.RecordPath(id): nil}
-	for _, env := range rec.Environments {
-		files[infrastructure.Folder(id)+"/"+env+".yaml"] = nil
+	files := map[string][]byte{}
+	for _, p := range there {
+		files[p] = nil
 	}
 	_, err = d.commitFiles(ctx, files, fmt.Sprintf("remove the infrastructure repo %s (%s)", id, actorOf(ctx)))
 	return err

@@ -78,7 +78,10 @@ type creator struct {
 	infra *infrastructure.Config
 	oidc  OIDCSubjects
 	org   string
-	log   *slog.Logger
+	// targetLocks holds a *sync.Mutex per target, held while a create of an
+	// infrastructure repo for it runs (planInfrastructure).
+	targetLocks sync.Map
+	log         *slog.Logger
 
 	mu sync.Mutex
 	// results tracks each create by request_id.
@@ -267,6 +270,17 @@ func (c *creator) checkFree(ctx context.Context, id string) error {
 			return connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("github.com/%s/%s already exists", c.org, id))
 		}
 	}
+	// A folder an earlier repo of this name left in the deploy repo would give
+	// the new one its environments and cloud access.
+	if c.deploys != nil && c.deploys.o.Repo != nil {
+		left, err := c.deploys.infrastructureLeft(ctx, id)
+		if err != nil {
+			return connect.NewError(connect.CodeUnavailable, err)
+		}
+		if len(left) > 0 {
+			return connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("the deploy repo still has %s from an earlier %s; remove it before using the name again", infrastructure.Folder(id), id))
+		}
+	}
 	return nil
 }
 
@@ -316,6 +330,9 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if t.IsFile() {
 		return c.propose(ctx, req, t, version, skeleton, w)
 	}
+	if t.IsInfrastructure() && req.GetRunOptions() != nil {
+		return nil, invalid("run options are for a service: an infrastructure repo deploys itself and has no run")
+	}
 	if err := c.checkFree(ctx, id); err != nil {
 		return nil, err
 	}
@@ -360,9 +377,11 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	svc.RepoUrl = repoURL
 	var infra *infraPlan
 	if t.IsInfrastructure() {
-		if infra, err = c.planInfrastructure(ctx, req); err != nil {
+		var release func()
+		if infra, release, err = c.planInfrastructure(ctx, req); err != nil {
 			return nil, err
 		}
+		defer release()
 		svc.Infrastructure = infrastructureOf(m, infra)
 	}
 	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true}), false); err != nil {
@@ -398,15 +417,22 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	}
 	done("create_repo", "github.com/"+c.org+"/"+id)
 
-	var undoInfra func()
+	// wroteInfra: the deploy repo may hold the repo's infrastructure folder
+	// (a write that failed may still have landed), so a failure removes it.
+	wroteInfra := false
 	fail := func(step string, cause error) (*forgev1.CreateServiceResponse, error) {
-		if undoInfra != nil {
-			undoInfra()
+		msg := cause.Error()
+		var undoErr error
+		if wroteInfra {
+			if undoErr = c.deploys.removeInfrastructure(work, id); undoErr != nil {
+				msg += fmt.Sprintf("; and %s could not be removed from the deploy repo (%v): remove it before using the name again", infrastructure.Folder(id), undoErr)
+			}
 		}
 		delErr := c.repos.DeleteRepo(work, c.org, id)
-		c.log.WarnContext(ctx, "create failed", "service", id, "step", step, "error", cause, "rolled_back", delErr == nil, "rollback_error", delErr)
+		rolledBack := delErr == nil && undoErr == nil
+		c.log.WarnContext(ctx, "create failed", "service", id, "step", step, "error", cause, "rolled_back", rolledBack, "rollback_error", errors.Join(delErr, undoErr))
 		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Failure{Failure: &forgev1.CreateFailure{
-			Step: step, Message: cause.Error(), RolledBack: delErr == nil,
+			Step: step, Message: msg, RolledBack: rolledBack,
 		}}}
 		noteCreateFailure(ctx, final)
 		w.send(final)
@@ -421,6 +447,12 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		done("grant_team", team+" ("+teamRepoRole+")")
 	}
 
+	if infra != nil {
+		if err := c.setOIDCSubject(work, id, started, done); err != nil {
+			return fail("oidc_subject", err)
+		}
+	}
+
 	started("push")
 	pushFiles := make([]github.File, 0, len(files))
 	for _, f := range files {
@@ -433,8 +465,9 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	done("push", shortSHA(sha)+" (CI started)")
 
 	if infra != nil {
-		if undoInfra, err = c.setUpInfrastructure(work, id, infra, started, done); err != nil {
-			return fail("infrastructure", err)
+		wroteInfra = true
+		if err := c.writeInfrastructure(work, id, infra, started, done); err != nil {
+			return fail("write_infrastructure", err)
 		}
 	}
 

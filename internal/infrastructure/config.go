@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"slices"
@@ -157,7 +158,7 @@ func (c *Config) check() error {
 			if !slices.Contains(Environments, name) {
 				return fmt.Errorf("target %s: environment %q must be one of %s", t.Name, name, strings.Join(Environments, ", "))
 			}
-			if err := e.check(); err != nil {
+			if err := e.check(c.AccessKinds); err != nil {
 				return fmt.Errorf("target %s, %s: %w", t.Name, name, err)
 			}
 			t.Environments[name] = e
@@ -166,7 +167,33 @@ func (c *Config) check() error {
 	return nil
 }
 
-func (e *Environment) check() error {
+// checkKinds checks that every object of docs is of a kind in kinds
+// ("<group>/<Kind>"): the AppProject allows only those.
+func checkKinds(docs []byte, kinds []string) error {
+	dec := yaml.NewDecoder(bytes.NewReader(docs))
+	for {
+		var d struct {
+			APIVersion string `yaml:"apiVersion"`
+			Kind       string `yaml:"kind"`
+		}
+		err := dec.Decode(&d)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		group, _, _ := strings.Cut(d.APIVersion, "/")
+		if !strings.Contains(d.APIVersion, "/") {
+			group = "" // the core group: v1
+		}
+		if k := group + "/" + d.Kind; !slices.Contains(kinds, k) {
+			return fmt.Errorf("makes a %s, which accessKinds does not list (add %s)", d.Kind, k)
+		}
+	}
+}
+
+func (e *Environment) check(kinds []string) error {
 	if !dnsLabel.MatchString(e.Secret) {
 		return fmt.Errorf("secret %q must be a Secret's name", e.Secret)
 	}
@@ -197,7 +224,11 @@ func (e *Environment) check() error {
 		e.access = t
 		// A sample repo shows a template that cannot render now, not at the
 		// first create.
-		if _, err := e.renderAccess(AccessValues{Org: "my-org", Repo: "sample", Team: "team", Environment: "staging", Subject: "repo:my-org/sample:environment:staging"}, nil); err != nil {
+		sample, err := e.renderAccess(AccessValues{Org: "my-org", Repo: "sample", Team: "team", Environment: "staging", Subject: "repo:my-org/sample:environment:staging"}, nil)
+		if err != nil {
+			return fmt.Errorf("access: %w", err)
+		}
+		if err := checkKinds(sample, kinds); err != nil {
 			return fmt.Errorf("access: %w", err)
 		}
 	}
@@ -231,12 +262,15 @@ func (t Target) Allows(team string) bool {
 }
 
 // Subject is the OIDC subject GitHub gives a job of org/repo in env once the
-// repo's subject claim includes the workflow (SubjectClaims): only runs of
-// the shared workflow carry it.
+// repo's subject claims are SubjectClaims: only runs of the shared workflow
+// carry it.
 func (c *Config) Subject(org, repo, env string) string {
-	return "repo:" + org + "/" + repo + ":environment:" + env + ":job_workflow_ref:" + c.Workflow
+	return "job_workflow_ref:" + c.Workflow + ":repo:" + org + "/" + repo + ":environment:" + env
 }
 
 // SubjectClaims are the claims, in order, of an infrastructure repo's
-// customized OIDC subject.
-var SubjectClaims = []string{"repo", "context", "job_workflow_ref"}
+// customized OIDC subject. The workflow comes first: GitHub's default
+// subject starts with "repo:", so if the repo's setting were ever reset, no
+// token, whatever its environment's name, could match the subject a cloud
+// trusts.
+var SubjectClaims = []string{"job_workflow_ref", "repo", "context"}

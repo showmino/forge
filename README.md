@@ -400,8 +400,8 @@ Actions deploy to a target, a set of cloud accounts (one per environment)
 the platform team sets up in the chart's `infrastructure.targets`
 (forge-api `--infrastructure-config`). forge-api checks the target rules
 (`policy/targets.rego`: the target's teams, its environments, `maxRepos`),
-makes the repo's OIDC subject name the workflow (`repo`, `context`,
-`job_workflow_ref`), and writes `infrastructure/<name>/` in the deploy repo:
+makes the repo's OIDC subject name the workflow first (`job_workflow_ref`,
+`repo`, `context`), and writes `infrastructure/<name>/` in the deploy repo:
 `target.yaml` and, per environment, Crossplane objects for the GitHub
 environment (production only from `main`), its secrets (from the target's
 Secret) and variables, and the target's `access` (for Azure a federated
