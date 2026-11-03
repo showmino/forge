@@ -315,7 +315,7 @@ hand in GitHub is put back.
 
 ## Names (confirmed by the owner, 2026-11-03)
 
- `--target` and `--environments` on `forge create`; `forge approval
+`--target` and `--environments` on `forge create`; `forge approval
 approve | reject | list`; `forge approval exception request | list | revoke`;
 the dashboard page "Approvals". `target:` already means something else in
 `template.yaml` (the repo a file template writes to); users do not see that
