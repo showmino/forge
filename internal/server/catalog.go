@@ -260,6 +260,10 @@ func (c *Catalog) RegisterService(ctx context.Context, req *connect.Request[forg
 	if err := authorize(ctx, ActServiceRegister, ""); err != nil {
 		return nil, err
 	}
+	if req.Msg.GetService().GetInfrastructure() != nil {
+		// Only CreateService sets it: it sets up what the field says.
+		return nil, invalid("service.infrastructure is output only: make an infrastructure repo with forge create")
+	}
 	return c.register(ctx, req, true)
 }
 

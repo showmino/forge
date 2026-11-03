@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 
@@ -16,6 +18,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/template"
 )
@@ -69,8 +72,13 @@ type creator struct {
 	// ciRunner and ciDeployRunner are the runners of a connected repo's
 	// workflow: where it builds, and where it deploys (it must reach the API).
 	ciRunner, ciDeployRunner string
-	org                      string
-	log                      *slog.Logger
+	// infra are the targets infrastructure repos deploy to, and oidc ties a
+	// new one's production sign-in to the shared workflow; nil: none can be
+	// made.
+	infra *infrastructure.Config
+	oidc  OIDCSubjects
+	org   string
+	log   *slog.Logger
 
 	mu sync.Mutex
 	// results tracks each create by request_id.
@@ -124,6 +132,9 @@ func validateCreate(req *forgev1.CreateServiceRequest) error {
 		}
 	case !manifest.ValidID(strings.TrimPrefix(req.GetTemplate(), templatePrefix)):
 		return invalid(fmt.Sprintf("template %q must look like templates/{template}", req.GetTemplate()))
+	}
+	if (req.GetTarget() != "" || len(req.GetEnvironments()) > 0) && req.GetTemplate() == "" {
+		return invalid("target and environments are for an infrastructure template")
 	}
 	if strings.TrimSpace(req.GetOwnerTeam()) == "" {
 		return invalid("owner_team is required")
@@ -299,6 +310,9 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	if !t.IsInfrastructure() && (req.GetTarget() != "" || len(req.GetEnvironments()) > 0) {
+		return nil, invalid(fmt.Sprintf("%s is not an infrastructure template: target and environments do not apply", tname))
+	}
 	if t.IsFile() {
 		return c.propose(ctx, req, t, version, skeleton, w)
 	}
@@ -326,7 +340,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if err != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s does not render: %w", tname, version, err))
 	}
-	if err := template.CheckManifest(files, id, req.GetOwnerTeam()); err != nil {
+	if err := t.CheckManifest(files, id, req.GetOwnerTeam()); err != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", tname, version, err))
 	}
 	if ro := req.GetRunOptions(); ro != nil {
@@ -344,6 +358,13 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	// field) is found now, before anything is created.
 	svc := serviceFromManifest(m)
 	svc.RepoUrl = repoURL
+	var infra *infraPlan
+	if t.IsInfrastructure() {
+		if infra, err = c.planInfrastructure(ctx, req); err != nil {
+			return nil, err
+		}
+		svc.Infrastructure = infrastructureOf(m, infra)
+	}
 	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true}), false); err != nil {
 		return nil, err
 	}
@@ -353,6 +374,11 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		plan := &forgev1.CreatePlan{TemplateVersion: version, RepoUrl: repoURL}
 		for _, f := range files {
 			plan.Files = append(plan.Files, f.Path)
+		}
+		if infra != nil {
+			for _, p := range slices.Sorted(maps.Keys(infra.files)) {
+				plan.Files = append(plan.Files, "forge-deploys: "+p)
+			}
 		}
 		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Plan{Plan: plan}}
 		w.send(final)
@@ -372,7 +398,11 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	}
 	done("create_repo", "github.com/"+c.org+"/"+id)
 
+	var undoInfra func()
 	fail := func(step string, cause error) (*forgev1.CreateServiceResponse, error) {
+		if undoInfra != nil {
+			undoInfra()
+		}
 		delErr := c.repos.DeleteRepo(work, c.org, id)
 		c.log.WarnContext(ctx, "create failed", "service", id, "step", step, "error", cause, "rolled_back", delErr == nil, "rollback_error", delErr)
 		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Failure{Failure: &forgev1.CreateFailure{
@@ -402,12 +432,21 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	}
 	done("push", shortSHA(sha)+" (CI started)")
 
+	if infra != nil {
+		if undoInfra, err = c.setUpInfrastructure(work, id, infra, started, done); err != nil {
+			return fail("infrastructure", err)
+		}
+	}
+
 	started("register")
 	resp, err := c.catalog.register(work, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc}), false)
 	if err != nil {
 		return fail("register", err)
 	}
 	done("register", servicePrefix+id)
+	if infra != nil {
+		c.awaitInfrastructure(work, id, infra, started, done)
+	}
 
 	p, _ := PrincipalFrom(ctx)
 	c.log.InfoContext(ctx, "service created", "service", id, "template", tname, "version", version, "repo", repoURL, "by", p.Subject)

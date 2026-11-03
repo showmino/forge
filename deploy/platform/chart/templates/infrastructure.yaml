@@ -1,0 +1,110 @@
+{{- if .Values.infrastructure.enabled }}
+{{- if not .Values.deploys.enabled }}
+{{- fail "infrastructure.enabled needs deploys.enabled: infrastructure repos are set up through the deploy repo" }}
+{{- end }}
+{{- $i := .Values.infrastructure }}
+{{- if not $i.workflow }}
+{{- fail "infrastructure.workflow is required: the shared workflow every infrastructure repo calls, <owner>/<repo>/.github/workflows/<file>.yml@refs/heads/<branch>" }}
+{{- end }}
+{{- if not $i.targets }}
+{{- fail "infrastructure.targets: name at least one target" }}
+{{- end }}
+# Infrastructure repos (phase 12): repos of infrastructure code that deploy
+# themselves from GitHub Actions to a target. forge-api reads the targets
+# below and writes infrastructure/<repo>/ in the deploy repo: Crossplane
+# objects for the repo's GitHub environments, their secrets and variables,
+# and the target's cloud access. The ApplicationSet makes <repo>-infrastructure
+# from each folder, into infrastructure.namespace, where the targets'
+# Secrets are. Crossplane (its GitHub provider and one for each cloud the
+# targets use) must be installed; this chart does not install it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forge-infrastructure
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- dict "namespace" $i.namespace "providerConfig" $i.providerConfig "workflow" $i.workflow "accessKinds" ($i.accessKinds | default list) "targets" $i.targets | toYaml | nindent 4 }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: forge-infrastructure
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  description: {{ printf "Forge's infrastructure repos: GitHub environments and cloud access, from %s" (include "forge.deployRepo" .) | quote }}
+  sourceRepos:
+    - {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: {{ $i.namespace | quote }}}
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: repo.github.m.upbound.io, kind: Environment}
+    - {group: repo.github.m.upbound.io, kind: EnvironmentDeploymentPolicy}
+    - {group: actions.github.m.upbound.io, kind: EnvironmentSecret}
+    - {group: actions.github.m.upbound.io, kind: EnvironmentVariable}
+    {{- range $i.accessKinds }}
+    {{- $parts := splitList "/" . }}
+    {{- if ne (len $parts) 2 }}
+    {{- fail (printf "infrastructure.accessKinds: %q must be <group>/<Kind>" .) }}
+    {{- end }}
+    - {group: {{ index $parts 0 | quote }}, kind: {{ index $parts 1 | quote }}}
+    {{- end }}
+---
+# The double-brace expressions are Argo CD ApplicationSet's own Go
+# templates, emitted as literal text, as in deploys.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: forge-infrastructure
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+        revision: main
+        directories:
+          - path: infrastructure/*
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{`{{ .path.basename }}`}}-infrastructure'
+      labels:
+        app.kubernetes.io/managed-by: forge
+        forge.dev/service: '{{`{{ .path.basename }}`}}'
+      # Deleting the folder deletes the objects, and Crossplane what they made.
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: forge-infrastructure
+      source:
+        repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+        targetRevision: main
+        path: '{{`{{ .path.path }}`}}'
+        directory:
+          # target.yaml is Forge's record, not a Kubernetes object.
+          exclude: target.yaml
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: {{ $i.namespace | quote }}
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
+{{- end }}

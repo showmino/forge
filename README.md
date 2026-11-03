@@ -392,6 +392,24 @@ values, with production's own values from `forge.yaml`; rollback restores
 both. forge-api runs it with `--charts` (`FORGE_CHARTS=1`, the chart's
 `deploys.charts.enabled`). See
 `docs/specs/2026-10-30-phase-11-helm-charts-design.md`.
+`forge create <name> --template opentofu --target <target> [--environments
+production] --team <team>` makes an infrastructure repo from a template of
+`type: infrastructure` (its `forge.yaml` has `infrastructure.tool`, and no
+`run` or `chart`): a repo of Bicep or OpenTofu code that its own GitHub
+Actions deploy to a target, a set of cloud accounts (one per environment)
+the platform team sets up in the chart's `infrastructure.targets`
+(forge-api `--infrastructure-config`). forge-api checks the target rules
+(`policy/targets.rego`: the target's teams, its environments, `maxRepos`),
+makes the repo's OIDC subject name the workflow (`repo`, `context`,
+`job_workflow_ref`), and writes `infrastructure/<name>/` in the deploy repo:
+`target.yaml` and, per environment, Crossplane objects for the GitHub
+environment (production only from `main`), its secrets (from the target's
+Secret) and variables, and the target's `access` (for Azure a federated
+credential whose subject is the shared workflow's). The
+`forge-infrastructure` ApplicationSet syncs them into
+`infrastructure.namespace`. Forge never deploys such a repo; deleting it
+removes the folder. See
+`docs/specs/2026-11-03-phase-12-infrastructure-repos-design.md`.
 `forge service connect github.com/<org>/<repo> --team <team>` connects an
 existing repo of the organization that has a Dockerfile, or Go, Node or
 Python code Forge proposes one for: forge-api registers the service and opens

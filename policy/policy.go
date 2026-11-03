@@ -2,7 +2,8 @@
 // Forge's Rego rules. The rules are the .rego files next to this file, built
 // into the binary: package forge.resources for plans, forge.deploys for
 // promotions, forge.images for the image a service without a repo runs,
-// forge.charts for the chart one runs.
+// forge.charts for the chart one runs, forge.targets for the target an
+// infrastructure repo deploys to.
 package policy
 
 import (
@@ -85,6 +86,22 @@ type Chart struct {
 	Actor        Actor    `json:"actor"`
 }
 
+// Target is what the target rules know: the target an infrastructure repo
+// is to deploy to (phase 12).
+type Target struct {
+	Service string `json:"service"`
+	Team    string `json:"team"`
+	Target  string `json:"target"`
+	// Teams may use the target; empty: every team.
+	Teams []string `json:"teams"`
+	// Environments are the ones asked for, Offered the ones the target has,
+	// Full those of them with no room left.
+	Environments []string `json:"environments"`
+	Offered      []string `json:"offered"`
+	Full         []string `json:"full"`
+	Actor        Actor    `json:"actor"`
+}
+
 // Source is what runs in the environment a promotion takes from, as Argo CD
 // reports it.
 type Source struct {
@@ -114,6 +131,7 @@ type Engine struct {
 	promotion   rego.PreparedEvalQuery
 	image       rego.PreparedEvalQuery
 	chart       rego.PreparedEvalQuery
+	target      rego.PreparedEvalQuery
 	fingerprint string
 }
 
@@ -164,7 +182,11 @@ func NewFromFS(ctx context.Context, fsys fs.FS) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{query: q, promotion: pq, image: iq, chart: cq, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
+	tq, err := prepare("deny = data.forge.targets.deny")
+	if err != nil {
+		return nil, err
+	}
+	return &Engine{query: q, promotion: pq, image: iq, chart: cq, target: tq, fingerprint: hex.EncodeToString(sum.Sum(nil))[:12]}, nil
 }
 
 // Fingerprint identifies the rule set: the first 12 hex characters of the
@@ -234,6 +256,25 @@ func (e *Engine) EvaluateChart(ctx context.Context, c Chart) (Result, error) {
 		return Result{}, err
 	}
 	return results(e.chart.Eval(ctx, rego.EvalInput(input)))
+}
+
+// EvaluateTarget checks the target an infrastructure repo is to deploy to.
+// An error means it could not be checked; the repo must then not be made.
+func (e *Engine) EvaluateTarget(ctx context.Context, t Target) (Result, error) {
+	for _, l := range []*[]string{&t.Teams, &t.Environments, &t.Offered, &t.Full} {
+		if *l == nil {
+			*l = []string{}
+		}
+	}
+	b, err := json.Marshal(t)
+	if err != nil {
+		return Result{}, err
+	}
+	var input map[string]any
+	if err := json.Unmarshal(b, &input); err != nil {
+		return Result{}, err
+	}
+	return results(e.target.Eval(ctx, rego.EvalInput(input)))
 }
 
 // results reads the deny and, when bound, warn sets of one evaluation.

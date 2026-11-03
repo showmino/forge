@@ -15,6 +15,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
+	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/store"
 	"github.com/showmino/forge/internal/version"
 	"github.com/showmino/forge/pkg/client"
@@ -55,6 +56,9 @@ type Options struct {
 	// CIDeployRunner of its deploy job, which must reach this API; both
 	// default to ubuntu-latest, the deploy runner to CIRunner.
 	CIRunner, CIDeployRunner string
+	// Infrastructure are the targets infrastructure repos deploy to (phase
+	// 12); nil: none can be made.
+	Infrastructure *infrastructure.Config
 	// GitHubOrg is the org new repos are created in; empty when no
 	// GitHub-App-backed feature is configured.
 	GitHubOrg string
@@ -135,8 +139,11 @@ func New(o Options) (http.Handler, error) {
 	mux := http.NewServeMux()
 	create := &creator{
 		catalog: o.Catalog, templates: o.Templates, repos: o.Repos, deploys: o.Deploys, domains: o.Deploys.publicDomainNames(), org: o.GitHubOrg, log: o.Logger,
-		ciRunner: o.CIRunner, ciDeployRunner: o.CIDeployRunner,
+		ciRunner: o.CIRunner, ciDeployRunner: o.CIDeployRunner, infra: o.Infrastructure,
 		results: map[string]*outcome{},
+	}
+	if oidc, ok := o.Repos.(OIDCSubjects); ok {
+		create.oidc = oidc
 	}
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))

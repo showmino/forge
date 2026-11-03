@@ -51,6 +51,9 @@ const (
 	TypeService = "service"
 	// TypeFile adds the rendered files to Target by pull request.
 	TypeFile = "file"
+	// TypeInfrastructure makes a new repo of infrastructure code, registers
+	// it, and sets up its GitHub environments for a target (phase 12).
+	TypeInfrastructure = "infrastructure"
 )
 
 // Template is the content of template.yaml.
@@ -62,7 +65,7 @@ type Template struct {
 	Description string   `yaml:"description"`
 	Tags        []string `yaml:"tags,omitempty"`
 	Owner       string   `yaml:"owner,omitempty"`
-	// Type is TypeService (also when empty) or TypeFile.
+	// Type is TypeService (also when empty), TypeFile or TypeInfrastructure.
 	Type string `yaml:"type,omitempty"`
 	// Target is the "owner/repo" a file template adds its files to.
 	Target     string      `yaml:"target,omitempty"`
@@ -138,6 +141,9 @@ func (p Parameter) DefaultString() (string, bool) {
 
 // IsFile reports whether t adds files to an existing repo.
 func (t *Template) IsFile() bool { return t.Type == TypeFile }
+
+// IsInfrastructure reports whether t makes an infrastructure repo.
+func (t *Template) IsInfrastructure() bool { return t.Type == TypeInfrastructure }
 
 // Finding is one problem lint found.
 type Finding struct {
@@ -236,6 +242,13 @@ func (t *Template) Validate() []Finding {
 		if t.Target != "" {
 			add(0, "target is only for a file template")
 		}
+	case TypeInfrastructure:
+		if t.Target != "" {
+			add(0, "target is only for a file template")
+		}
+		if len(t.Options) > 0 {
+			add(0, "options are only for a service template: an infrastructure repo has no run")
+		}
 	case TypeFile:
 		if t.Target == "" {
 			add(0, "a file template needs target: the owner/repo its files go to")
@@ -246,7 +259,7 @@ func (t *Template) Validate() []Finding {
 			add(0, "options are only for a service template")
 		}
 	default:
-		add(0, "type must be %q or %q, got %q", TypeService, TypeFile, t.Type)
+		add(0, "type must be %q, %q or %q, got %q", TypeService, TypeFile, TypeInfrastructure, t.Type)
 	}
 	seen := map[string]bool{}
 	for _, p := range t.Parameters {

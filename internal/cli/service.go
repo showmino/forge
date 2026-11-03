@@ -220,6 +220,12 @@ func newServiceGetCmd(f *Factory) *cobra.Command {
 				{"labels", formatLabels(s.GetLabels())},
 				{"updated", s.GetUpdateTime().AsTime().Local().Format("2006-01-02 15:04")},
 			}
+			if i := s.GetInfrastructure(); i != nil {
+				rows = append(rows,
+					[]string{"infrastructure", i.GetTool() + ", deploys itself from GitHub Actions"},
+					[]string{"target", i.GetTarget()},
+					[]string{"environments", strings.Join(i.GetEnvironments(), ", ")})
+			}
 			if format == output.Table {
 				if can := f.allowedOn(cmd, s.GetName()); can != "" {
 					rows = append(rows, []string{"you can", can})

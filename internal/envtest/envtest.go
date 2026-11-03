@@ -492,16 +492,22 @@ func (a *Argo) Run(ctx context.Context) {
 		}
 		for _, p := range paths {
 			parts := strings.Split(p, "/")
+			var name string
+			switch {
+			// An infrastructure repo's folder is forge-infrastructure's app.
+			case len(parts) == 3 && parts[0] == "infrastructure" && parts[2] == "target.yaml":
+				name = parts[1] + "-infrastructure"
 			// values.yaml is forge-services' app, chart.json forge-charts'.
-			if len(parts) != 4 || parts[0] != "services" || (path.Base(p) != "values.yaml" && path.Base(p) != "chart.json") {
+			case len(parts) == 4 && parts[0] == "services" && (path.Base(p) == "values.yaml" || path.Base(p) == "chart.json"):
+				svc, env := parts[1], parts[2]
+				name = svc + "-" + env
+				if path.Base(p) == "chart.json" {
+					name += "-chart"
+				} else {
+					a.ensureNamespace(ctx, name, svc, env)
+				}
+			default:
 				continue
-			}
-			svc, env := parts[1], parts[2]
-			name := svc + "-" + env
-			if path.Base(p) == "chart.json" {
-				name += "-chart"
-			} else {
-				a.ensureNamespace(ctx, name, svc, env)
 			}
 			from[name] = p
 			if time.Since(seen[head]) < a.lag() || synced[name] == head {

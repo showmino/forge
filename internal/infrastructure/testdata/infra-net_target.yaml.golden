@@ -1,0 +1,5 @@
+target: azure
+team: platform
+environments:
+  - staging
+  - production

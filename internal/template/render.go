@@ -270,3 +270,20 @@ func CheckManifest(files []File, service, team string) error {
 	}
 	return nil
 }
+
+// CheckManifest is the package's CheckManifest, and checks the rendered
+// forge.yaml has infrastructure exactly when t is an infrastructure template.
+func (t *Template) CheckManifest(files []File, service, team string) error {
+	if err := CheckManifest(files, service, team); err != nil {
+		return err
+	}
+	i := slices.IndexFunc(files, func(f File) bool { return f.Path == manifest.FileName })
+	m, _ := manifest.Parse(files[i].Data) // CheckManifest parsed it
+	switch {
+	case t.IsInfrastructure() && !m.IsInfrastructure():
+		return errors.New("an infrastructure template's forge.yaml needs infrastructure.tool")
+	case !t.IsInfrastructure() && m.IsInfrastructure():
+		return errors.New("forge.yaml has infrastructure, but the template is not type: infrastructure")
+	}
+	return nil
+}

@@ -64,6 +64,9 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 	if err != nil {
 		return s, err // NotFound "services/<id> not found", or Unavailable
 	}
+	if svc.GetInfrastructure() != nil {
+		return s, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s: %w", servicePrefix, sid, manifest.ErrDeploysItself))
+	}
 	if svc.GetRepoUrl() == "" {
 		return s, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Errorf("%s%s has no repo: it runs an image or a chart, and this needs a branch or a commit of a repo", servicePrefix, sid))

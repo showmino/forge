@@ -1,0 +1,125 @@
+---
+apiVersion: repo.github.m.upbound.io/v1alpha1
+kind: Environment
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production
+spec:
+  forProvider:
+    canAdminsBypass: false
+    deploymentBranchPolicy:
+      - customBranchPolicies: true
+        protectedBranches: false
+    environment: production
+    repository: infra-net
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: repo.github.m.upbound.io/v1alpha1
+kind: EnvironmentDeploymentPolicy
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production-main
+spec:
+  forProvider:
+    branchPattern: main
+    environment: production
+    repository: infra-net
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: EnvironmentSecret
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production-azure-client-id
+spec:
+  forProvider:
+    environment: production
+    plaintextValueSecretRef:
+      key: clientId
+      name: target-azure-production
+    repository: infra-net
+    secretName: AZURE_CLIENT_ID
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: EnvironmentSecret
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production-azure-subscription-id
+spec:
+  forProvider:
+    environment: production
+    plaintextValueSecretRef:
+      key: subscriptionId
+      name: target-azure-production
+    repository: infra-net
+    secretName: AZURE_SUBSCRIPTION_ID
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: EnvironmentSecret
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production-azure-tenant-id
+spec:
+  forProvider:
+    environment: production
+    plaintextValueSecretRef:
+      key: tenantId
+      name: target-azure-production
+    repository: infra-net
+    secretName: AZURE_TENANT_ID
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: EnvironmentVariable
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production-tf-state-storage-account
+spec:
+  forProvider:
+    environment: production
+    repository: infra-net
+    value: ststate
+    variableName: TF_STATE_STORAGE_ACCOUNT
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+kind: FederatedIdentityCredential
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production
+spec:
+  forProvider:
+    audience:
+      - api://AzureADTokenExchange
+    issuer: https://token.actions.githubusercontent.com
+    parentId: /subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id
+    resourceGroupName: rg
+    subject: repo:my-org/infra-net:environment:production:job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
