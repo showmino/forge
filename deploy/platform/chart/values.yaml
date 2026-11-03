@@ -251,6 +251,36 @@ deploys:
     # allows any.
     allowedRepos: []
 
+# Infrastructure repos (phase 12): `forge create --template <infrastructure
+# template> --target <target>` makes a repo of infrastructure code (Bicep,
+# OpenTofu) that its own GitHub Actions deploy to a target, a set of cloud
+# accounts, one per environment. forge-api writes the repo's GitHub
+# environments, their secrets and variables, and the target's cloud access as
+# Crossplane objects into the deploy repo. Needs deploys, the GitHub App
+# (Actions: write) and Crossplane with its GitHub provider and a provider for
+# each cloud the targets use. See templates/infrastructure.yaml.
+infrastructure:
+  enabled: false
+  # Where the Crossplane objects and the targets' Secrets live.
+  namespace: forge-infrastructure
+  # The Crossplane GitHub provider's config the objects use.
+  providerConfig:
+    kind: ClusterProviderConfig
+    name: github
+  # The shared workflow every infrastructure repo calls, and the only one
+  # production's cloud access accepts:
+  # <owner>/<repo>/.github/workflows/<file>.yml@refs/heads/<branch>.
+  workflow: ""
+  # The kinds the targets' access templates make, as <group>/<Kind>, such as
+  # managedidentity.azure.m.upbound.io/FederatedIdentityCredential.
+  accessKinds: []
+  # Each target: name, title, teams (empty: every team), and per environment
+  # (staging, production): secret (a Secret in namespace), githubSecrets
+  # (secret name: key in it), githubVariables (name: value), maxRepos, and
+  # access (a Go template of Crossplane objects with .Org, .Repo, .Team,
+  # .Environment and .Subject). Forge's README has an example.
+  targets: []
+
 # Resources: `forge resource` plans and applies a service's databases
 # (CloudNativePG clusters, the operator must be installed) with OpenTofu Jobs
 # in the namespace <release namespace>-runner. Needs deploys.

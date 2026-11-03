@@ -21,14 +21,14 @@ import (
 )
 
 func newCreateCmd(f *Factory) *cobra.Command {
-	var tmpl, team, image, health string
+	var tmpl, team, image, health, target string
 	var chart, chartRepo, chartVersion, expose, valuesFile, stagingValues, productionValues string
-	var owners, sets, writable []string
+	var owners, sets, writable, environments []string
 	var dryRun, deploy bool
 	var port int
 	var run runFlags
 	cmd := &cobra.Command{
-		Use:   "create <name> (--template <template>[@version] | --image <image> | --chart <chart>) --team <team>",
+		Use:   "create <name> (--template <template>[@version] | --image <image> | --chart <chart>) --team <team> [--target <target>]",
 		Short: "Create a service from a template, an image or a Helm chart",
 		Long: `Create a service from a template: the Forge API renders the template,
 creates the private repo github.com/<org>/<name>, pushes the first commit
@@ -46,6 +46,14 @@ refused. Change them later in forge.yaml.
 A file template (type file in 'forge template get') makes no repo: it opens
 a pull request that adds its files to the template's target repo, and
 prints the pull request's URL. <name> names the branch and the files.
+
+An infrastructure template (type infrastructure: Bicep, OpenTofu) makes a
+repo of infrastructure code that its own GitHub Actions deploy to --target,
+a set of cloud accounts the platform team set up. Forge gives the repo the
+GitHub environments of --environments (staging, production; default every
+one the target has), each with its account's secrets, and lets the shared
+workflow sign in there. Production runs wait for an approval in Forge by
+the owning team. Forge never deploys such a repo itself.
 
 With --image instead of --template, the service runs an image someone else
 built (nginx:1.27, ghcr.io/acme/tool:2.3) and gets no repo: its forge.yaml,
@@ -73,6 +81,7 @@ and new values with --values there.`,
   forge create shop --template nextjs --team web --replicas 2 --env LOG_LEVEL=info \
     --secret stripe=vaults/Apps/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
   forge create payments --template go-grpc --team billing --dry-run
+  forge create infra-network --template opentofu --target azure --environments production --team platform
   forge create web --image nginxinc/nginx-unprivileged:1.27 --health / --team web
   forge create podinfo --chart podinfo --chart-repo oci://ghcr.io/stefanprodan/charts --chart-version 6.7.1 \
     --expose podinfo:9898 --values podinfo.yaml --team web`,
@@ -101,6 +110,8 @@ and new values with --values there.`,
 				return exitcode.Usagef("--set is for a template's parameters; an image has none")
 			case tmpl != "" && (port != 0 || health != "" || len(writable) > 0):
 				return exitcode.Usagef("--port, --health and --writable are for --image; a template sets its own")
+			case tmpl == "" && (target != "" || len(environments) > 0):
+				return exitcode.Usagef("--target and --environments are for an infrastructure template")
 			}
 			raw, err := parseSets(sets)
 			if err != nil {
@@ -181,6 +192,8 @@ and new values with --values there.`,
 				RequestId:       client.NewRequestID(),
 				ValidateOnly:    dryRun,
 				RunOptions:      runOptions,
+				Target:          target,
+				Environments:    environments,
 			})
 			if errors.Is(err, errMayStillFinish) {
 				return exitcode.From(errors.Unwrap(err)).WithHint(fmt.Sprintf("the create may still finish on the Forge API; check 'forge service get %s'", id))
@@ -216,6 +229,8 @@ and new values with --values there.`,
 	fl.StringVar(&team, "team", "", "owning team")
 	fl.StringSliceVar(&owners, "owner", nil, "owner email or handle (repeatable)")
 	fl.StringArrayVar(&sets, "set", nil, "template parameter as name=value (repeatable)")
+	fl.StringVar(&target, "target", "", "with an infrastructure template: the target it deploys to, a set of cloud accounts")
+	fl.StringSliceVar(&environments, "environments", nil, "with an infrastructure template: its environments, staging and/or production (default: every one the target has)")
 	fl.BoolVar(&dryRun, "dry-run", false, "render and check without creating anything; print the files")
 	fl.StringVar(&image, "image", "", "an image to run instead of a template, such as nginx:1.27; the service gets no repo")
 	fl.IntVar(&port, "port", 0, "with --image: the port it listens on (default 8080)")

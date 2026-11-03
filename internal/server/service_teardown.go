@@ -13,6 +13,7 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/store"
 )
 
@@ -49,9 +50,14 @@ type teardownPlan struct {
 	// manifest: the service has no repo, and its forge.yaml is in the
 	// deploy repo.
 	manifest bool
+	// infrastructure: the service is an infrastructure repo, and its GitHub
+	// environments and cloud access are in the deploy repo.
+	infrastructure bool
 }
 
-func (p teardownPlan) empty() bool { return len(p.previews) == 0 && len(p.envs) == 0 && !p.manifest }
+func (p teardownPlan) empty() bool {
+	return len(p.previews) == 0 && len(p.envs) == 0 && !p.manifest && !p.infrastructure
+}
 
 // removes names what the plan takes down, for the caller to read.
 func (p teardownPlan) removes(svc string) []string {
@@ -61,6 +67,9 @@ func (p teardownPlan) removes(svc string) []string {
 	}
 	for _, env := range slices.Backward(p.envs) {
 		out = append(out, deployNamePrefix+svc+"/"+env)
+	}
+	if p.infrastructure {
+		out = append(out, infrastructure.Folder(svc)+" (its GitHub environments and cloud access; what it deployed stays in the cloud)")
 	}
 	return out
 }
@@ -115,6 +124,11 @@ func (t *teardown) plan(ctx context.Context, name string) (teardownPlan, error) 
 			return p, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the deploy repo: %w", err))
 		}
 		p.manifest = there
+		rec, err := t.deploys.readInfrastructure(ctx, svc)
+		if err != nil {
+			return p, connect.NewError(connect.CodeUnavailable, err)
+		}
+		p.infrastructure = rec != nil
 	}
 	return p, nil
 }
@@ -341,6 +355,12 @@ func (c *Catalog) teardownWork(name string, plan teardownPlan, release func()) W
 		if t.hasDeploys() {
 			if err := t.deploys.removeManifest(ctx, svc, emit); err != nil {
 				return err
+			}
+			if plan.infrastructure {
+				if err := t.deploys.removeInfrastructure(ctx, svc); err != nil {
+					return err
+				}
+				emit("infrastructure", "removed "+infrastructure.Folder(svc)+": Crossplane removes its GitHub environments and cloud access; what the repo deployed stays in the cloud")
 			}
 		}
 		// Nothing new may be started for a service being deleted, but a

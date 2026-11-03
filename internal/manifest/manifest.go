@@ -40,6 +40,9 @@ type Manifest struct {
 	Run *Run `yaml:"run,omitempty"`
 	// Chart is the Helm chart a service without a repo runs (chart.go).
 	Chart *Chart `yaml:"chart,omitempty"`
+	// Infrastructure marks a repo of infrastructure code that deploys
+	// itself (infrastructure.go).
+	Infrastructure *Infrastructure `yaml:"infrastructure,omitempty"`
 	// Resources are what the service needs besides its own pods.
 	Resources []Resource `yaml:"resources,omitempty"`
 	// Docs lists the pages under docs/ in the order of the side menu.
@@ -314,6 +317,9 @@ func (m *Manifest) Validate() error {
 		return err
 	}
 	if err := m.checkChart(); err != nil {
+		return err
+	}
+	if err := m.checkInfrastructure(); err != nil {
 		return err
 	}
 	seen := map[string]bool{}

@@ -135,7 +135,7 @@ func Lint(fsys fs.FS, dir string) ([]File, []Finding) {
 		}
 		return files, nil
 	}
-	if err := CheckManifest(files, v.Service.Name, v.Service.Team); err != nil {
+	if err := t.CheckManifest(files, v.Service.Name, v.Service.Team); err != nil {
 		add([]Finding{{File: path.Join(SkeletonDir, "forge.yaml"), Message: err.Error()}})
 		return nil, out
 	}

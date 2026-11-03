@@ -46,6 +46,10 @@ type Runner struct {
 	started   []run.Spec
 	stopped   []string // the stuck runs that were stopped, "<plan>/<mode>"
 	wg        sync.WaitGroup
+	// closed: Close has begun, and Start starts nothing more (a run the
+	// server starts after the test has ended must not add to wg while Close
+	// waits on it).
+	closed bool
 }
 
 type fakeRun struct {
@@ -68,6 +72,9 @@ func (r *Runner) Start(_ context.Context, s run.Spec) error {
 	defer r.mu.Unlock()
 	if r.StartErr != nil {
 		return r.StartErr
+	}
+	if r.closed {
+		return errors.New("the runner is closed")
 	}
 	if r.runs == nil {
 		r.runs, r.databases = map[string]*fakeRun{}, map[string]run.Resource{}
@@ -125,6 +132,7 @@ func (r *Runner) Stop(_ context.Context, plan, mode string) error {
 // Close stops every run and waits for them to end.
 func (r *Runner) Close() {
 	r.mu.Lock()
+	r.closed = true
 	for _, fr := range r.runs {
 		fr.stop()
 	}

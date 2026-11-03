@@ -39,6 +39,25 @@ type fakeRepos struct {
 	grantErr error
 	// trees are the files of the repos a connect reads, by repo.
 	trees map[string]map[string]string
+	// oidc are the OIDC subject claims set on each repo; oidcErr fails it.
+	oidc    map[string][]string
+	oidcErr error
+}
+
+func (f *fakeRepos) SetOIDCSubjectClaims(_ context.Context, owner, repo string, claims []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.oidcErr != nil {
+		return f.oidcErr
+	}
+	if owner != "showmino" {
+		return fmt.Errorf("OIDC outside the org: %s", owner)
+	}
+	if f.oidc == nil {
+		f.oidc = map[string][]string{}
+	}
+	f.oidc[repo] = claims
+	return nil
 }
 
 func (f *fakeRepos) SetTeamRepoPermission(_ context.Context, org, slug, owner, repo, permission string) error {
@@ -207,6 +226,13 @@ func newCreateEnv(t *testing.T, src TemplateSource, repos *fakeRepos) *createEnv
 // domains a create may choose from.
 func newCreateEnvWith(t *testing.T, src TemplateSource, repos *fakeRepos, deploys *Deploys) *createEnv {
 	t.Helper()
+	return newCreateEnvOpts(t, src, repos, deploys, nil)
+}
+
+// newCreateEnvOpts is newCreateEnvWith with the server's options changed by
+// tweak when it is set.
+func newCreateEnvOpts(t *testing.T, src TemplateSource, repos *fakeRepos, deploys *Deploys, tweak func(*Options)) *createEnv {
+	t.Helper()
 	e := &createEnv{catalog: NewCatalog(nil), repos: repos}
 	opts := Options{
 		Authenticator: StaticAuthenticator{
@@ -223,6 +249,9 @@ func newCreateEnvWith(t *testing.T, src TemplateSource, repos *fakeRepos, deploy
 		opts.Repos = repos
 	}
 	opts.Deploys = deploys
+	if tweak != nil {
+		tweak(&opts)
+	}
 	h, err := New(opts)
 	if err != nil {
 		t.Fatal(err)

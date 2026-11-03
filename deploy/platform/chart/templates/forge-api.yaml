@@ -46,6 +46,11 @@ spec:
   template:
     metadata:
       labels: {app: forge-api}
+      {{- if .Values.infrastructure.enabled }}
+      annotations:
+        # forge-api reads the targets when it starts.
+        checksum/infrastructure: {{ toYaml .Values.infrastructure | sha256sum }}
+      {{- end }}
     spec:
       serviceAccountName: forge-api
       securityContext:
@@ -63,6 +68,11 @@ spec:
             defaultMode: 0440
             items:
               - {key: {{ .Values.github.keys.appPrivateKey }}, path: app-private-key}
+        {{- if .Values.infrastructure.enabled }}
+        - name: infrastructure
+          configMap:
+            name: forge-infrastructure
+        {{- end }}
         {{- with .Values.database.caSecret }}
         - name: database-ca
           secret:
@@ -134,6 +144,9 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if .Values.infrastructure.enabled }}
+            - {name: FORGE_INFRASTRUCTURE_CONFIG, value: /etc/forge/infrastructure/config.yaml}
+            {{- end }}
             {{- if .Values.clusters.enabled }}
             - {name: FORGE_CLUSTERS, value: "1"}
             - {name: FORGE_CLUSTER_NAME, value: {{ .Values.clusters.name | default "default" | quote }}}
@@ -167,6 +180,9 @@ spec:
             {{- end }}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
+            {{- if .Values.infrastructure.enabled }}
+            - {name: infrastructure, mountPath: /etc/forge/infrastructure, readOnly: true}
+            {{- end }}
             {{- if .Values.database.caSecret }}
             - {name: database-ca, mountPath: /etc/forge/database-ca, readOnly: true}
             {{- end }}

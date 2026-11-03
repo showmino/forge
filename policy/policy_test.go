@@ -622,3 +622,42 @@ func TestChartRules(t *testing.T) {
 		t.Error("a chart was judged without chart rules")
 	}
 }
+
+func TestTargetRules(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := Target{Service: "infra-net", Team: "platform", Target: "azure", Environments: []string{"production"}, Offered: []string{"staging", "production"}}
+	mod := func(f func(*Target)) Target { c := ok; f(&c); return c }
+	for _, tc := range []struct {
+		name string
+		t    Target
+		deny string
+	}{
+		{"every team may use a target without teams", ok, ""},
+		{"a team the target names", mod(func(c *Target) { c.Teams = []string{"web", "platform"} }), ""},
+		{"a team the target does not name", mod(func(c *Target) { c.Teams = []string{"web"} }),
+			"target azure is for the teams web, not platform"},
+		{"no environment", mod(func(c *Target) { c.Environments = nil }),
+			"choose at least one environment of target azure (staging, production)"},
+		{"an environment the target lacks", mod(func(c *Target) { c.Offered = []string{"staging"} }),
+			"target azure has no production (it has staging)"},
+		{"a full environment", mod(func(c *Target) { c.Full = []string{"production"} }),
+			"target azure's production has no room for another repo; ask the platform team for another target"},
+		{"another environment is full", mod(func(c *Target) { c.Full = []string{"staging"} }), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, err := e.EvaluateTarget(ctx, tc.t)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(r.Deny, "|"); got != tc.deny {
+				t.Errorf("deny %q, want %q", got, tc.deny)
+			}
+		})
+	}
+}

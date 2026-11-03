@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/server"
 	"github.com/showmino/forge/internal/version"
 )
@@ -76,6 +77,7 @@ func run() error {
 		ciDeployRunner    = flag.String("ci-deploy-runner", env("FORGE_CI_DEPLOY_RUNNER", ""), "runs-on of that workflow's deploy job, which must reach this API (default: --ci-runner)")
 		chartsOn          = flag.Bool("charts", env("FORGE_CHARTS", "") == "1" || env("FORGE_CHARTS", "") == "true", "let services run a published Helm chart (forge create --chart); needs --deploys and the forge-charts ApplicationSet")
 		allowedChartRepos = flag.String("allowed-chart-repos", env("FORGE_ALLOWED_CHART_REPOS", ""), "chart repositories services may run charts from, comma separated, such as oci://ghcr.io/acme/charts (empty: any); the chart rules (policy/charts.rego) refuse others")
+		infraConfig       = flag.String("infrastructure-config", env("FORGE_INFRASTRUCTURE_CONFIG", ""), "file of the targets infrastructure repos deploy to (forge create --target; phase 12); needs --deploys and the GitHub App")
 		allowedRegistries = flag.String("allowed-registries", env("FORGE_ALLOWED_REGISTRIES", ""), "registry hosts a service without a repo may run images from, comma separated (empty: any); the image rules (policy/images.rego) refuse others")
 		imageRegistry     = flag.String("image-registry", env("FORGE_IMAGE_REGISTRY", server.DefaultRegistry), "where the services' CI pushes images (a host and an optional path); deploys and previews run <registry>/<owner>/<service>:<commit>")
 		previewPull       = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
@@ -256,6 +258,13 @@ func run() error {
 	} else {
 		log.Info("sessions are off: they need the GitHub App to keep memberships current")
 	}
+	var infra *infrastructure.Config
+	if *infraConfig != "" {
+		if infra, err = infrastructure.Load(*infraConfig); err != nil {
+			return fmt.Errorf("--infrastructure-config: %w", err)
+		}
+		log.Info("infrastructure repos are on", "targets", len(infra.Targets), "workflow", infra.Workflow)
+	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,
 		Operations:       ops,
@@ -274,6 +283,7 @@ func run() error {
 		GitHubOrg:        *githubOrg,
 		CIRunner:         *ciRunner,
 		CIDeployRunner:   *ciDeployRunner,
+		Infrastructure:   infra,
 		MinClientVersion: *minClient,
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID, WebClientID: *webClientID},
 		Authenticator:    authn,

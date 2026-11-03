@@ -79,6 +79,20 @@ message Service {
   // Where the service is reached, when set in Forge (DeployService.SetAddress)
   // rather than by forge.yaml. Output only.
   ServiceAddress address = 12;
+  // What Forge set up for an infrastructure repo (phase 12). Output only:
+  // CreateService sets it, and nothing changes it.
+  InfrastructureRepo infrastructure = 13;
+}
+
+// InfrastructureRepo is a repo of infrastructure code that its own GitHub
+// Actions deploy to a target, with production approved in Forge.
+message InfrastructureRepo {
+  // forge.yaml's infrastructure.tool: opentofu, terraform or bicep.
+  string tool = 1;
+  // The target (a set of cloud accounts, one per environment) it deploys to.
+  string target = 2;
+  // Its GitHub environments, in deploy order: staging, production or both.
+  repeated string environments = 3;
 }
 
 // ServiceAddress overrides forge.yaml's run.host and run.domain.
@@ -194,6 +208,10 @@ message CreateServiceRequest {
   // exist in its repository. run_options may set only the address (domain,
   // network_only, staging_network_only). Deploy it with StartDeploy.
   ChartSource chart = 12;
+  // For an infrastructure template: the target the repo deploys to, and
+  // which of its environments it gets (empty: every one the target has).
+  string target = 13;
+  repeated string environments = 14;
 }
 
 // ChartSource is forge.yaml's chart, for a new service.

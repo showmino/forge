@@ -97,7 +97,8 @@ type Template struct {
 	// The run options of forge.yaml the create form offers: "replicas",
 	// "resources", "env", "secrets", "jobs", "autoscaling".
 	Options []string `protobuf:"bytes,8,rep,name=options,proto3" json:"options,omitempty"`
-	// "service" makes a new repo; "file" adds files to target_repo by pull request.
+	// "service" makes a new repo; "file" adds files to target_repo by pull
+	// request; "infrastructure" makes a repo of infrastructure code for a target.
 	Type string `protobuf:"bytes,9,opt,name=type,proto3" json:"type,omitempty"`
 	// For a file template, "owner/repo".
 	TargetRepo    string `protobuf:"bytes,10,opt,name=target_repo,json=targetRepo,proto3" json:"target_repo,omitempty"`

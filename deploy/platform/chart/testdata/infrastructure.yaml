@@ -1,0 +1,42 @@
+# Deploys with infrastructure repos for one Azure target, production only.
+github:
+  org: acme
+  appID: "123456"
+host: forge.acme.example
+apps:
+  domain: apps.acme.example
+  pullSecret: ghcr
+deploys:
+  enabled: true
+infrastructure:
+  enabled: true
+  workflow: acme/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
+  accessKinds: [managedidentity.azure.m.upbound.io/FederatedIdentityCredential]
+  targets:
+    - name: azure
+      title: Azure
+      environments:
+        production:
+          secret: target-azure-production
+          githubSecrets:
+            AZURE_TENANT_ID: tenantId
+            AZURE_SUBSCRIPTION_ID: subscriptionId
+            AZURE_CLIENT_ID: clientId
+          githubVariables:
+            TF_STATE_STORAGE_ACCOUNT: stacmestate
+          maxRepos: 20
+          access: |
+            apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+            kind: FederatedIdentityCredential
+            metadata:
+              name: {{ .Repo }}-{{ .Environment }}
+            spec:
+              forProvider:
+                audience: [api://AzureADTokenExchange]
+                issuer: https://token.actions.githubusercontent.com
+                subject: {{ .Subject }}
+                parentId: /subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-acme
+                resourceGroupName: rg
+database:
+  existingSecret: forge-database
+  host: forge-db-rw.databases.svc

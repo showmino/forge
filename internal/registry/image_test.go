@@ -98,7 +98,7 @@ func TestDigestOfAPublicImage(t *testing.T) {
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	// The install's pull secret has no login for Docker Hub.
-	c := &Client{BaseURL: srv.URL, Creds: func(context.Context, string) (string, string, error) {
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), Creds: func(context.Context, string) (string, string, error) {
 		return "", "", fmt.Errorf("pull secret has no login for docker.io: %w", ErrNoLogin)
 	}}
 	ctx := context.Background()
@@ -122,7 +122,7 @@ func TestDigestMissingHeader(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	t.Cleanup(srv.Close)
-	c := &Client{BaseURL: srv.URL}
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
 	if d, err := c.Digest(context.Background(), "registry.example/org/app:1"); err == nil {
 		t.Errorf("digest %q without a header", d)
 	}
@@ -146,14 +146,14 @@ func TestBrokenLoginIsReported(t *testing.T) {
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	ctx := context.Background()
-	broken := &Client{BaseURL: srv.URL, Creds: func(context.Context, string) (string, string, error) {
+	broken := &Client{BaseURL: srv.URL, HTTP: srv.Client(), Creds: func(context.Context, string) (string, string, error) {
 		return "", "", errors.New("pull secret forge/ghcr: forbidden")
 	}}
 	if ok, err := broken.Exists(ctx, "ghcr.io/acme/private:1a2b3c4"); err == nil || ok || !strings.Contains(err.Error(), "forbidden") {
 		t.Errorf("broken login: %v %v, want the login's error", ok, err)
 	}
 	// With no login at all, a 404 is a 404.
-	none := &Client{BaseURL: srv.URL, Creds: func(context.Context, string) (string, string, error) { return "", "", ErrNoLogin }}
+	none := &Client{BaseURL: srv.URL, HTTP: srv.Client(), Creds: func(context.Context, string) (string, string, error) { return "", "", ErrNoLogin }}
 	if ok, err := none.Exists(ctx, "ghcr.io/acme/private:1a2b3c4"); err != nil || ok {
 		t.Errorf("no login: %v %v, want not found", ok, err)
 	}
@@ -171,7 +171,7 @@ func TestAnonymousRefusalNamesTheLogin(t *testing.T) {
 	})
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c := &Client{BaseURL: srv.URL}
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
 	if _, err := c.Digest(context.Background(), "ghcr.io/acme/private:1"); err == nil || !errors.Is(err, ErrNoLogin) {
 		t.Errorf("refused: %v, want ErrNoLogin in it", err)
 	}
@@ -211,7 +211,7 @@ func TestDigestMustMatch(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)
-	c := &Client{BaseURL: srv.URL}
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
 	if d, err := c.Digest(context.Background(), "registry.example/org/app@"+someDigest); err == nil {
 		t.Errorf("digest %q accepted for another", d)
 	}

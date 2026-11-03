@@ -122,7 +122,7 @@ func TestBicepString(t *testing.T) {
 func TestValidateFileTemplate(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ name, from, to, want string }{
-		{"type", "type: file", "type: library", `type must be "service" or "file"`},
+		{"type", "type: file", "type: library", `type must be "service", "file" or "infrastructure"`},
 		{"no target", "target: showmino/landingzone\n", "", "a file template needs target"},
 		{"bad target", "target: showmino/landingzone", "target: landingzone", `target "landingzone" must be owner/repo`},
 		{"target on a service", "type: file", "type: service", "target is only for a file template"},

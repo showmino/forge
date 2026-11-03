@@ -34,7 +34,7 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/chart-ingress.yaml | diff -u deploy/argocd/chart/testdata/chart-ingress.golden -
 
 PLATFORM_CHART := deploy/platform/chart
-PLATFORM_CASES := minimal gateway full ingress-deploys gateway-deploys platform charts
+PLATFORM_CASES := minimal gateway full ingress-deploys gateway-deploys platform charts infrastructure
 
 platform-chart-test: ## Lint deploy/platform/chart and compare its renders with their goldens
 	$(HELM) lint $(PLATFORM_CHART) -f $(PLATFORM_CHART)/testdata/minimal.yaml
@@ -66,7 +66,7 @@ generate: ## Regenerate gen/ from proto/
 	buf generate
 
 update-golden: ## Rewrite golden files after an intended output change
-	go test ./internal/output ./internal/template ./internal/cli -update
+	go test ./internal/output ./internal/template ./internal/cli ./internal/infrastructure -update
 
 tools: ## Install buf and the protoc plugins at the versions CI uses
 	go install github.com/bufbuild/buf/cmd/buf@v1.47.2

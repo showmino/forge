@@ -169,8 +169,8 @@ func templateProto(t *template.Template, version string) *forgev1.Template {
 		Type:        template.TypeService,
 		TargetRepo:  t.Target,
 	}
-	if t.IsFile() {
-		out.Type = template.TypeFile
+	if t.IsFile() || t.IsInfrastructure() {
+		out.Type = t.Type
 	}
 	for _, p := range t.Parameters {
 		def, _ := p.DefaultString()
