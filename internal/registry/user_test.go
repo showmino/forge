@@ -79,7 +79,7 @@ func userRegistry(t *testing.T, badConfig bool) *Client {
 	})
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return &Client{BaseURL: srv.URL}
+	return &Client{BaseURL: srv.URL, HTTP: srv.Client()}
 }
 
 func TestUser(t *testing.T) {
@@ -147,7 +147,7 @@ func TestUserChecksTheManifestDigest(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	c := &Client{BaseURL: srv.URL}
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
 	_, err := c.User(context.Background(), "ghcr.io/acme/tool:1")
 	if !errors.Is(err, ErrBadImage) || !strings.Contains(err.Error(), "manifest does not match") {
 		t.Errorf("a manifest that is not its digest: %v", err)
