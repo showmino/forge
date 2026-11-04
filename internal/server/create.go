@@ -359,6 +359,13 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if err != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s does not render: %w", tname, version, err))
 	}
+	if c.repositories != nil {
+		codeowners, err := repositories.Codeowners(c.org, req.GetOwnerTeam())
+		if err != nil {
+			return nil, invalid(err.Error())
+		}
+		files = setCodeowners(files, codeowners)
+	}
 	if err := t.CheckManifest(files, id, req.GetOwnerTeam()); err != nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", tname, version, err))
 	}
@@ -420,6 +427,8 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("create github.com/%s/%s: %w", c.org, id, err))
 	}
+	noteAuditDetail(work, "repository_id", fmt.Sprint(repo.ID))
+	noteAuditDetail(work, "repository_owner_id", fmt.Sprint(repo.Owner.ID))
 	done("create_repo", "github.com/"+c.org+"/"+id)
 
 	// wroteInfra: the deploy repo may hold the repo's infrastructure folder
@@ -537,6 +546,18 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Service{Service: resp.Msg.GetService()}}
 	w.send(final)
 	return final, nil
+}
+
+func setCodeowners(files []template.File, data []byte) []template.File {
+	for _, path := range []string{".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"} {
+		for i := range files {
+			if files[i].Path == path {
+				files[i].Data = data
+				return files
+			}
+		}
+	}
+	return append(files, template.File{Path: "CODEOWNERS", Mode: 0o644, Data: data})
 }
 
 // propose runs a file template: render, then open a pull request that adds

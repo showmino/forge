@@ -14,10 +14,11 @@ import (
 
 // Repo is a repository GitHub created.
 type Repo struct {
-	ID            int64  `json:"id"`
-	FullName      string `json:"full_name"`
-	HTMLURL       string `json:"html_url"`
-	DefaultBranch string `json:"default_branch"`
+	ID            int64     `json:"id"`
+	FullName      string    `json:"full_name"`
+	HTMLURL       string    `json:"html_url"`
+	DefaultBranch string    `json:"default_branch"`
+	CreatedAt     time.Time `json:"created_at"`
 	Owner         struct {
 		ID int64 `json:"id"`
 	} `json:"owner"`

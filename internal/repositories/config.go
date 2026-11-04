@@ -62,7 +62,10 @@ func (c *Config) Rules(repo string, infrastructure bool) ([]byte, error) {
 	rules := map[string]any{
 		"deletion":       true,
 		"nonFastForward": true,
-		"pullRequest":    []any{map[string]any{"requiredApprovingReviewCount": 0}},
+		"pullRequest": []any{map[string]any{
+			"requiredApprovingReviewCount": 1,
+			"requireCodeOwnerReview":       true,
+		}},
 	}
 	if infrastructure {
 		rules["requiredStatusChecks"] = []any{map[string]any{

@@ -11,6 +11,7 @@ import (
 type Pull struct {
 	Number  int
 	HTMLURL string
+	User    string
 	// Merged is when it was merged; zero when it was not.
 	Merged time.Time
 	// Base is the branch it merges into, HeadSHA its last commit, and
@@ -31,8 +32,11 @@ type Review struct {
 // PullsForCommit returns the pull requests a commit of owner/repo belongs to.
 func (c *Client) PullsForCommit(ctx context.Context, owner, repo, sha string) ([]Pull, error) {
 	var out []struct {
-		Number   int        `json:"number"`
-		HTMLURL  string     `json:"html_url"`
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+		User    struct {
+			Login string `json:"login"`
+		} `json:"user"`
 		MergedAt *time.Time `json:"merged_at"`
 		Base     struct {
 			Ref string `json:"ref"`
@@ -47,7 +51,7 @@ func (c *Client) PullsForCommit(ctx context.Context, owner, repo, sha string) ([
 	}
 	pulls := make([]Pull, 0, len(out))
 	for _, p := range out {
-		pl := Pull{Number: p.Number, HTMLURL: p.HTMLURL, Base: p.Base.Ref, HeadSHA: p.Head.SHA, MergeCommit: p.MergeCommitSHA}
+		pl := Pull{Number: p.Number, HTMLURL: p.HTMLURL, User: p.User.Login, Base: p.Base.Ref, HeadSHA: p.Head.SHA, MergeCommit: p.MergeCommitSHA}
 		if p.MergedAt != nil {
 			pl.Merged = *p.MergedAt
 		}
@@ -60,7 +64,7 @@ func (c *Client) PullsForCommit(ctx context.Context, owner, repo, sha string) ([
 // oldest first (at most 300).
 func (c *Client) PullReviews(ctx context.Context, owner, repo string, number int) ([]Review, error) {
 	var reviews []Review
-	for page := 1; page <= 3; page++ {
+	for page := 1; page <= 4; page++ {
 		var out []struct {
 			User struct {
 				Login string `json:"login"`
@@ -71,6 +75,12 @@ func (c *Client) PullReviews(ctx context.Context, owner, repo string, number int
 		path := fmt.Sprintf("%s/pulls/%d/reviews?per_page=100&page=%d", repoPath(owner, repo), number, page)
 		if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
 			return nil, err
+		}
+		if page == 4 {
+			if len(out) > 0 {
+				return nil, fmt.Errorf("pull request %d has more than 300 reviews; cannot verify its latest review states", number)
+			}
+			break
 		}
 		for _, r := range out {
 			reviews = append(reviews, Review{User: r.User.Login, State: r.State, CommitID: r.CommitID})

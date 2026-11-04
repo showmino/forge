@@ -21,6 +21,7 @@ var ErrBranchExists = errors.New("the branch already exists")
 type Proposal struct {
 	Branch, Title, Body, Message string
 	Files                        []File
+	Update                       []File
 	// Remove are paths the pull request deletes; each must exist.
 	Remove []string
 	// Fresh refuses a branch that exists, even with an open pull request,
@@ -45,7 +46,7 @@ func (c *Client) ProposeFiles(ctx context.Context, owner, repo string, p Proposa
 		return "", fmt.Errorf("read %s: %w", base, err)
 	}
 	git := rf.git()
-	entries := make([]map[string]any, 0, len(p.Files))
+	entries := make([]map[string]any, 0, len(p.Files)+len(p.Update)+len(p.Remove))
 	for _, f := range p.Files {
 		_, err := c.FileAt(ctx, owner, repo, f.Path, head)
 		if err == nil {
@@ -54,22 +55,19 @@ func (c *Client) ProposeFiles(ctx context.Context, owner, repo string, p Proposa
 		if !errors.Is(err, ErrNotFound) {
 			return "", fmt.Errorf("check %s: %w", f.Path, err)
 		}
-		mode := "100644"
-		if f.Executable {
-			mode = "100755"
+		e, err := c.proposalEntry(ctx, git, f)
+		if err != nil {
+			return "", err
 		}
-		e := map[string]any{"path": f.Path, "mode": mode, "type": "blob"}
-		if utf8.Valid(f.Content) {
-			e["content"] = string(f.Content)
-		} else {
-			var blob struct {
-				SHA string `json:"sha"`
-			}
-			in := map[string]string{"content": base64.StdEncoding.EncodeToString(f.Content), "encoding": "base64"}
-			if err := c.doJSON(ctx, http.MethodPost, git+"/blobs", in, &blob); err != nil {
-				return "", fmt.Errorf("upload %s: %w", f.Path, err)
-			}
-			e["sha"] = blob.SHA
+		entries = append(entries, e)
+	}
+	for _, f := range p.Update {
+		if _, err := c.FileAt(ctx, owner, repo, f.Path, head); err != nil {
+			return "", fmt.Errorf("update %s: %w", f.Path, err)
+		}
+		e, err := c.proposalEntry(ctx, git, f)
+		if err != nil {
+			return "", err
 		}
 		entries = append(entries, e)
 	}
@@ -111,6 +109,27 @@ func (c *Client) ProposeFiles(ctx context.Context, owner, repo string, p Proposa
 		return "", fmt.Errorf("open the pull request from %s: %w", p.Branch, err)
 	}
 	return pr.HTMLURL, nil
+}
+
+func (c *Client) proposalEntry(ctx context.Context, git string, f File) (map[string]any, error) {
+	mode := "100644"
+	if f.Executable {
+		mode = "100755"
+	}
+	e := map[string]any{"path": f.Path, "mode": mode, "type": "blob"}
+	if utf8.Valid(f.Content) {
+		e["content"] = string(f.Content)
+	} else {
+		var blob struct {
+			SHA string `json:"sha"`
+		}
+		in := map[string]string{"content": base64.StdEncoding.EncodeToString(f.Content), "encoding": "base64"}
+		if err := c.doJSON(ctx, http.MethodPost, git+"/blobs", in, &blob); err != nil {
+			return nil, fmt.Errorf("upload %s: %w", f.Path, err)
+		}
+		e["sha"] = blob.SHA
+	}
+	return e, nil
 }
 
 // openPull returns the URL of the open pull request from branch, if there is one.

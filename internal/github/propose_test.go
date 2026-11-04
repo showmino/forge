@@ -128,8 +128,20 @@ func TestProposeFiles(t *testing.T) {
 	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); !errors.Is(err, ErrFileExists) {
 		t.Errorf("existing file: %v", err)
 	}
+	p = Proposal{
+		Branch: "forge/update", Title: "Update", Message: "Update",
+		Update: []File{{Path: "zones/taken.txt", Content: []byte("updated\n")}},
+	}
+	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	if entries := f.tree["tree"].([]any); len(entries) != 1 || entries[0].(map[string]any)["path"] != "zones/taken.txt" || entries[0].(map[string]any)["content"] != "updated\n" {
+		t.Errorf("update tree %v", f.tree)
+	}
+	f.mu.Unlock()
 	// A retry finds the pull request it opened.
-	p.Files = []File{{Path: "zones/a.txt", Content: []byte("a\n")}}
+	p = Proposal{Branch: "forge/lz-a", Files: []File{{Path: "zones/a.txt", Content: []byte("a\n")}}}
 	if url, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); err != nil || url != "https://github.com/showmino/lz/pull/3" {
 		t.Errorf("retry: %q %v", url, err)
 	}

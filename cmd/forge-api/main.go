@@ -277,6 +277,12 @@ func run() error {
 		}
 		log.Info("Forge-created repositories require pull requests on main", "namespace", repoConfig.Namespace)
 	}
+	var reviewAdminTeams []string
+	for _, group := range groups {
+		if team, ok := strings.CutPrefix(group, *githubOrg+":"); ok && team != "" {
+			reviewAdminTeams = append(reviewAdminTeams, team)
+		}
+	}
 	var approvals *server.Approvals
 	if infra != nil {
 		var dispatch server.Dispatcher
@@ -286,16 +292,9 @@ func run() error {
 		o := server.ApprovalOptions{Store: st, Catalog: catalog, Infra: infra, Dispatch: dispatch, Org: *githubOrg, Log: log}
 		if gh, ok := repoHost(app).(*github.Client); ok && *deployRepo != "" {
 			owner, name, _ := strings.Cut(*deployRepo, "/")
-			// The admin groups that are teams of the org grant exceptions.
-			var teams []string
-			for _, g := range groups {
-				if slug, ok := strings.CutPrefix(g, *githubOrg+":"); ok && slug != "" {
-					teams = append(teams, slug)
-				}
-			}
 			o.Exceptions = &server.ExceptionOptions{
 				Repo: &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"}, Owner: owner, Name: name,
-				GitHub: gh, AdminTeams: teams,
+				GitHub: gh, AdminTeams: reviewAdminTeams,
 			}
 		}
 		approvals = server.NewApprovals(o)
@@ -346,8 +345,10 @@ func run() error {
 				}
 			}
 			if repoConfig != nil {
+				deployOwner, deployName, _ := strings.Cut(*deployRepo, "/")
 				changed, err := server.ReconcileRepositories(ctx, server.RepositoryOptions{
-					Catalog: catalog, Deploys: deps, Config: repoConfig, Audit: st, GitHub: gh, Org: *githubOrg, Log: log,
+					Catalog: catalog, Deploys: deps, Config: repoConfig, Audit: st, GitHub: gh, Org: *githubOrg,
+					DeployOwner: deployOwner, DeployName: deployName, ReviewAdminTeams: reviewAdminTeams, Log: log,
 				})
 				if err != nil {
 					log.Warn("repository protection reconciled with errors", "changed", changed, "error", err)

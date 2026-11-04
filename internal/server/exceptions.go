@@ -137,7 +137,7 @@ func (a *Approvals) exception(ctx context.Context, svc string) (*forgev1.Excepti
 			out.Problem = fmt.Sprintf("its last change (%s) is not the merge of %s: merge exception pull requests with squash or rebase", shortSHA(hist[0].SHA), p.HTMLURL)
 			continue
 		}
-		by, err := a.adminApproval(ctx, p, f.RequestedBy)
+		by, err := adminApproval(ctx, e.GitHub, e.Owner, e.Name, a.o.Org, e.AdminTeams, p, f.RequestedBy)
 		if err != nil {
 			return nil, err
 		}
@@ -153,18 +153,22 @@ func (a *Approvals) exception(ctx context.Context, svc string) (*forgev1.Excepti
 
 // adminApproval returns who of the admin teams, other than requester,
 // approved p's last commit, or "" when none did.
-func (a *Approvals) adminApproval(ctx context.Context, p github.Pull, requester string) (string, error) {
-	e := a.o.Exceptions
-	reviews, err := e.GitHub.PullReviews(ctx, e.Owner, e.Name, p.Number)
+func adminApproval(ctx context.Context, gh ExceptionGitHub, owner, repo, org string, teams []string, p github.Pull, requester string) (string, error) {
+	reviews, err := gh.PullReviews(ctx, owner, repo, p.Number)
 	if err != nil {
 		return "", connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the reviews of %s: %w", p.HTMLURL, err))
 	}
+	seen := make(map[string]bool)
 	for _, r := range slices.Backward(reviews) {
-		if r.State != "APPROVED" || r.CommitID != p.HeadSHA || r.User == "" || strings.EqualFold(r.User, requester) {
+		if r.CommitID != p.HeadSHA || r.User == "" || seen[strings.ToLower(r.User)] {
 			continue
 		}
-		for _, team := range e.AdminTeams {
-			ok, err := e.GitHub.TeamMember(ctx, a.o.Org, team, r.User)
+		seen[strings.ToLower(r.User)] = true
+		if r.State != "APPROVED" || strings.EqualFold(r.User, requester) {
+			continue
+		}
+		for _, team := range teams {
+			ok, err := gh.TeamMember(ctx, org, team, r.User)
 			if err != nil {
 				return "", connect.NewError(connect.CodeUnavailable, fmt.Errorf("check whether %s is in %s: %w", r.User, team, err))
 			}

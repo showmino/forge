@@ -48,11 +48,18 @@ func (f *fakeRepos) Tree(_ context.Context, _, repo, treeish string, recursive b
 func (f *fakeRepos) FileAt(_ context.Context, _, repo, path, ref string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	c, ok := f.trees[repo][path]
-	if !ok || ref != "main" {
+	if ref != "main" {
 		return nil, github.ErrNotFound
 	}
-	return []byte(c), nil
+	if c, ok := f.trees[repo][path]; ok {
+		return []byte(c), nil
+	}
+	for _, file := range f.repos[repo] {
+		if file.Path == path {
+			return file.Content, nil
+		}
+	}
+	return nil, github.ErrNotFound
 }
 
 func connectRequest(repo string) *forgev1.CreateServiceRequest {
