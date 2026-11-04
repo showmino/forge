@@ -104,6 +104,7 @@ func (a *GitHubOIDCAuthenticator) Authenticate(ctx context.Context, token string
 		JobWorkflowRef  string `json:"job_workflow_ref"`
 		EventName       string `json:"event_name"`
 		TriggeringActor string `json:"triggering_actor"`
+		RunAttempt      string `json:"run_attempt"`
 	}
 	if err := idt.Claims(&c); err != nil {
 		return nil, fmt.Errorf("invalid GitHub Actions token claims: %w", err)
@@ -136,11 +137,12 @@ func (a *GitHubOIDCAuthenticator) Authenticate(ctx context.Context, token string
 		return nil, ciDenied("ref %q is not the default branch of %s (refs/heads/%s)", c.Ref, c.Repository, branch)
 	}
 	runID, _ := strconv.ParseInt(c.RunID, 10, 64) // 0 when missing: only approvals use it
+	attempt, _ := strconv.ParseInt(c.RunAttempt, 10, 64)
 	return &Principal{
 		Subject:     "github:" + c.Repository,
 		Permissions: []string{PermDeploy(ids[0], "staging")},
 		Workload: &Workload{Repository: c.Repository, Service: ids[0], SHA: c.SHA, Actor: c.Actor, RunID: runID, JobWorkflowRef: c.JobWorkflowRef,
-			EventName: c.EventName, TriggeringActor: c.TriggeringActor},
+			EventName: c.EventName, TriggeringActor: c.TriggeringActor, RunAttempt: attempt},
 	}, nil
 }
 

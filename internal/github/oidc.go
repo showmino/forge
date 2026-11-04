@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 )
@@ -27,4 +28,23 @@ func (c *Client) DispatchWorkflow(ctx context.Context, owner, repo, workflow, re
 		Inputs map[string]string `json:"inputs,omitempty"`
 	}{ref, inputs}
 	return c.doJSON(ctx, http.MethodPost, repoPath(owner, repo)+"/actions/workflows/"+url.PathEscape(workflow)+"/dispatches", body, nil)
+}
+
+// RunActors returns who started run runID of owner/repo (its actor) and who
+// started its attempt (the triggering actor: who re-ran it, for a re-run).
+// GitHub's OIDC tokens do not carry the triggering actor.
+func (c *Client) RunActors(ctx context.Context, owner, repo string, runID, attempt int64) (actor, triggering string, err error) {
+	var out struct {
+		Actor struct {
+			Login string `json:"login"`
+		} `json:"actor"`
+		TriggeringActor struct {
+			Login string `json:"login"`
+		} `json:"triggering_actor"`
+	}
+	path := fmt.Sprintf("%s/actions/runs/%d/attempts/%d", repoPath(owner, repo), runID, attempt)
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return "", "", err
+	}
+	return out.Actor.Login, out.TriggeringActor.Login, nil
 }

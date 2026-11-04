@@ -29,6 +29,8 @@ type Dispatcher interface {
 	DispatchWorkflow(ctx context.Context, owner, repo, workflow, ref string, inputs map[string]string) error
 	DefaultBranch(ctx context.Context, owner, repo string) (string, error)
 	ResolveRef(ctx context.Context, owner, repo, ref string) (string, error)
+	// RunActors returns who started a run and who started its attempt.
+	RunActors(ctx context.Context, owner, repo string, runID, attempt int64) (actor, triggering string, err error)
 }
 
 var _ Dispatcher = (*github.Client)(nil)
@@ -141,22 +143,33 @@ func (a *Approvals) RequestApproval(ctx context.Context, _ *connect.Request[forg
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
 			"%s is not the newest commit of %s (%s is): only the newest asks for production's approval", shortSHA(w.SHA), branch, shortSHA(head)))
 	}
-	// A re-run of the same job asks again: it gets the approval it has.
+	// Who started this attempt: GitHub's OIDC tokens do not say, so ask. A
+	// re-run's is the person who re-ran it, who may not approve it either.
+	if w.RunID == 0 || w.RunAttempt == 0 {
+		return nil, workloadDenied(w, "ask for an approval only with a token that names its run (run_id, run_attempt)")
+	}
+	_, triggering, err := a.o.Dispatch.RunActors(ctx, owner, repo, w.RunID, w.RunAttempt)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read who started run %d (attempt %d) of %s: %w", w.RunID, w.RunAttempt, w.Repository, err))
+	}
+	if triggering == "" {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("GitHub did not say who started run %d (attempt %d) of %s; try again", w.RunID, w.RunAttempt, w.Repository))
+	}
+	// A re-run of the same job by the same person asks again: it gets the
+	// approval it has. Someone else's re-run gets a new one, naming them.
 	pending, err := a.o.Store.ListApprovals(ctx, store.ApprovalQuery{Service: w.Service, State: store.ApprovalPending, Limit: 1})
 	if err != nil {
 		return nil, storeErr(err)
 	}
-	if len(pending) == 1 && pending[0].Commit == w.SHA && pending[0].RunID == w.RunID {
+	if len(pending) == 1 && pending[0].Commit == w.SHA && pending[0].RunID == w.RunID && strings.EqualFold(pending[0].TriggeredBy, triggering) {
 		noteAuditTarget(ctx, approvalPrefix+pending[0].ID)
 		return connect.NewResponse(&forgev1.RequestApprovalResponse{Approval: a.proto(pending[0], svc)}), nil
 	}
 	ap := store.Approval{
 		ID: newApprovalID(), Service: w.Service, Environment: infrastructure.Production, Commit: w.SHA,
-		RunID: w.RunID, RequestedBy: w.Actor, TriggeredBy: w.TriggeringActor, State: store.ApprovalPending, CreatedAt: a.o.Now().UTC(),
+		RunID: w.RunID, RequestedBy: w.Actor, TriggeredBy: triggering, State: store.ApprovalPending, CreatedAt: a.o.Now().UTC(),
 	}
-	if w.RunID != 0 {
-		ap.RunURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d", w.Repository, w.RunID)
-	}
+	ap.RunURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d", w.Repository, w.RunID)
 	if err := a.o.Store.CreateApproval(ctx, ap); err != nil {
 		return nil, storeErr(err)
 	}
