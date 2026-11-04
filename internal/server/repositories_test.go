@@ -9,6 +9,7 @@ import (
 	"connectrpc.com/connect"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/repositories"
@@ -39,6 +40,7 @@ func TestCreatedRepository(t *testing.T) {
 	}
 	add("", "false", "ok") // A connected repository.
 	add("templates/svc", "true", "ok")
+	add("templates/svc", "invalid", "ok")
 	add("templates/svc", "false", "failed")
 	if got, err := createdRepository(ctx, st, svc); err != nil || got {
 		t.Fatalf("adopted without a successful create: %v %v", got, err)
@@ -49,6 +51,28 @@ func TestCreatedRepository(t *testing.T) {
 	}
 	if got, err := createdRepository(ctx, st, svc); err != nil || !got {
 		t.Fatalf("did not find paginated successful create: %v %v", got, err)
+	}
+}
+
+func TestCreatedRepositoryWithAuditedRequest(t *testing.T) {
+	for _, validate := range []bool{false, true} {
+		t.Run(map[bool]string{false: "create", true: "dry-run"}[validate], func(t *testing.T) {
+			ctx := context.Background()
+			st := store.NewMemory()
+			_, _, det := auditActions[forgev1connect.ServiceCatalogServiceCreateServiceProcedure].describe(&forgev1.CreateServiceRequest{
+				ServiceId: "app", Template: "templates/svc", ValidateOnly: validate,
+			})
+			if _, err := st.AppendAuditEvent(ctx, &forgev1.AuditEvent{
+				Action: "service.create", Service: "services/app", Result: &forgev1.AuditResult{Code: "ok"},
+				Details: det,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			got, err := createdRepository(ctx, st, &forgev1.Service{Name: "services/app"})
+			if err != nil || got == validate {
+				t.Fatalf("audited request (validate_only=%v): created=%v, error=%v", validate, got, err)
+			}
+		})
 	}
 }
 
@@ -109,7 +133,7 @@ func TestReconcileRepositories(t *testing.T) {
 		if id != "connected" {
 			if _, err := audit.AppendAuditEvent(ctx, &forgev1.AuditEvent{
 				Action: "service.create", Service: servicePrefix + id, Result: &forgev1.AuditResult{Code: "ok"},
-				Details: map[string]string{"template": "templates/svc", "validate_only": "false"},
+				Details: details("template", "templates/svc"),
 			}); err != nil {
 				t.Fatal(err)
 			}
