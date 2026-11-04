@@ -173,3 +173,15 @@ func TestApprovalExceptionCommands(t *testing.T) {
 		t.Errorf("self-approve with the exception: %s", r)
 	}
 }
+
+func TestTemplateTargetsNone(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	r := h.run("template", "targets")
+	if r.code != 0 || !strings.Contains(r.err, "No targets") {
+		t.Errorf("targets: %s", r)
+	}
+	if r = h.run("template", "targets", "-o", "json"); r.code != 0 || !strings.Contains(r.out, `"targets": []`) {
+		t.Errorf("json: %s", r)
+	}
+}

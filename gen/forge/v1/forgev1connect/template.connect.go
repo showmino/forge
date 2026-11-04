@@ -33,6 +33,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// TemplateServiceListTargetsProcedure is the fully-qualified name of the TemplateService's
+	// ListTargets RPC.
+	TemplateServiceListTargetsProcedure = "/forge.v1.TemplateService/ListTargets"
 	// TemplateServiceListTemplatesProcedure is the fully-qualified name of the TemplateService's
 	// ListTemplates RPC.
 	TemplateServiceListTemplatesProcedure = "/forge.v1.TemplateService/ListTemplates"
@@ -43,6 +46,10 @@ const (
 
 // TemplateServiceClient is a client for the forge.v1.TemplateService service.
 type TemplateServiceClient interface {
+	// ListTargets returns the targets infrastructure templates deploy to
+	// (phase 12): what 'forge create --target' and the Create page choose
+	// from. Empty when this API has no infrastructure repos.
+	ListTargets(context.Context, *connect.Request[v1.ListTargetsRequest]) (*connect.Response[v1.ListTargetsResponse], error)
 	// ListTemplates returns the templates of one release, the newest by default.
 	ListTemplates(context.Context, *connect.Request[v1.ListTemplatesRequest]) (*connect.Response[v1.ListTemplatesResponse], error)
 	// GetTemplate returns one template of one release, the newest by default.
@@ -60,6 +67,13 @@ func NewTemplateServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 	baseURL = strings.TrimRight(baseURL, "/")
 	templateServiceMethods := v1.File_forge_v1_template_proto.Services().ByName("TemplateService").Methods()
 	return &templateServiceClient{
+		listTargets: connect.NewClient[v1.ListTargetsRequest, v1.ListTargetsResponse](
+			httpClient,
+			baseURL+TemplateServiceListTargetsProcedure,
+			connect.WithSchema(templateServiceMethods.ByName("ListTargets")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		listTemplates: connect.NewClient[v1.ListTemplatesRequest, v1.ListTemplatesResponse](
 			httpClient,
 			baseURL+TemplateServiceListTemplatesProcedure,
@@ -79,8 +93,14 @@ func NewTemplateServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 
 // templateServiceClient implements TemplateServiceClient.
 type templateServiceClient struct {
+	listTargets   *connect.Client[v1.ListTargetsRequest, v1.ListTargetsResponse]
 	listTemplates *connect.Client[v1.ListTemplatesRequest, v1.ListTemplatesResponse]
 	getTemplate   *connect.Client[v1.GetTemplateRequest, v1.GetTemplateResponse]
+}
+
+// ListTargets calls forge.v1.TemplateService.ListTargets.
+func (c *templateServiceClient) ListTargets(ctx context.Context, req *connect.Request[v1.ListTargetsRequest]) (*connect.Response[v1.ListTargetsResponse], error) {
+	return c.listTargets.CallUnary(ctx, req)
 }
 
 // ListTemplates calls forge.v1.TemplateService.ListTemplates.
@@ -95,6 +115,10 @@ func (c *templateServiceClient) GetTemplate(ctx context.Context, req *connect.Re
 
 // TemplateServiceHandler is an implementation of the forge.v1.TemplateService service.
 type TemplateServiceHandler interface {
+	// ListTargets returns the targets infrastructure templates deploy to
+	// (phase 12): what 'forge create --target' and the Create page choose
+	// from. Empty when this API has no infrastructure repos.
+	ListTargets(context.Context, *connect.Request[v1.ListTargetsRequest]) (*connect.Response[v1.ListTargetsResponse], error)
 	// ListTemplates returns the templates of one release, the newest by default.
 	ListTemplates(context.Context, *connect.Request[v1.ListTemplatesRequest]) (*connect.Response[v1.ListTemplatesResponse], error)
 	// GetTemplate returns one template of one release, the newest by default.
@@ -108,6 +132,13 @@ type TemplateServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewTemplateServiceHandler(svc TemplateServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	templateServiceMethods := v1.File_forge_v1_template_proto.Services().ByName("TemplateService").Methods()
+	templateServiceListTargetsHandler := connect.NewUnaryHandler(
+		TemplateServiceListTargetsProcedure,
+		svc.ListTargets,
+		connect.WithSchema(templateServiceMethods.ByName("ListTargets")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	templateServiceListTemplatesHandler := connect.NewUnaryHandler(
 		TemplateServiceListTemplatesProcedure,
 		svc.ListTemplates,
@@ -124,6 +155,8 @@ func NewTemplateServiceHandler(svc TemplateServiceHandler, opts ...connect.Handl
 	)
 	return "/forge.v1.TemplateService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case TemplateServiceListTargetsProcedure:
+			templateServiceListTargetsHandler.ServeHTTP(w, r)
 		case TemplateServiceListTemplatesProcedure:
 			templateServiceListTemplatesHandler.ServeHTTP(w, r)
 		case TemplateServiceGetTemplateProcedure:
@@ -136,6 +169,10 @@ func NewTemplateServiceHandler(svc TemplateServiceHandler, opts ...connect.Handl
 
 // UnimplementedTemplateServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedTemplateServiceHandler struct{}
+
+func (UnimplementedTemplateServiceHandler) ListTargets(context.Context, *connect.Request[v1.ListTargetsRequest]) (*connect.Response[v1.ListTargetsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.TemplateService.ListTargets is not implemented"))
+}
 
 func (UnimplementedTemplateServiceHandler) ListTemplates(context.Context, *connect.Request[v1.ListTemplatesRequest]) (*connect.Response[v1.ListTemplatesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.TemplateService.ListTemplates is not implemented"))

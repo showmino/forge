@@ -482,6 +482,7 @@ var auditReads = []string{
 	forgev1connect.ApprovalServiceGetApprovalProcedure,
 	forgev1connect.ApprovalServiceListApprovalsProcedure,
 	forgev1connect.ApprovalServiceListExceptionsProcedure,
+	forgev1connect.TemplateServiceListTargetsProcedure,
 	forgev1connect.ServiceCatalogServiceListServicesProcedure,
 	forgev1connect.ServiceCatalogServiceGetServiceProcedure,
 	forgev1connect.AuthServiceGetServerInfoProcedure,
