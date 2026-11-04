@@ -143,7 +143,7 @@ func TestCreateInfrastructure(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"kind: Environment", "kind: EnvironmentDeploymentPolicy", "secretName: AZURE_CLIENT_ID",
-		"subject: job_workflow_ref:showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:showmino/infra-net:environment:production"} {
+		"subject: job_workflow_ref:showmino/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:showmino@155/infra-net@1445:environment:production"} {
 		if !strings.Contains(string(objs), want) {
 			t.Errorf("production.yaml has no %q:\n%s", want, objs)
 		}
@@ -346,5 +346,78 @@ func TestListTargets(t *testing.T) {
 	}
 	if _, err := s.ListTargets(context.Background(), connect.NewRequest(&forgev1.ListTargetsRequest{})); connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Errorf("anonymous: %v", err)
+	}
+}
+
+// ReconcileInfrastructure brings a folder written before the repos' IDs were
+// recorded up to date, once.
+func TestReconcileInfrastructure(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	if _, err := e.create(ctx, "writer", infraRequest("infra-net", "staging")); err != nil {
+		t.Fatal(err)
+	}
+	// An older repo: no IDs in its record, a subject without them.
+	e.repos.mu.Lock()
+	e.repos.repos["infra-old"] = nil
+	e.repos.mu.Unlock()
+	if _, err := e.catalog.register(writerCtx(), connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: "infra-old", Service: &forgev1.Service{
+		OwnerTeam: "platform", RepoUrl: "https://github.com/showmino/infra-old",
+		Infrastructure: &forgev1.InfrastructureRepo{Tool: "opentofu", Target: "azure", Environments: []string{"production"}},
+	}}), false); err != nil {
+		t.Fatal(err)
+	}
+	e.repo.Push("infrastructure/infra-old/target.yaml", []byte("target: azure\nteam: platform\nenvironments: [production]\n"), "old")
+	e.repo.Push("infrastructure/infra-old/production.yaml", []byte("subject: repo:showmino/infra-old\n"), "old")
+	cfg, _ := infrastructure.Parse([]byte(infraConfig))
+	o := ReconcileOptions{Catalog: e.catalog, Deploys: e.deploys, Infra: cfg, GitHub: e.repos, OIDC: e.repos, Org: "showmino"}
+	changed, err := ReconcileInfrastructure(ctx, o)
+	if err != nil || strings.Join(changed, ",") != "infra-old" {
+		t.Fatalf("changed %v %v, want infra-old only", changed, err)
+	}
+	prod, _ := e.repo.Read(ctx, "infrastructure/infra-old/production.yaml", "")
+	rec, _ := e.deploys.readInfrastructure(ctx, "infra-old")
+	if !strings.Contains(string(prod), "repo:showmino@155/infra-old@1445:environment:production") || rec.RepoID != 1445 || rec.OwnerID != 155 {
+		t.Errorf("after: %s %+v", prod, rec)
+	}
+	if _, err := e.repo.Read(ctx, "infrastructure/infra-old/repo.yaml", ""); err != nil {
+		t.Errorf("repo.yaml: %v", err)
+	}
+	if got := strings.Join(e.repos.oidc["infra-old"], ","); got != "job_workflow_ref,repo,context" {
+		t.Errorf("OIDC claims %q", got)
+	}
+	if changed, err := ReconcileInfrastructure(ctx, o); err != nil || len(changed) != 0 {
+		t.Errorf("again: %v %v", changed, err)
+	}
+}
+
+// A repo being deleted, or whose team its target no longer allows, is left
+// alone: a delete must not see its folder come back.
+func TestReconcileInfrastructureLeavesAlone(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	if _, err := e.create(ctx, "writer", infraRequest("infra-net", "staging")); err != nil {
+		t.Fatal(err)
+	}
+	// A change to the target's values would be written...
+	cfg, _ := infrastructure.Parse([]byte(strings.Replace(infraConfig, "githubSecrets: {AZURE_CLIENT_ID: clientId}\n      production", "githubSecrets: {AZURE_CLIENT_ID: clientId, AZURE_TENANT_ID: tenantId}\n      production", 1)))
+	o := ReconcileOptions{Catalog: e.catalog, Deploys: e.deploys, Infra: cfg, GitHub: e.repos, Org: "showmino"}
+	// ...but not while it is being deleted,
+	e.catalog.markDeleting("services/infra-net", "operations/op_x")
+	if changed, err := ReconcileInfrastructure(ctx, o); len(changed) != 0 || err == nil || !strings.Contains(err.Error(), "being deleted") {
+		t.Errorf("while deleting: %v %v", changed, err)
+	}
+	e.catalog.unmarkDeleting("services/infra-net")
+	// nor when the target no longer allows its team.
+	closed, _ := infrastructure.Parse([]byte(strings.Replace(infraConfig, "  - name: azure\n", "  - name: azure\n    teams: [web]\n", 1)))
+	o.Infra = closed
+	if changed, err := ReconcileInfrastructure(ctx, o); len(changed) != 0 || err == nil || !strings.Contains(err.Error(), "no longer allows team platform") {
+		t.Errorf("team not allowed: %v %v", changed, err)
+	}
+	o.Infra = cfg
+	if changed, err := ReconcileInfrastructure(ctx, o); err != nil || strings.Join(changed, ",") != "infra-net" {
+		t.Errorf("the change: %v %v", changed, err)
 	}
 }

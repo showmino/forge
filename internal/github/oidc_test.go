@@ -23,7 +23,7 @@ func TestSetOIDCSubjectClaims(t *testing.T) {
 	if err := c.SetOIDCSubjectClaims(context.Background(), "my-org", "infra-net", []string{"repo", "context", "job_workflow_ref"}); err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"use_default":false,"include_claim_keys":["repo","context","job_workflow_ref"]}`; got != want {
+	if want := `{"use_default":false,"use_immutable_subject":true,"include_claim_keys":["repo","context","job_workflow_ref"]}`; got != want {
 		t.Errorf("body %s, want %s", got, want)
 	}
 }

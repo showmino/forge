@@ -269,11 +269,16 @@ func (t Target) Allows(team string) bool {
 	return len(t.Teams) == 0 || slices.Contains(t.Teams, team)
 }
 
-// Subject is the OIDC subject GitHub gives a job of org/repo in env once the
-// repo's subject claims are SubjectClaims: only runs of the shared workflow
-// carry it.
-func (c *Config) Subject(org, repo, env string) string {
-	return "job_workflow_ref:" + c.Workflow + ":repo:" + org + "/" + repo + ":environment:" + env
+// Subject is the OIDC subject GitHub gives a job of r in env once the repo's
+// subject claims are SubjectClaims, with immutable identifiers: only runs of
+// the shared workflow carry it, and a repo deleted and made again under the
+// same name gets another (its ID changes).
+func (c *Config) Subject(r Repo, env string) string {
+	repo := r.Org + "/" + r.Name
+	if r.OwnerID != 0 && r.RepoID != 0 {
+		repo = fmt.Sprintf("%s@%d/%s@%d", r.Org, r.OwnerID, r.Name, r.RepoID)
+	}
+	return "job_workflow_ref:" + c.Workflow + ":repo:" + repo + ":environment:" + env
 }
 
 // SubjectClaims are the claims, in order, of an infrastructure repo's

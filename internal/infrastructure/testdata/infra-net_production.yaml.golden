@@ -122,4 +122,4 @@ spec:
     issuer: https://token.actions.githubusercontent.com
     parentId: /subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id
     resourceGroupName: rg
-    subject: job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org/infra-net:environment:production
+    subject: job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org@155/infra-net@1445:environment:production

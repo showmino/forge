@@ -448,6 +448,12 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	}
 
 	if infra != nil {
+		// Now with GitHub's IDs: the repo's OIDC subject names them.
+		if infra.files, err = c.infra.Files(infra.target, infrastructure.Repo{
+			Org: c.org, Name: id, Team: req.GetOwnerTeam(), Environments: infra.envs, OwnerID: repo.Owner.ID, RepoID: repo.ID,
+		}); err != nil {
+			return fail("infrastructure", err)
+		}
 		if err := c.setOIDCSubject(work, id, started, done); err != nil {
 			return fail("oidc_subject", err)
 		}

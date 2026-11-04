@@ -14,9 +14,22 @@ import (
 
 // Repo is a repository GitHub created.
 type Repo struct {
+	ID            int64  `json:"id"`
 	FullName      string `json:"full_name"`
 	HTMLURL       string `json:"html_url"`
 	DefaultBranch string `json:"default_branch"`
+	Owner         struct {
+		ID int64 `json:"id"`
+	} `json:"owner"`
+}
+
+// GetRepo returns owner/name.
+func (c *Client) GetRepo(ctx context.Context, owner, name string) (*Repo, error) {
+	var r Repo
+	if err := c.doJSON(ctx, http.MethodGet, repoPath(owner, name), nil, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
 }
 
 // File is one file of a commit.
