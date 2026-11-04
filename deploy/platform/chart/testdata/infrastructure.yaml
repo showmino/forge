@@ -8,6 +8,8 @@ apps:
   pullSecret: ghcr
 deploys:
   enabled: true
+repositories:
+  enabled: true
 infrastructure:
   enabled: true
   workflow: acme/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
@@ -25,6 +27,28 @@ infrastructure:
           githubVariables:
             TF_STATE_STORAGE_ACCOUNT: stacmestate
           maxRepos: 20
+          plan:
+            secret: target-azure-production-plan
+            githubSecrets:
+              AZURE_TENANT_ID: tenantId
+              AZURE_SUBSCRIPTION_ID: subscriptionId
+              AZURE_CLIENT_ID: clientId
+            githubVariables:
+              TF_STATE_RESOURCE_GROUP: rg-state
+              TF_STATE_STORAGE_ACCOUNT: stacmestate
+              AZURE_LOCATION: swedencentral
+            access: |
+              apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+              kind: FederatedIdentityCredential
+              metadata:
+                name: {{ .Repo }}-{{ .Environment }}-plan
+              spec:
+                forProvider:
+                  audience: [api://AzureADTokenExchange]
+                  issuer: https://token.actions.githubusercontent.com
+                  subject: {{ .Subject }}
+                  parentId: /subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-plan
+                  resourceGroupName: rg
           access: |
             apiVersion: managedidentity.azure.m.upbound.io/v1beta1
             kind: FederatedIdentityCredential

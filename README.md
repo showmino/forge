@@ -392,6 +392,17 @@ values, with production's own values from `forge.yaml`; rollback restores
 both. forge-api runs it with `--charts` (`FORGE_CHARTS=1`, the chart's
 `deploys.charts.enabled`). See
 `docs/specs/2026-10-30-phase-11-helm-charts-design.md`.
+With the chart's `repositories.enabled` (forge-api `--repositories-config`),
+every repository Forge creates from a template gets a Crossplane
+`RepositoryRuleset`: `main` requires a pull request, without administrator
+or App bypass, and refuses force pushes and deletion. The initial scaffold
+is written before protection is installed. On startup Forge backfills
+existing successful template creates from its audit log; connected repos
+are not adopted. Rules live independently in `repositories/<name>/rules.yaml`
+in the deploy repo and stay after catalog deletion. Infrastructure repos also
+require the shared workflow's `infrastructure / pr-checks` check, with the
+branch up to date. Enable protection only after installing the GitHub
+provider's namespaced `RepositoryRuleset` CRD.
 `forge create <name> --template opentofu --target <target> [--environments
 production] --team <team>` makes an infrastructure repo from a template of
 `type: infrastructure` (its `forge.yaml` has `infrastructure.tool`, and no
@@ -415,7 +426,23 @@ under the same name is not trusted; `target.yaml` keeps the IDs. When
 forge-api starts it writes every infrastructure repo's folder again from the
 current targets (only what changed), so a changed target reaches the repos
 made before. Forge never deploys such a repo; deleting it removes the
-folder. Its production runs wait in Forge: the shared workflow
+folder. Every chosen target environment needs `plan` with a separate
+`secret`, `githubSecrets`, `githubVariables` and `access`, shaped like the
+deployment settings. Crossplane publishes these as repository settings
+`FORGE_PLAN_<ENV>_*`, plus the JSON array `FORGE_PLAN_ENVIRONMENTS`. The
+plan access template's `.Subject` ends in `:pull_request` and does not name a
+GitHub environment. Every PR runs a plan/what-if for each chosen account,
+including production-only repos, without creating preview environments.
+The Azure plan identity has Reader and ARM what-if/validation permissions,
+not deploy permissions, and Storage Blob Data Reader on the state container.
+Terraform PR plans read a state snapshot into a local backend and do not
+acquire a remote state lock or initialize remote state. Deployment still
+locks and replans after merge. Bicep what-if uses `validation-level: providerNoRbac`.
+`Azure/bicep-deploy@v2.5.0` runs Bicep what-if and deployment; deployments
+use stacks with `delete` for unmanaged resources and resource groups and
+`denyDelete` for managed resources. Removing a resource from a template can
+therefore delete it during an approved deployment.
+Its production runs wait in Forge: the shared workflow
 runs `forge approval request` with the job's token (only that workflow may),
 a member of the owning team who did not start the run approves it (`forge
 approval list --state pending`, `forge approval approve <id>`, the action

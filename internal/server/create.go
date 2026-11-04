@@ -20,6 +20,7 @@ import (
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/manifest"
+	"github.com/showmino/forge/internal/repositories"
 	"github.com/showmino/forge/internal/template"
 )
 
@@ -75,9 +76,10 @@ type creator struct {
 	// infra are the targets infrastructure repos deploy to, and oidc ties a
 	// new one's production sign-in to the shared workflow; nil: none can be
 	// made.
-	infra *infrastructure.Config
-	oidc  OIDCSubjects
-	org   string
+	infra        *infrastructure.Config
+	oidc         OIDCSubjects
+	repositories *repositories.Config
+	org          string
 	// targetLocks holds a *sync.Mutex per target, held while a create of an
 	// infrastructure repo for it runs (planInfrastructure).
 	targetLocks sync.Map
@@ -399,6 +401,9 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 				plan.Files = append(plan.Files, "forge-deploys: "+p)
 			}
 		}
+		if c.repositories != nil {
+			plan.Files = append(plan.Files, "forge-deploys: "+repositories.Path(id))
+		}
 		final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Plan{Plan: plan}}
 		w.send(final)
 		return final, w.err
@@ -420,12 +425,20 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	// wroteInfra: the deploy repo may hold the repo's infrastructure folder
 	// (a write that failed may still have landed), so a failure removes it.
 	wroteInfra := false
+	wroteProtection := false
 	fail := func(step string, cause error) (*forgev1.CreateServiceResponse, error) {
 		msg := cause.Error()
 		var undoErr error
+		if wroteProtection {
+			_, undoErr = c.deploys.commitFiles(work, map[string][]byte{repositories.Path(id): nil}, "remove failed repository protection for "+id)
+			if undoErr != nil {
+				msg += fmt.Sprintf("; repository protection could not be removed from the deploy repo: %v", undoErr)
+			}
+		}
 		if wroteInfra {
-			if undoErr = c.deploys.removeInfrastructure(work, id); undoErr != nil {
-				msg += fmt.Sprintf("; and %s could not be removed from the deploy repo (%v): remove it before using the name again", infrastructure.Folder(id), undoErr)
+			if err := c.deploys.removeInfrastructure(work, id); err != nil {
+				undoErr = errors.Join(undoErr, err)
+				msg += fmt.Sprintf("; and %s could not be removed from the deploy repo (%v): remove it before using the name again", infrastructure.Folder(id), err)
 			}
 		}
 		delErr := c.repos.DeleteRepo(work, c.org, id)
@@ -437,6 +450,9 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		noteCreateFailure(ctx, final)
 		w.send(final)
 		return final, nil
+	}
+	if c.repositories != nil && repo.DefaultBranch != "main" {
+		return fail("protect_main", fmt.Errorf("repository protection requires main, but GitHub created default branch %q; set the organization's default branch to main", repo.DefaultBranch))
 	}
 
 	if team := svc.GetOwnerTeam(); team != "" {
@@ -470,6 +486,22 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	}
 	done("push", shortSHA(sha)+" (CI started)")
 
+	var protectionFiles map[string][]byte
+	var protectionCommit string
+	if c.repositories != nil {
+		started("protect_main")
+		data, err := c.repositories.Rules(id, infra != nil)
+		if err != nil {
+			return fail("protect_main", err)
+		}
+		protectionFiles = map[string][]byte{repositories.Path(id): data}
+		wroteProtection = true
+		protectionCommit, err = c.deploys.commitFiles(work, protectionFiles, "require pull requests in "+c.org+"/"+id+" (forge-api)")
+		if err != nil {
+			return fail("protect_main", err)
+		}
+		done("protect_main", "Crossplane ruleset written: no direct pushes to main")
+	}
 	if infra != nil {
 		wroteInfra = true
 		if err := c.writeInfrastructure(work, id, infra, started, done); err != nil {
@@ -485,6 +517,19 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	done("register", servicePrefix+id)
 	if infra != nil {
 		c.awaitInfrastructure(work, id, infra, started, done)
+	}
+	if c.repositories != nil && c.deploys.o.Cluster != nil {
+		started("repository_ready")
+		err := c.deploys.awaitApp(work, id, "repository", id+"-repository", protectionCommit, protectionFiles, "repository_ready", func(string, string) {})
+		if err != nil {
+			final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Failure{Failure: &forgev1.CreateFailure{
+				Step: "repository_ready", Message: "the repo is registered but its main protection is not ready: " + err.Error() + "; Crossplane keeps trying; inspect Argo CD application " + id + "-repository",
+			}}}
+			noteCreateFailure(ctx, final)
+			w.send(final)
+			return final, nil
+		}
+		done("repository_ready", "main requires a pull request")
 	}
 
 	p, _ := PrincipalFrom(ctx)

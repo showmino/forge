@@ -90,3 +90,15 @@ The walkthrough, with the GitHub App's settings, is
 [Install Forge](https://forgegate.io/docs/running-your-own-forge), and
 [Chart values](https://forgegate.io/docs/chart-values) lists every setting;
 `values.yaml` has the defaults, with comments.
+
+`repositories.enabled: true` requires Crossplane's namespaced GitHub
+`RepositoryRuleset` CRD and a provider with repository administration access.
+It protects `main` for every Forge-created repository, including existing
+audited template creates, with no administrator or App bypass. Connected
+repositories are not adopted. Protection is independent of service deletion.
+Infrastructure repos additionally require the shared workflow's PR gate.
+
+Each infrastructure target environment needs a separate `plan` identity:
+`secret`, `githubSecrets`, `githubVariables` and `access`. Its settings become
+repository-level `FORGE_PLAN_<ENV>_*` values for mandatory PR plan/what-if
+jobs, without making preview environments or exposing deployment identities.

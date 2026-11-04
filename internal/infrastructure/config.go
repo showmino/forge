@@ -77,8 +77,27 @@ type Environment struct {
 	// Access is a Go template of the Crossplane objects that let one repo
 	// sign in to the account (see AccessValues).
 	Access string `yaml:"access,omitempty"`
+	// Plan is a separate identity for unreviewed PR code, never the deploy identity.
+	Plan *PlanAccess `yaml:"plan,omitempty"`
 
 	access *template.Template
+}
+
+// PlanAccess provides repository-level settings and cloud trust for PR plans.
+// It makes no GitHub environment.
+type PlanAccess struct {
+	Secret          string            `yaml:"secret"`
+	GitHubSecrets   map[string]string `yaml:"githubSecrets,omitempty"`
+	GitHubVariables map[string]string `yaml:"githubVariables,omitempty"`
+	Access          string            `yaml:"access,omitempty"`
+	access          *template.Template
+}
+
+func (p *PlanAccess) environment() Environment {
+	return Environment{
+		Secret: p.Secret, GitHubSecrets: p.GitHubSecrets,
+		GitHubVariables: p.GitHubVariables, Access: p.Access, access: p.access,
+	}
 }
 
 // AccessValues are what an access template can use.
@@ -240,6 +259,16 @@ func (e *Environment) check(kinds []string) error {
 			return fmt.Errorf("access: %w", err)
 		}
 	}
+	if e.Plan != nil {
+		if e.Plan.Secret == e.Secret {
+			return errors.New("plan.secret must differ from the deployment secret: PRs use a separate identity")
+		}
+		p := e.Plan.environment()
+		if err := p.check(kinds); err != nil {
+			return fmt.Errorf("plan: %w", err)
+		}
+		e.Plan.access = p.access
+	}
 	return nil
 }
 
@@ -274,11 +303,20 @@ func (t Target) Allows(team string) bool {
 // the shared workflow carry it, and a repo deleted and made again under the
 // same name gets another (its ID changes).
 func (c *Config) Subject(r Repo, env string) string {
+	return c.subject(r, "environment:"+env)
+}
+
+// PlanSubject trusts only PR jobs of the shared workflow, without an environment.
+func (c *Config) PlanSubject(r Repo) string {
+	return c.subject(r, "pull_request")
+}
+
+func (c *Config) subject(r Repo, context string) string {
 	repo := r.Org + "/" + r.Name
 	if r.OwnerID != 0 && r.RepoID != 0 {
 		repo = fmt.Sprintf("%s@%d/%s@%d", r.Org, r.OwnerID, r.Name, r.RepoID)
 	}
-	return "job_workflow_ref:" + c.Workflow + ":repo:" + repo + ":environment:" + env
+	return "job_workflow_ref:" + c.Workflow + ":repo:" + repo + ":" + context
 }
 
 // SubjectClaims are the claims, in order, of an infrastructure repo's

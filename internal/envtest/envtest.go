@@ -497,6 +497,8 @@ func (a *Argo) Run(ctx context.Context) {
 			// An infrastructure repo's folder is forge-infrastructure's app.
 			case len(parts) == 3 && parts[0] == "infrastructure" && parts[2] == "target.yaml":
 				name = parts[1] + "-infrastructure"
+			case len(parts) == 3 && parts[0] == "repositories" && parts[2] == "rules.yaml":
+				name = parts[1] + "-repository"
 			// values.yaml is forge-services' app, chart.json forge-charts'.
 			case len(parts) == 4 && parts[0] == "services" && (path.Base(p) == "values.yaml" || path.Base(p) == "chart.json"):
 				svc, env := parts[1], parts[2]

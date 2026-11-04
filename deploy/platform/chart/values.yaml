@@ -259,6 +259,16 @@ deploys:
 # Crossplane objects into the deploy repo. Needs deploys, the GitHub App
 # (Actions: write) and Crossplane with its GitHub provider and a provider for
 # each cloud the targets use. See templates/infrastructure.yaml.
+repositories:
+  # Enable only after installing Crossplane's namespaced GitHub
+  # RepositoryRuleset CRD. Covers existing audited template creates and all
+  # future ones, not connected repos. No actor bypasses PRs on main.
+  enabled: false
+  namespace: forge-repositories
+  providerConfig:
+    kind: ClusterProviderConfig
+    name: github
+
 infrastructure:
   enabled: false
   # Where the Crossplane objects and the targets' Secrets live.
@@ -281,7 +291,11 @@ infrastructure:
   # (staging, production): secret (a Secret in namespace), githubSecrets
   # (secret name: key in it), githubVariables (name: value), maxRepos, and
   # access (a Go template of Crossplane objects with .Org, .Repo, .Team,
-  # .Environment and .Subject). Forge's README has an example.
+  # .Environment and .Subject). Each environment also needs plan:
+  # secret, githubSecrets, githubVariables and access for a separate PR
+  # identity. Its settings become FORGE_PLAN_<ENV>_* repository settings;
+  # it uses .Subject ending in :pull_request, never deploy credentials.
+  # Forge's README has an example.
   targets: []
 
 # Resources: `forge resource` plans and applies a service's databases

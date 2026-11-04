@@ -20,6 +20,7 @@ import (
 
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/infrastructure"
+	"github.com/showmino/forge/internal/repositories"
 	"github.com/showmino/forge/internal/server"
 	"github.com/showmino/forge/internal/version"
 )
@@ -70,18 +71,19 @@ func run() error {
 		appKey        = flag.String("github-app-key-file", env("FORGE_GITHUB_APP_KEY_FILE", ""), "file with the GitHub App's private key (PEM)")
 		githubOrg     = flag.String("github-org", env("FORGE_GITHUB_ORG", ""), "GitHub org the App is installed on; required with the GitHub App")
 
-		previewsOn        = flag.Bool("previews", env("FORGE_PREVIEWS", "") == "1" || env("FORGE_PREVIEWS", "") == "true", "serve preview environments (needs the GitHub App and Kubernetes access)")
-		previewDomain     = flag.String("preview-domain", env("FORGE_PREVIEW_DOMAIN", ""), "preview hosts are <environment>.<domain>, for example preview.10.150.1.222.nip.io")
-		previewGateway    = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
-		ciRunner          = flag.String("ci-runner", env("FORGE_CI_RUNNER", "ubuntu-latest"), "runs-on of the build job in the workflow forge service connect adds to a repo")
-		ciDeployRunner    = flag.String("ci-deploy-runner", env("FORGE_CI_DEPLOY_RUNNER", ""), "runs-on of that workflow's deploy job, which must reach this API (default: --ci-runner)")
-		chartsOn          = flag.Bool("charts", env("FORGE_CHARTS", "") == "1" || env("FORGE_CHARTS", "") == "true", "let services run a published Helm chart (forge create --chart); needs --deploys and the forge-charts ApplicationSet")
-		allowedChartRepos = flag.String("allowed-chart-repos", env("FORGE_ALLOWED_CHART_REPOS", ""), "chart repositories services may run charts from, comma separated, such as oci://ghcr.io/acme/charts (empty: any); the chart rules (policy/charts.rego) refuse others")
-		infraConfig       = flag.String("infrastructure-config", env("FORGE_INFRASTRUCTURE_CONFIG", ""), "file of the targets infrastructure repos deploy to (forge create --target; phase 12); needs --deploys and the GitHub App")
-		allowedRegistries = flag.String("allowed-registries", env("FORGE_ALLOWED_REGISTRIES", ""), "registry hosts a service without a repo may run images from, comma separated (empty: any); the image rules (policy/images.rego) refuse others")
-		imageRegistry     = flag.String("image-registry", env("FORGE_IMAGE_REGISTRY", server.DefaultRegistry), "where the services' CI pushes images (a host and an optional path); deploys and previews run <registry>/<owner>/<service>:<commit>")
-		previewPull       = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
-		previewMax        = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
+		previewsOn         = flag.Bool("previews", env("FORGE_PREVIEWS", "") == "1" || env("FORGE_PREVIEWS", "") == "true", "serve preview environments (needs the GitHub App and Kubernetes access)")
+		previewDomain      = flag.String("preview-domain", env("FORGE_PREVIEW_DOMAIN", ""), "preview hosts are <environment>.<domain>, for example preview.10.150.1.222.nip.io")
+		previewGateway     = flag.String("preview-gateway", env("FORGE_PREVIEW_GATEWAY", "forge/forge-previews"), "Gateway (namespace/name) that routes previews")
+		ciRunner           = flag.String("ci-runner", env("FORGE_CI_RUNNER", "ubuntu-latest"), "runs-on of the build job in the workflow forge service connect adds to a repo")
+		ciDeployRunner     = flag.String("ci-deploy-runner", env("FORGE_CI_DEPLOY_RUNNER", ""), "runs-on of that workflow's deploy job, which must reach this API (default: --ci-runner)")
+		chartsOn           = flag.Bool("charts", env("FORGE_CHARTS", "") == "1" || env("FORGE_CHARTS", "") == "true", "let services run a published Helm chart (forge create --chart); needs --deploys and the forge-charts ApplicationSet")
+		allowedChartRepos  = flag.String("allowed-chart-repos", env("FORGE_ALLOWED_CHART_REPOS", ""), "chart repositories services may run charts from, comma separated, such as oci://ghcr.io/acme/charts (empty: any); the chart rules (policy/charts.rego) refuse others")
+		infraConfig        = flag.String("infrastructure-config", env("FORGE_INFRASTRUCTURE_CONFIG", ""), "file of the targets infrastructure repos deploy to (forge create --target; phase 12); needs --deploys and the GitHub App")
+		repositoriesConfig = flag.String("repositories-config", env("FORGE_REPOSITORIES_CONFIG", ""), "file configuring Crossplane main-branch protection for Forge-created repos; needs --deploys and the GitHub App")
+		allowedRegistries  = flag.String("allowed-registries", env("FORGE_ALLOWED_REGISTRIES", ""), "registry hosts a service without a repo may run images from, comma separated (empty: any); the image rules (policy/images.rego) refuse others")
+		imageRegistry      = flag.String("image-registry", env("FORGE_IMAGE_REGISTRY", server.DefaultRegistry), "where the services' CI pushes images (a host and an optional path); deploys and previews run <registry>/<owner>/<service>:<commit>")
+		previewPull        = flag.String("preview-pull-secret", env("FORGE_PREVIEW_PULL_SECRET", ""), "dockerconfigjson Secret (namespace/name) copied into previews and used to check images; required with --previews")
+		previewMax         = flag.Int("preview-max", envInt("FORGE_PREVIEW_MAX", 10), "most preview environments at once")
 
 		deploysOn     = flag.Bool("deploys", env("FORGE_DEPLOYS", "") == "1" || env("FORGE_DEPLOYS", "") == "true", "serve deploys to staging and production through Argo CD (needs --preview-pull-secret, and --deploy-domain without --previews)")
 		deployRepo    = flag.String("deploy-repo", env("FORGE_DEPLOY_REPO", ""), "GitOps repo (owner/name) Forge commits deploys to; required with --deploys")
@@ -265,6 +267,16 @@ func run() error {
 		}
 		log.Info("infrastructure repos are on", "targets", len(infra.Targets), "workflow", infra.Workflow)
 	}
+	var repoConfig *repositories.Config
+	if *repositoriesConfig != "" {
+		if repoConfig, err = repositories.Load(*repositoriesConfig); err != nil {
+			return fmt.Errorf("--repositories-config: %w", err)
+		}
+		if deps == nil || app == nil {
+			return errors.New("--repositories-config needs --deploys and the GitHub App")
+		}
+		log.Info("Forge-created repositories require pull requests on main", "namespace", repoConfig.Namespace)
+	}
 	var approvals *server.Approvals
 	if infra != nil {
 		var dispatch server.Dispatcher
@@ -307,6 +319,7 @@ func run() error {
 		CIRunner:         *ciRunner,
 		CIDeployRunner:   *ciDeployRunner,
 		Infrastructure:   infra,
+		Repositories:     repoConfig,
 		Approvals:        approvals,
 		MinClientVersion: *minClient,
 		OIDC:             server.OIDC{Issuer: *issuer, ClientID: *clientID, WebClientID: *webClientID},
@@ -318,17 +331,30 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if gh, ok := repoHost(app).(*github.Client); ok && infra != nil && deps != nil {
-		// Bring the infrastructure repos' folders up to the current targets.
+	if gh, ok := repoHost(app).(*github.Client); ok && deps != nil && (infra != nil || repoConfig != nil) {
+		// Run sequentially: both reconcilers lock individual services.
+		// An infrastructure error must not prevent repository protection.
 		go func() {
-			changed, err := server.ReconcileInfrastructure(ctx, server.ReconcileOptions{
-				Catalog: catalog, Deploys: deps, Infra: infra, GitHub: gh, OIDC: gh, Org: *githubOrg, Log: log,
-			})
-			if err != nil {
-				log.Warn("infrastructure repos reconciled with errors", "changed", changed, "error", err)
-				return
+			if infra != nil {
+				changed, err := server.ReconcileInfrastructure(ctx, server.ReconcileOptions{
+					Catalog: catalog, Deploys: deps, Infra: infra, GitHub: gh, OIDC: gh, Org: *githubOrg, Log: log,
+				})
+				if err != nil {
+					log.Warn("infrastructure repos reconciled with errors", "changed", changed, "error", err)
+				} else {
+					log.Info("infrastructure repos reconciled", "changed", changed)
+				}
 			}
-			log.Info("infrastructure repos reconciled", "changed", changed)
+			if repoConfig != nil {
+				changed, err := server.ReconcileRepositories(ctx, server.RepositoryOptions{
+					Catalog: catalog, Deploys: deps, Config: repoConfig, Audit: st, GitHub: gh, Org: *githubOrg, Log: log,
+				})
+				if err != nil {
+					log.Warn("repository protection reconciled with errors", "changed", changed, "error", err)
+				} else {
+					log.Info("repository protection reconciled", "changed", changed)
+				}
+			}
 		}()
 	}
 	if len(origins) > 0 {

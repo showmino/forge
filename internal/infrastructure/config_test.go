@@ -44,6 +44,18 @@ targets:
       staging:
         secret: target-azure-staging
         githubSecrets: {AZURE_CLIENT_ID: clientId}
+        plan:
+          secret: target-azure-staging-plan
+          githubSecrets: {AZURE_CLIENT_ID: clientId}
+          githubVariables: {TF_STATE_STORAGE_ACCOUNT: planstate}
+          access: |
+            apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+            kind: FederatedIdentityCredential
+            metadata:
+              name: {{ .Repo }}-{{ .Environment }}-plan
+            spec:
+              forProvider:
+                subject: {{ .Subject }}
 `
 
 func mustParse(t *testing.T, s string) *Config {
@@ -112,6 +124,43 @@ func TestSubject(t *testing.T) {
 	want = "job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org@155/infra-net@1445:environment:production"
 	if got := c.Subject(Repo{Org: "my-org", Name: "infra-net", OwnerID: 155, RepoID: 1445}, "production"); got != want {
 		t.Errorf("Subject with IDs = %s\nwant %s", got, want)
+	}
+}
+
+func TestPlanObjects(t *testing.T) {
+	c := mustParse(t, sample)
+	tg, _ := c.Target("azure")
+	r := Repo{Org: "my-org", Name: "infra-net", Team: "platform", Environments: []string{"staging"}, OwnerID: 155, RepoID: 1445}
+	files, err := c.Files(tg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := string(files[RepoObjectsPath(r.Name)])
+	for _, want := range []string{
+		"kind: ActionsSecret", "secretName: FORGE_PLAN_STAGING_AZURE_CLIENT_ID",
+		"name: target-azure-staging-plan", "variableName: FORGE_PLAN_STAGING_TF_STATE_STORAGE_ACCOUNT",
+		"variableName: FORGE_PLAN_ENVIRONMENTS", `["staging"]`,
+		"job_workflow_ref:" + c.Workflow + ":repo:my-org@155/infra-net@1445:pull_request",
+	} {
+		if !strings.Contains(data, want) {
+			t.Errorf("missing %q:\n%s", want, data)
+		}
+	}
+	if strings.Contains(data, "kind: Environment\n") {
+		t.Fatal("plan created a GitHub environment")
+	}
+}
+
+func TestPlanConfig(t *testing.T) {
+	for _, tc := range []struct{ old, new string }{
+		{"secret: target-azure-staging-plan", "secret: BAD"},
+		{"secret: target-azure-staging-plan", "secret: target-azure-staging"},
+		{"githubVariables: {TF_STATE_STORAGE_ACCOUNT: planstate}", "githubVariables: {GITHUB_TOKEN: token}"},
+	} {
+		_, err := Parse([]byte(strings.Replace(sample, tc.old, tc.new, 1)))
+		if err == nil {
+			t.Fatal("invalid plan accepted")
+		}
 	}
 }
 

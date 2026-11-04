@@ -145,15 +145,24 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
 - `deploy.yml` is short: it calls the shared workflow (`infrastructure.workflow`
   above) with the tool and the folder. The shared workflow lives in a repo the
   platform team owns, and holds the jobs:
-  - on a pull request: `bicep build` or `tofu validate`, and, when the repo
-    has `staging`, a preview against staging (`what-if` or `tofu plan`),
-    commented on the pull request;
+  - on every pull request: `bicep build` or `tofu validate`, plus a required
+    `what-if` or `tofu plan` for every chosen account, including production
+    when that is the repo's only account. These are plans, not preview
+    environments: no GitHub environment or deployed resources are created;
   - on a merge to `main`: deploy to `staging` (when the repo has it), then
     ask Forge for production's approval, and deploy to `production` once
     Forge says it is approved for that commit.
-  - Every job signs in with `azure/login` from the environment's secrets and
-    GitHub's OIDC token. The `opentofu` template runs `tofu`; one input
-    switches it to `terraform`.
+  - Deployment jobs sign in with `azure/login` from the environment's
+    secrets and GitHub's OIDC token. PR plans use separate read-only
+    identities, delivered as repository secrets, without naming an environment.
+    The `opentofu` template runs `tofu`; one input switches it to `terraform`.
+  - Bicep what-if and deployments use `Azure/bicep-deploy@v2.5.0`.
+    Deployment stacks delete unmanaged resources and resource groups and
+    use `deny-settings-mode: denyDelete`. A what-if with a read-only identity
+    uses `type: deployment` and `validation-level: providerNoRbac`. Version
+    2.5.0 accepts this validation level only for deployments, not stacks.
+    This what-if does not report stack unmanage deletions; removals must also
+    be reviewed in the template diff.
 - One parameter file per tool. What differs between environments is read
   from the GitHub environment (`readEnvironmentVariable()` in
   `main.bicepparam`, `TF_VAR_...` for OpenTofu).
@@ -164,6 +173,44 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
   that account; Owner alone does not give data access.
 - The first templates are for Azure. Templates for other clouds are someone
   else's to write; nothing in Forge stops them.
+
+### Pull requests and plan identities (owner's amendment, 2026-11-04)
+
+- All repositories created by Forge, existing and future, require a PR for
+  `main`. Crossplane's namespaced GitHub `RepositoryRuleset` enforces it
+  without administrator or App bypasses, and prevents force pushes and deletion.
+  Bootstrap is the sole exception: Forge writes the scaffold before creating
+  the ruleset. Connected repositories are outside this scope.
+- `repositories.enabled`, with its namespace and GitHub provider config,
+  enables the chart's `forge-repositories` ApplicationSet. Rules are stored
+  at `repositories/<repo>/rules.yaml`, independently of infrastructure access.
+  Startup reconciliation backfills successful template creates recorded in
+  the audit log; a dry run, a failed create or a connected repo is not proof.
+  Catalog deletion does not remove protection. Rulesets use `Orphan` so
+  accidentally removing their Kubernetes objects does not open `main`.
+- Infrastructure rules require `infrastructure / pr-checks` from GitHub
+  Actions and an up-to-date branch. That check succeeds only if validation
+  and every account's plan/what-if succeed; missing configuration fails.
+- Each target environment has a `plan` block: `secret`, `githubSecrets`,
+  `githubVariables`, `access`. It uses a different identity and Secret from
+  deployment. Crossplane copies its settings into repository-level
+  `FORGE_PLAN_<ENV>_*` secrets/variables. `FORGE_PLAN_ENVIRONMENTS` is a JSON
+  array of the repo's chosen accounts. No new GitHub environments are needed.
+- The plan access template uses `.Environment` for naming/account selection
+  and `.Subject` for the shared workflow's PR subject, ending in
+  `:pull_request`, with immutable repository IDs. Deployment's `:environment:`
+  trust and production's main-only branch policy remain unchanged.
+- For Azure: Reader at the account's required scope, narrowly scoped ARM
+  what-if/validation actions, and Storage Blob Data Reader at the `tfstate`
+  container. Never give PR code deployment privileges or state write access.
+  Terraform PR plans download the state blob read-only and use a local
+  backend override with `-lock=false`; missing blobs start from empty state.
+  Other read failures are fatal. This avoids backend initialization writing
+  or leasing a missing state. Merge-time apply replans and locks.
+  The platform team provisions these identities and roles; Forge stays cloud-neutral.
+- Existing targets without `plan` remain readable for migration, but creating
+  a repo against one fails with a configuration error. Roll out the plan
+  settings and updated shared workflow alongside enforcement, not afterward.
 
 ### forge.yaml
 

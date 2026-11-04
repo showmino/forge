@@ -1,0 +1,74 @@
+{{- if .Values.repositories.enabled }}
+{{- if not .Values.deploys.enabled }}
+{{- fail "repositories.enabled needs deploys.enabled: repository rules are written through the deploy repo" }}
+{{- end }}
+{{- $r := .Values.repositories }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forge-repositories
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- dict "namespace" $r.namespace "providerConfig" $r.providerConfig | toYaml | nindent 4 }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: forge-repositories
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  description: Require pull requests on main for Forge-created repositories
+  sourceRepos:
+    - {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: {{ $r.namespace | quote }}}
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: repo.github.m.upbound.io, kind: RepositoryRuleset}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: forge-repositories
+  namespace: argocd
+  labels:
+    {{- include "forge.labels" . | nindent 4 }}
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+        revision: main
+        directories:
+          - path: repositories/*
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{`{{ .path.basename }}`}}-repository'
+      labels:
+        app.kubernetes.io/managed-by: forge
+        forge.dev/service: '{{`{{ .path.basename }}`}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: forge-repositories
+      source:
+        repoURL: {{ printf "https://github.com/%s.git" (include "forge.deployRepo" .) | quote }}
+        targetRevision: main
+        path: '{{`{{ .path.path }}`}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: {{ $r.namespace | quote }}
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+{{- end }}

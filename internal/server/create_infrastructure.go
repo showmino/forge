@@ -98,6 +98,12 @@ func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateSer
 			ordered = append(ordered, e) // the rules name it
 		}
 	}
+	for _, env := range ordered {
+		if e, ok := t.Environments[env]; ok && e.Plan == nil {
+			return nil, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"target %s, %s has no plan identity: the platform team must configure plan access before this repo can run mandatory PR plans", t.Name, env))
+		}
+	}
 	full, err := c.fullEnvironments(ctx, t)
 	if err != nil {
 		return nil, nil, err

@@ -46,10 +46,15 @@ spec:
   template:
     metadata:
       labels: {app: forge-api}
-      {{- if .Values.infrastructure.enabled }}
+      {{- if or .Values.infrastructure.enabled .Values.repositories.enabled }}
       annotations:
+        {{- if .Values.repositories.enabled }}
+        checksum/repositories: {{ toYaml .Values.repositories | sha256sum }}
+        {{- end }}
+        {{- if .Values.infrastructure.enabled }}
         # forge-api reads the targets when it starts.
         checksum/infrastructure: {{ toYaml .Values.infrastructure | sha256sum }}
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: forge-api
@@ -72,6 +77,11 @@ spec:
         - name: infrastructure
           configMap:
             name: forge-infrastructure
+        {{- end }}
+        {{- if .Values.repositories.enabled }}
+        - name: repositories
+          configMap:
+            name: forge-repositories
         {{- end }}
         {{- with .Values.database.caSecret }}
         - name: database-ca
@@ -110,6 +120,9 @@ spec:
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/app-private-key}
             - {name: FORGE_GITHUB_ORG, value: {{ include "forge.org" . | quote }}}
             - {name: FORGE_TEMPLATES_REPO, value: {{ include "forge.templatesRepo" . | quote }}}
+            {{- if .Values.repositories.enabled }}
+            - {name: FORGE_REPOSITORIES_CONFIG, value: /etc/forge/repositories/config.yaml}
+            {{- end }}
             {{- with .Values.cliRepo }}
             - {name: FORGE_CLI_REPO, value: {{ . | quote }}}
             {{- end }}
@@ -182,6 +195,9 @@ spec:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
             {{- if .Values.infrastructure.enabled }}
             - {name: infrastructure, mountPath: /etc/forge/infrastructure, readOnly: true}
+            {{- end }}
+            {{- if .Values.repositories.enabled }}
+            - {name: repositories, mountPath: /etc/forge/repositories, readOnly: true}
             {{- end }}
             {{- if .Values.database.caSecret }}
             - {name: database-ca, mountPath: /etc/forge/database-ca, readOnly: true}
