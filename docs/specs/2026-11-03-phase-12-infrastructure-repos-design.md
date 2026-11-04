@@ -186,6 +186,8 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
   at `repositories/<repo>/rules.yaml`, independently of infrastructure access.
   Startup reconciliation backfills successful template creates recorded in
   the audit log; a dry run, a failed create or a connected repo is not proof.
+  Audit records omit false flags, so an absent `validate_only` means a real
+  create, as does explicit `false`; `true` and unknown values never qualify.
   Catalog deletion does not remove protection. Rulesets use `Orphan` so
   accidentally removing their Kubernetes objects does not open `main`.
 - Infrastructure rules require `infrastructure / pr-checks` from GitHub

@@ -109,7 +109,9 @@ func createdRepository(ctx context.Context, audit store.AuditStore, svc *forgev1
 			return false, fmt.Errorf("read repository creation provenance: %w", err)
 		}
 		for _, event := range events {
-			if event.GetResult().GetCode() == "ok" && event.GetDetails()["template"] != "" && event.GetDetails()["validate_only"] == "false" {
+			// Audit omits false flags; an explicit true denotes a dry run.
+			validate := event.GetDetails()["validate_only"]
+			if event.GetResult().GetCode() == "ok" && event.GetDetails()["template"] != "" && (validate == "" || validate == "false") {
 				return true, nil
 			}
 		}
