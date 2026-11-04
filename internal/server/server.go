@@ -16,6 +16,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/infrastructure"
+	"github.com/showmino/forge/internal/repositories"
 	"github.com/showmino/forge/internal/store"
 	"github.com/showmino/forge/internal/version"
 	"github.com/showmino/forge/pkg/client"
@@ -59,6 +60,8 @@ type Options struct {
 	// Infrastructure are the targets infrastructure repos deploy to (phase
 	// 12); nil: none can be made.
 	Infrastructure *infrastructure.Config
+	// Repositories requires pull requests on repos created from templates.
+	Repositories *repositories.Config
 	// GitHubOrg is the org new repos are created in; empty when no
 	// GitHub-App-backed feature is configured.
 	GitHubOrg string
@@ -94,6 +97,9 @@ type Options struct {
 func New(o Options) (http.Handler, error) {
 	if o.Authenticator == nil {
 		return nil, errors.New("server: an Authenticator is required")
+	}
+	if o.Repositories != nil && (o.Deploys == nil || o.Deploys.o.Repo == nil || o.Repos == nil) {
+		return nil, errors.New("repository protection needs deploys and the GitHub App")
 	}
 	for flag, label := range map[string]string{"--ci-runner": o.CIRunner, "--ci-deploy-runner": o.CIDeployRunner} {
 		if label != "" && !runnerLabel.MatchString(label) {
@@ -142,7 +148,7 @@ func New(o Options) (http.Handler, error) {
 	mux := http.NewServeMux()
 	create := &creator{
 		catalog: o.Catalog, templates: o.Templates, repos: o.Repos, deploys: o.Deploys, domains: o.Deploys.publicDomainNames(), org: o.GitHubOrg, log: o.Logger,
-		ciRunner: o.CIRunner, ciDeployRunner: o.CIDeployRunner, infra: o.Infrastructure,
+		ciRunner: o.CIRunner, ciDeployRunner: o.CIDeployRunner, infra: o.Infrastructure, repositories: o.Repositories,
 		results: map[string]*outcome{},
 	}
 	if oidc, ok := o.Repos.(OIDCSubjects); ok {

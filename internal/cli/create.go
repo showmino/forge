@@ -32,8 +32,9 @@ func newCreateCmd(f *Factory) *cobra.Command {
 		Short: "Create a service from a template, an image or a Helm chart",
 		Long: `Create a service from a template: the Forge API renders the template,
 creates the private repo github.com/<org>/<name>, pushes the first commit
-(which starts its CI) and registers the service in the catalog. If a step
-after the repo exists fails, the repo is deleted again.
+(which starts its CI) and registers the service in the catalog. A failure
+before registration deletes the repo again. After registration, an unfinished
+setup keeps the repo and reports what still needs attention.
 
 Template parameters are set with --set name=value; on a terminal forge asks
 for missing required ones. See 'forge template get <template>'.

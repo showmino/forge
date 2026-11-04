@@ -73,6 +73,14 @@ you start gets no cluster access: tell it to run no `kubectl`.
   `gh api repos/showmino/<repo>/compare/main...<branch> --jq .behind_by`
   (must be 0).
 - Never force-push `main`. Never rewrite published history.
+- Repositories created by Forge require pull requests on `main`, enforced
+  by Crossplane's GitHub provider, with no administrator or App bypass after
+  the initial scaffold. Existing Forge-created repos are covered too.
+- Infrastructure pull requests must pass Terraform/OpenTofu plan or Bicep
+  what-if for their chosen accounts. They create no preview environments and
+  use separate plan identities, never deployment credentials. Production-only
+  repos remain supported. Bicep uses `Azure/bicep-deploy@v2.5.0`; deployment
+  stacks delete unmanaged resources and resource groups and use `denyDelete`.
 - A change that is risky (auth, what becomes reachable from the internet,
   anything on the path to production) gets **one independent review** before
   it merges: a second model or person reading the diff cold. Fix what it

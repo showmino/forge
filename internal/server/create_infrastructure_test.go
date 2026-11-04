@@ -45,9 +45,15 @@ targets:
       staging:
         secret: target-azure-staging
         githubSecrets: {AZURE_CLIENT_ID: clientId}
+        plan:
+          secret: target-azure-staging-plan
+          githubSecrets: {AZURE_CLIENT_ID: clientId}
       production:
         secret: target-azure-production
         githubSecrets: {AZURE_CLIENT_ID: clientId}
+        plan:
+          secret: target-azure-production-plan
+          githubSecrets: {AZURE_CLIENT_ID: clientId}
         maxRepos: 1
         access: |
           apiVersion: managedidentity.azure.m.upbound.io/v1beta1
@@ -60,7 +66,7 @@ targets:
   - name: web-only
     teams: [web]
     environments:
-      production: {secret: target-web}
+      production: {secret: target-web, plan: {secret: target-web-plan}}
 `
 
 type infraEnv struct {
@@ -71,7 +77,7 @@ type infraEnv struct {
 
 // newInfraEnv is a create env with deploys (the deploy repo, envtest's Argo
 // CD) and the targets of infraConfig, unless noConfig.
-func newInfraEnv(t *testing.T, noConfig bool) *infraEnv {
+func newInfraEnv(t *testing.T, noConfig bool, tweaks ...func(*Options)) *infraEnv {
 	t.Helper()
 	rules, err := policy.New(context.Background())
 	if err != nil {
@@ -98,6 +104,9 @@ func newInfraEnv(t *testing.T, noConfig bool) *infraEnv {
 	e := newCreateEnvOpts(t, infraRelease, newFakeRepos(), deploys, func(o *Options) {
 		o.Catalog = catalog
 		o.Infrastructure = cfg
+		for _, tweak := range tweaks {
+			tweak(o)
+		}
 	})
 	e.catalog = catalog
 	return &infraEnv{createEnv: e, repo: repo, deploys: deploys}

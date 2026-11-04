@@ -442,10 +442,49 @@ data:
           githubVariables:
             TF_STATE_STORAGE_ACCOUNT: stacmestate
           maxRepos: 20
+          plan:
+            access: |
+              apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+              kind: FederatedIdentityCredential
+              metadata:
+                name: {{ .Repo }}-{{ .Environment }}-plan
+              spec:
+                forProvider:
+                  audience: [api://AzureADTokenExchange]
+                  issuer: https://token.actions.githubusercontent.com
+                  subject: {{ .Subject }}
+                  parentId: /subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-plan
+                  resourceGroupName: rg
+            githubSecrets:
+              AZURE_CLIENT_ID: clientId
+              AZURE_SUBSCRIPTION_ID: subscriptionId
+              AZURE_TENANT_ID: tenantId
+            githubVariables:
+              AZURE_LOCATION: swedencentral
+              TF_STATE_RESOURCE_GROUP: rg-state
+              TF_STATE_STORAGE_ACCOUNT: stacmestate
+            secret: target-azure-production-plan
           secret: target-azure-production
       name: azure
       title: Azure
     workflow: acme/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
+---
+# Source: forge/templates/repositories.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: forge-repositories
+  namespace: forge
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+data:
+  config.yaml: |
+    namespace: forge-repositories
+    providerConfig:
+      kind: ClusterProviderConfig
+      name: github
 ---
 # Source: forge/templates/previews.yaml
 # Exactly the calls internal/server/env_cluster.go makes, for previews and
@@ -693,8 +732,9 @@ spec:
     metadata:
       labels: {app: forge-api}
       annotations:
+        checksum/repositories: 3140bd297f9effecee4176a035d41f43e8cc698c22525cca125a318bd2c86a46
         # forge-api reads the targets when it starts.
-        checksum/infrastructure: 8fde539dca7f9fac27f075b43b8acdc3e0950b0279c2880f90e7b2ae0c136263
+        checksum/infrastructure: c6b7b1a1a36a800bca61e2417557013987cd8c750b13637e893ab91a989199b1
     spec:
       serviceAccountName: forge-api
       securityContext:
@@ -715,6 +755,9 @@ spec:
         - name: infrastructure
           configMap:
             name: forge-infrastructure
+        - name: repositories
+          configMap:
+            name: forge-repositories
       containers:
         - name: forge-api
           image: "ghcr.io/showmino/forge-api:v0.27.0"
@@ -732,6 +775,7 @@ spec:
             - {name: FORGE_GITHUB_APP_KEY_FILE, value: /etc/forge/github-app/app-private-key}
             - {name: FORGE_GITHUB_ORG, value: "acme"}
             - {name: FORGE_TEMPLATES_REPO, value: "acme/forge-templates"}
+            - {name: FORGE_REPOSITORIES_CONFIG, value: /etc/forge/repositories/config.yaml}
             - {name: FORGE_CLI_REPO, value: "showmino/forge"}
             - {name: FORGE_CI_RUNNER, value: "ubuntu-latest"}
             - {name: FORGE_PREVIEW_PULL_SECRET, value: "forge/ghcr"}
@@ -743,6 +787,7 @@ spec:
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
             - {name: infrastructure, mountPath: /etc/forge/infrastructure, readOnly: true}
+            - {name: repositories, mountPath: /etc/forge/repositories, readOnly: true}
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
@@ -999,7 +1044,28 @@ spec:
     - {group: actions.github.m.upbound.io, kind: EnvironmentSecret}
     - {group: actions.github.m.upbound.io, kind: EnvironmentVariable}
     - {group: actions.github.m.upbound.io, kind: ActionsVariable}
+    - {group: actions.github.m.upbound.io, kind: ActionsSecret}
     - {group: "managedidentity.azure.m.upbound.io", kind: "FederatedIdentityCredential"}
+---
+# Source: forge/templates/repositories.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: forge-repositories
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  description: Require pull requests on main for Forge-created repositories
+  sourceRepos:
+    - "https://github.com/acme/forge-deploys.git"
+  destinations:
+    - {server: https://kubernetes.default.svc, namespace: "forge-repositories"}
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - {group: repo.github.m.upbound.io, kind: RepositoryRuleset}
 ---
 # Source: forge/templates/deploys.yaml
 apiVersion: argoproj.io/v1alpha1
@@ -1143,6 +1209,50 @@ spec:
             duration: 10s
             factor: 2
             maxDuration: 3m
+---
+# Source: forge/templates/repositories.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: forge-repositories
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: forge
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: forge-0.27.0
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: "https://github.com/acme/forge-deploys.git"
+        revision: main
+        directories:
+          - path: repositories/*
+        requeueAfterSeconds: 30
+  template:
+    metadata:
+      name: '{{ .path.basename }}-repository'
+      labels:
+        app.kubernetes.io/managed-by: forge
+        forge.dev/service: '{{ .path.basename }}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: forge-repositories
+      source:
+        repoURL: "https://github.com/acme/forge-deploys.git"
+        targetRevision: main
+        path: '{{ .path.path }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "forge-repositories"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
 ---
 # Source: forge/templates/previews.yaml
 # The Gateway previews and deploys are reached through. Point

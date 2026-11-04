@@ -1,0 +1,3 @@
+# want: repositories.enabled needs deploys.enabled
+repositories:
+  enabled: true

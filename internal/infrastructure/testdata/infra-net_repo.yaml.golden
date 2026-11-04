@@ -13,3 +13,61 @@ spec:
   providerConfigRef:
     kind: ClusterProviderConfig
     name: github
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: ActionsVariable
+metadata:
+  labels:
+    forge.dev/service: infra-net
+  name: infra-net-plan-environments
+spec:
+  forProvider:
+    repository: infra-net
+    value: '["staging","production"]'
+    variableName: FORGE_PLAN_ENVIRONMENTS
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: ActionsSecret
+metadata:
+  labels:
+    forge.dev/service: infra-net
+  name: infra-net-forge-plan-staging-azure-client-id
+spec:
+  forProvider:
+    plaintextValueSecretRef:
+      key: clientId
+      name: target-azure-staging-plan
+    repository: infra-net
+    secretName: FORGE_PLAN_STAGING_AZURE_CLIENT_ID
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: ActionsVariable
+metadata:
+  labels:
+    forge.dev/service: infra-net
+  name: infra-net-forge-plan-staging-tf-state-storage-account
+spec:
+  forProvider:
+    repository: infra-net
+    value: planstate
+    variableName: FORGE_PLAN_STAGING_TF_STATE_STORAGE_ACCOUNT
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github
+---
+apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+kind: FederatedIdentityCredential
+metadata:
+  labels:
+    forge.dev/deploy-env: staging
+    forge.dev/service: infra-net
+  name: infra-net-staging-plan
+spec:
+  forProvider:
+    subject: job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org@155/infra-net@1445:pull_request

@@ -48,6 +48,7 @@ spec:
     - {group: actions.github.m.upbound.io, kind: EnvironmentSecret}
     - {group: actions.github.m.upbound.io, kind: EnvironmentVariable}
     - {group: actions.github.m.upbound.io, kind: ActionsVariable}
+    - {group: actions.github.m.upbound.io, kind: ActionsSecret}
     {{- range $i.accessKinds }}
     {{- $parts := splitList "/" . }}
     {{- if ne (len $parts) 2 }}

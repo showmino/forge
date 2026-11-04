@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -85,7 +86,7 @@ func (c *Config) Files(t Target, r Repo) (map[string][]byte, error) {
 		}
 		files[Folder(r.Name)+"/"+env+".yaml"] = data
 	}
-	repo, err := marshal(map[string]any{
+	docs := []map[string]any{{
 		"apiVersion": "actions.github.m.upbound.io/v1alpha1",
 		"kind":       "ActionsVariable",
 		"metadata":   map[string]any{"name": r.Name + "-environments", "labels": map[string]string{"forge.dev/service": r.Name}},
@@ -93,12 +94,69 @@ func (c *Config) Files(t Target, r Repo) (map[string][]byte, error) {
 			"providerConfigRef": map[string]string{"kind": c.ProviderConfig.Kind, "name": c.ProviderConfig.Name},
 			"forProvider":       map[string]any{"repository": r.Name, "variableName": EnvironmentsVariable, "value": strings.Join(r.Environments, ",")},
 		},
-	})
+	}}
+	planEnvironments, err := json.Marshal(r.Environments)
 	if err != nil {
 		return nil, err
 	}
-	files[RepoObjectsPath(r.Name)] = append([]byte("---\n"), repo...)
+	docs = append(docs, c.repoObject(r, "ActionsVariable", r.Name+"-plan-environments", map[string]any{
+		"variableName": "FORGE_PLAN_ENVIRONMENTS", "value": string(planEnvironments),
+	}))
+	var access bytes.Buffer
+	for _, env := range r.Environments {
+		p := t.Environments[env].Plan
+		if p == nil {
+			continue // Legacy targets remain renderable; new creates refuse missing plan access.
+		}
+		prefix := "FORGE_PLAN_" + strings.ToUpper(env) + "_"
+		for _, name := range slices.Sorted(maps.Keys(p.GitHubSecrets)) {
+			docs = append(docs, c.repoObject(r, "ActionsSecret", r.Name+"-"+objName(prefix+name), map[string]any{
+				"secretName":              prefix + name,
+				"plaintextValueSecretRef": map[string]string{"name": p.Secret, "key": p.GitHubSecrets[name]},
+			}))
+		}
+		for _, name := range slices.Sorted(maps.Keys(p.GitHubVariables)) {
+			docs = append(docs, c.repoObject(r, "ActionsVariable", r.Name+"-"+objName(prefix+name), map[string]any{
+				"variableName": prefix + name, "value": p.GitHubVariables[name],
+			}))
+		}
+		if p.access != nil {
+			e := p.environment()
+			data, err := e.renderAccess(AccessValues{
+				Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env, Subject: c.PlanSubject(r),
+			}, map[string]string{"forge.dev/service": r.Name, "forge.dev/deploy-env": env})
+			if err != nil {
+				return nil, fmt.Errorf("%s plan access: %w", env, err)
+			}
+			access.Write(data)
+		}
+	}
+	var repo bytes.Buffer
+	for _, doc := range docs {
+		data, err := marshal(doc)
+		if err != nil {
+			return nil, err
+		}
+		repo.WriteString("---\n")
+		repo.Write(data)
+	}
+	repo.Write(access.Bytes())
+	files[RepoObjectsPath(r.Name)] = repo.Bytes()
 	return files, nil
+}
+
+func (c *Config) repoObject(r Repo, kind, name string, settings map[string]any) map[string]any {
+	forProvider := map[string]any{"repository": r.Name}
+	maps.Copy(forProvider, settings)
+	return map[string]any{
+		"apiVersion": "actions.github.m.upbound.io/v1alpha1",
+		"kind":       kind,
+		"metadata":   map[string]any{"name": name, "labels": map[string]string{"forge.dev/service": r.Name}},
+		"spec": map[string]any{
+			"providerConfigRef": map[string]string{"kind": c.ProviderConfig.Kind, "name": c.ProviderConfig.Name},
+			"forProvider":       forProvider,
+		},
+	}
 }
 
 // objects are one environment's Crossplane objects, as YAML documents.
