@@ -323,6 +323,25 @@ pull request the platform team merges, and its developer approves their own
 production run. Every step is in the audit log. Changing an environment by
 hand in GitHub is put back.
 
+## Known limits (accepted)
+
+From the independent reviews of the parts, kept as they are for now:
+
+- A pull request's preview runs its code with staging's identity (staging is
+  where unreviewed code may run). Production is reached only after an
+  approval.
+- A claimed approval is used once: when a production apply fails, the fix is
+  a new commit with its own approval.
+- The self-approval check compares GitHub logins, which a user can rename;
+  user IDs would be firmer.
+- An exception brought back by force-pushing `main` to before its revoke is
+  not caught (it needs a bypass of the deploy repo's ruleset).
+- Members of a child team of an admin team count as that team's members for
+  granting exceptions (GitHub's team membership), and each exception check
+  makes a few GitHub calls, without a cache.
+- Provider and module versions are whatever the repo pins: commit
+  `.terraform.lock.hcl` to pin providers.
+
 ## Left to the builder
 
 - The Crossplane kinds' exact fields and API versions (check the installed
