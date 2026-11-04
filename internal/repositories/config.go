@@ -81,8 +81,8 @@ func (c *Config) Rules(repo string, infrastructure bool) ([]byte, error) {
 			"labels": map[string]string{"forge.dev/service": repo},
 		},
 		"spec": map[string]any{
-			"deletionPolicy":    "Orphan",
-			"providerConfigRef": c.ProviderConfig,
+			"managementPolicies": []string{"Observe", "Create", "Update", "LateInitialize"},
+			"providerConfigRef":  c.ProviderConfig,
 			"forProvider": map[string]any{
 				"repository":   repo,
 				"name":         "forge-main",
