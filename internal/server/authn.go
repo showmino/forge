@@ -66,6 +66,8 @@ type Workload struct {
 	// person who re-ran it).
 	EventName       string
 	TriggeringActor string
+	// RunAttempt is the attempt of the run (2 and up for a re-run).
+	RunAttempt int64
 }
 
 // PermDeploy is a CI caller's permission to deploy service to env.

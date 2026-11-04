@@ -27,6 +27,7 @@ type fakeDispatch struct {
 	err      error
 	heads    map[string]string
 	branches map[string]string
+	reruns   map[int64]string
 }
 
 func (f *fakeDispatch) DefaultBranch(_ context.Context, _, repo string) (string, error) {
@@ -45,6 +46,17 @@ func (f *fakeDispatch) ResolveRef(_ context.Context, _, repo, _ string) (string,
 		return h, nil
 	}
 	return envSHA, nil
+}
+
+// RunActors answers who started a run and its attempt: the token's actor,
+// and, for attempt 2 and up, reruns[runID] when set.
+func (f *fakeDispatch) RunActors(_ context.Context, _, _ string, runID, attempt int64) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if by, ok := f.reruns[runID]; ok && attempt > 1 {
+		return "", by, nil
+	}
+	return "", "", nil
 }
 
 func (f *fakeDispatch) setHead(repo, sha string) {
@@ -131,7 +143,7 @@ targets: [{name: azure, environments: {production: {secret: s}}}]
 	ci := func(repo, sha, actor, wf string, run int64, event string) *Principal {
 		return &Principal{Subject: "github:showmino/" + repo, Permissions: []string{PermDeploy(repo, "staging")},
 			Workload: &Workload{Repository: "showmino/" + repo, Service: repo, SHA: sha, Actor: actor, RunID: run, JobWorkflowRef: wf,
-				EventName: event, TriggeringActor: actor}}
+				EventName: event, TriggeringActor: actor, RunAttempt: 1}}
 	}
 	rerunBy := func(p *Principal, who string) Principal {
 		w := *p.Workload
@@ -142,13 +154,20 @@ targets: [{name: azure, environments: {production: {secret: s}}}]
 	}
 	h, err := New(Options{
 		Authenticator: StaticAuthenticator{
-			"ana":          {Subject: "ana", Login: "ana", Groups: []string{"showmino:platform"}},
-			"bo":           {Subject: "bo", Login: "Bo", Groups: []string{"showmino:platform"}},
-			"cy":           {Subject: "cy", Login: "cy", Groups: []string{"showmino:web"}},
-			"admin":        {Subject: "dee", Login: "dee", Groups: []string{"showmino:admins"}},
-			"nologin":      {Subject: "eve", Groups: []string{"showmino:platform"}},
-			"ci":           *ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"),
-			"ci-rerun":     *ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"),
+			"ana":      {Subject: "ana", Login: "ana", Groups: []string{"showmino:platform"}},
+			"bo":       {Subject: "bo", Login: "Bo", Groups: []string{"showmino:platform"}},
+			"cy":       {Subject: "cy", Login: "cy", Groups: []string{"showmino:web"}},
+			"admin":    {Subject: "dee", Login: "dee", Groups: []string{"showmino:admins"}},
+			"nologin":  {Subject: "eve", Groups: []string{"showmino:platform"}},
+			"ci":       *ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"),
+			"ci-rerun": *ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"),
+			"ci-rerun-attempt-2": func() Principal {
+				p := *ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push")
+				w := *p.Workload
+				w.RunAttempt = 2
+				p.Workload = &w
+				return p
+			}(),
 			"ci-rerun-bo":  rerunBy(ci("infra-net", envSHA, "ana", sharedWorkflow, 41, "push"), "Bo"),
 			"ci-newer":     *ci("infra-net", ciOldSHA, "ana", sharedWorkflow, 42, "push"),
 			"ci-comment":   *ci("infra-net", envSHA, "cy", sharedWorkflow, 46, "issue_comment"),
@@ -412,5 +431,26 @@ func TestApprovalDispatchesTheDefaultBranch(t *testing.T) {
 	}
 	if calls := e.dispatch.all(); len(calls) != 1 || !strings.Contains(calls[0], "deploy.yml@trunk") {
 		t.Errorf("dispatched %v", calls)
+	}
+}
+
+// GitHub's tokens do not carry the triggering actor: Forge asks GitHub who
+// started the attempt, so the one who re-ran a job cannot approve it.
+func TestApprovalRerunByGitHub(t *testing.T) {
+	t.Parallel()
+	e := newApprovalEnv(t, false)
+	first := e.request(t, "ci") // attempt 1, pushed by ana
+	e.dispatch.mu.Lock()
+	e.dispatch.reruns = map[int64]string{41: "Bo"}
+	e.dispatch.mu.Unlock()
+	// Bo re-runs it; the token says nothing about Bo.
+	rerun := e.request(t, "ci-rerun-attempt-2")
+	if rerun.GetName() == first.GetName() {
+		t.Fatalf("Bo's re-run got ana's approval %s", first.GetName())
+	}
+	_, err := e.approve("bo", rerun.GetName())
+	wantCode(t, "the one who re-ran it", err, connect.CodePermissionDenied, "you started this run")
+	if got := e.get(t, first.GetName()); got.GetState() != forgev1.Approval_STATE_SUPERSEDED {
+		t.Errorf("first: %v", got.GetState())
 	}
 }

@@ -27,6 +27,9 @@ func (noDispatch) DispatchWorkflow(context.Context, string, string, string, stri
 	return errors.New("403 Resource not accessible by integration")
 }
 func (noDispatch) DefaultBranch(context.Context, string, string) (string, error) { return "main", nil }
+func (noDispatch) RunActors(context.Context, string, string, int64, int64) (string, string, error) {
+	return "", "", nil
+}
 func (noDispatch) ResolveRef(context.Context, string, string, string) (string, error) {
 	return testInfraSHA, nil
 }
@@ -59,7 +62,7 @@ func serveApprovalsWith(t *testing.T, h *harness, ex *server.ExceptionOptions) {
 	h.approvals = server.NewApprovals(server.ApprovalOptions{Store: st, Catalog: h.catalog, Infra: cfg, Org: "showmino", Dispatch: noDispatch{}, Exceptions: ex})
 	ci := func(event string) server.Principal {
 		return server.Principal{Subject: "github:showmino/infra-net", Workload: &server.Workload{
-			Repository: "showmino/infra-net", Service: "infra-net", SHA: testInfraSHA, Actor: "cy", RunID: 7, JobWorkflowRef: testSharedWorkflow, EventName: event}}
+			Repository: "showmino/infra-net", Service: "infra-net", SHA: testInfraSHA, Actor: "cy", RunID: 7, RunAttempt: 1, JobWorkflowRef: testSharedWorkflow, EventName: event}}
 	}
 	h.startAPI(server.StaticAuthenticator{
 		"t-ci":      ci("push"),

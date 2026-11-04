@@ -47,3 +47,18 @@ func TestDispatchWorkflow(t *testing.T) {
 		t.Errorf("body %s, want %s", got, want)
 	}
 }
+
+func TestRunActors(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/my-org/infra-net/actions/runs/41/attempts/2", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"actor":{"login":"mino-forge[bot]"},"triggering_actor":{"login":"ana"}}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &Client{BaseURL: srv.URL, Token: StaticToken("tok"), HTTP: srv.Client()}
+	actor, triggering, err := c.RunActors(context.Background(), "my-org", "infra-net", 41, 2)
+	if err != nil || actor != "mino-forge[bot]" || triggering != "ana" {
+		t.Errorf("RunActors = %q %q %v", actor, triggering, err)
+	}
+}
