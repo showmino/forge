@@ -176,6 +176,7 @@ func TestExceptionGrant(t *testing.T) {
 		{name: "another team's", reviews: dee, data: exceptionYAML("web"), problem: "it is for team web"},
 		{name: "an earlier service's", reviews: dee, data: []byte("service: infra-net\nteam: platform\nrequestedBy: ana\nrequestedAt: 2026-01-01T00:00:00Z\n"), problem: "before services/infra-net was made"},
 		{name: "a teammate approved", reviews: []github.Review{{User: "bo", State: "APPROVED", CommitID: "h7"}}, problem: "merged without an approval of its last commit by a member of admins"},
+		{name: "an admin's approval was superseded", reviews: []github.Review{{User: "dee", State: "APPROVED", CommitID: "h7"}, {User: "dee", State: "CHANGES_REQUESTED", CommitID: "h7"}}, problem: "merged without an approval of its last commit by a member of admins"},
 		{name: "an admin approved an older commit", reviews: []github.Review{{User: "dee", State: "APPROVED", CommitID: "h6"}}, problem: "without an approval"},
 		{name: "no review", problem: "without an approval"},
 		{name: "committed without a pull request", direct: true, problem: "was not merged through a pull request"},

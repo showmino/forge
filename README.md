@@ -395,14 +395,19 @@ both. forge-api runs it with `--charts` (`FORGE_CHARTS=1`, the chart's
 With the chart's `repositories.enabled` (forge-api `--repositories-config`),
 every repository Forge creates from a template gets a Crossplane
 `RepositoryRuleset`: `main` requires a pull request, without administrator
-or App bypass, and refuses force pushes and deletion. The initial scaffold
-is written before protection is installed. On startup Forge backfills
-existing successful template creates from its audit log; connected repos
-are not adopted. Rules live independently in `repositories/<name>/rules.yaml`
-in the deploy repo and stay after catalog deletion. Infrastructure repos also
-require the shared workflow's `infrastructure / pr-checks` check, with the
-branch up to date. Enable protection only after installing the GitHub
-provider's namespaced `RepositoryRuleset` CRD.
+or App bypass, and refuses force pushes and deletion. Merging also requires
+one approval from the service's owning team, which Forge makes the sole
+`CODEOWNERS` team for all files. The initial scaffold is written before
+protection is installed. On startup Forge backfills existing successful
+template creates from its audit log; connected repos are not adopted without
+an explicitly reviewed adoption record. Rules live independently in
+`repositories/<name>/rules.yaml` in the deploy repo and stay after catalog
+deletion. An admin-reviewed `review-exceptions/<name>.yaml` can name one
+alternate reviewer team that already has `maintain` access; it does not waive
+the approval requirement. Infrastructure repos also require the shared
+workflow's `infrastructure / pr-checks` check, with the branch up to date.
+Enable protection only after installing the GitHub provider's namespaced
+`RepositoryRuleset` CRD.
 `forge create <name> --template opentofu --target <target> [--environments
 production] --team <team>` makes an infrastructure repo from a template of
 `type: infrastructure` (its `forge.yaml` has `infrastructure.tool`, and no

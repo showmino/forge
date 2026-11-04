@@ -52,6 +52,9 @@ func TestRules(t *testing.T) {
 		if !r.Deletion || !r.NonFastForward || len(r.PullRequest) != 1 {
 			t.Fatalf("missing protections:\n%s", data)
 		}
+		if got := r.PullRequest[0]; got["requiredApprovingReviewCount"] != 1 || got["requireCodeOwnerReview"] != true {
+			t.Fatalf("pull request rules do not require a team code-owner approval:\n%s", data)
+		}
 		if !infrastructure {
 			if len(r.RequiredStatusChecks) != 0 {
 				t.Fatal("application repo requires infrastructure checks")
@@ -64,6 +67,18 @@ func TestRules(t *testing.T) {
 		check := r.RequiredStatusChecks[0]
 		if !check.Strict || len(check.RequiredCheck) != 1 || check.RequiredCheck[0].Context != InfrastructureCheck || check.RequiredCheck[0].IntegrationID != 15368 {
 			t.Fatalf("incorrect required checks:\n%s", data)
+		}
+	}
+}
+
+func TestCodeowners(t *testing.T) {
+	got, err := Codeowners("my-org", "platform")
+	if err != nil || string(got) != "* @my-org/platform\n" {
+		t.Fatalf("Codeowners() = %q, %v", got, err)
+	}
+	for _, tc := range [][2]string{{"Bad Org", "platform"}, {"my-org", "Bad Team"}} {
+		if _, err := Codeowners(tc[0], tc[1]); err == nil {
+			t.Errorf("Codeowners(%q, %q) succeeded", tc[0], tc[1])
 		}
 	}
 }

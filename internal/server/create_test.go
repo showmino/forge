@@ -132,6 +132,30 @@ func (f *fakeRepos) ProposeFiles(_ context.Context, owner, repo string, p github
 	return fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, len(f.proposals)), nil
 }
 
+func (f *fakeRepos) PullsForCommit(context.Context, string, string, string) ([]github.Pull, error) {
+	return nil, nil
+}
+
+func (f *fakeRepos) PullReviews(context.Context, string, string, int) ([]github.Review, error) {
+	return nil, nil
+}
+
+func (f *fakeRepos) TeamMember(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
+func (f *fakeRepos) writeFile(repo, path string, content []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.repos[repo] {
+		if f.repos[repo][i].Path == path {
+			f.repos[repo][i].Content = content
+			return
+		}
+	}
+	f.repos[repo] = append(f.repos[repo], github.File{Path: path, Content: content})
+}
+
 func newFakeRepos(existing ...string) *fakeRepos {
 	f := &fakeRepos{repos: map[string][]github.File{}}
 	for _, n := range existing {
@@ -161,7 +185,7 @@ func (f *fakeRepos) CreateOrgRepo(_ context.Context, org, name, _ string) (*gith
 	}
 	f.creates++
 	f.repos[name] = nil
-	r := &github.Repo{ID: 1445, FullName: org + "/" + name, DefaultBranch: "main"}
+	r := &github.Repo{ID: 1445, FullName: org + "/" + name, DefaultBranch: "main", CreatedAt: time.Unix(1, 0)}
 	r.Owner.ID = 155
 	return r, nil
 }
@@ -172,7 +196,7 @@ func (f *fakeRepos) GetRepo(_ context.Context, owner, name string) (*github.Repo
 	if _, ok := f.repos[name]; !ok {
 		return nil, github.ErrNotFound
 	}
-	r := &github.Repo{ID: 1445, FullName: owner + "/" + name, DefaultBranch: "main"}
+	r := &github.Repo{ID: 1445, FullName: owner + "/" + name, DefaultBranch: "main", CreatedAt: time.Unix(1, 0)}
 	r.Owner.ID = 155
 	return r, nil
 }
@@ -227,6 +251,7 @@ var createRelease = staticSource{
 type createEnv struct {
 	catalog *Catalog
 	repos   *fakeRepos
+	audit   store.AuditStore
 	client  forgev1connect.ServiceCatalogServiceClient
 }
 
@@ -246,7 +271,8 @@ func newCreateEnvWith(t *testing.T, src TemplateSource, repos *fakeRepos, deploy
 // tweak when it is set.
 func newCreateEnvOpts(t *testing.T, src TemplateSource, repos *fakeRepos, deploys *Deploys, tweak func(*Options)) *createEnv {
 	t.Helper()
-	e := &createEnv{catalog: NewCatalog(nil), repos: repos}
+	audit := store.NewMemory()
+	e := &createEnv{catalog: NewCatalog(nil), repos: repos, audit: audit}
 	opts := Options{
 		Authenticator: StaticAuthenticator{
 			"writer": {Subject: "ana", Groups: []string{"platform"}},
@@ -255,6 +281,7 @@ func newCreateEnvOpts(t *testing.T, src TemplateSource, repos *fakeRepos, deploy
 		},
 		Authorizer: Authorizer{WriterGroups: []string{"platform"}},
 		Catalog:    e.catalog,
+		Audit:      audit,
 		Templates:  src,
 		GitHubOrg:  "showmino",
 	}
