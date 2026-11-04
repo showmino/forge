@@ -323,3 +323,28 @@ func TestInfrastructureRepoKeepsItsTeam(t *testing.T) {
 		t.Errorf("move: %v", err)
 	}
 }
+
+func TestListTargets(t *testing.T) {
+	t.Parallel()
+	cfg, err := infrastructure.Parse([]byte(infraConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &templateService{infra: cfg}
+	resp, err := s.ListTargets(writerCtx(), connect.NewRequest(&forgev1.ListTargetsRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := resp.Msg.GetTargets()
+	if len(ts) != 2 || ts[0].GetName() != "azure" || strings.Join(ts[0].GetEnvironments(), ",") != "staging,production" ||
+		ts[1].GetName() != "web-only" || strings.Join(ts[1].GetTeams(), ",") != "web" {
+		t.Fatalf("targets %v", ts)
+	}
+	none, err := (&templateService{}).ListTargets(writerCtx(), connect.NewRequest(&forgev1.ListTargetsRequest{}))
+	if err != nil || len(none.Msg.GetTargets()) != 0 {
+		t.Errorf("without infrastructure: %v %v", none, err)
+	}
+	if _, err := s.ListTargets(context.Background(), connect.NewRequest(&forgev1.ListTargetsRequest{})); connect.CodeOf(err) != connect.CodeUnauthenticated {
+		t.Errorf("anonymous: %v", err)
+	}
+}

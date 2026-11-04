@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/template"
 )
@@ -25,6 +26,21 @@ const templatePrefix = "templates/"
 type templateService struct {
 	src TemplateSource
 	log *slog.Logger
+	// infra are the targets of infrastructure repos; nil: none.
+	infra *infrastructure.Config
+}
+
+func (s *templateService) ListTargets(ctx context.Context, _ *connect.Request[forgev1.ListTargetsRequest]) (*connect.Response[forgev1.ListTargetsResponse], error) {
+	if err := authenticated(ctx); err != nil {
+		return nil, err
+	}
+	out := &forgev1.ListTargetsResponse{}
+	if s.infra != nil {
+		for _, t := range s.infra.Targets {
+			out.Targets = append(out.Targets, &forgev1.Target{Name: t.Name, Title: t.Title, Environments: t.EnvironmentNames(), Teams: slices.Clone(t.Teams)})
+		}
+	}
+	return connect.NewResponse(out), nil
 }
 
 func authenticated(ctx context.Context) error {

@@ -5,6 +5,13 @@ package forge.v1;
 // TemplateService lists the service templates of a release of the template
 // repo. Resource names follow AIP style: "templates/{template}".
 service TemplateService {
+  // ListTargets returns the targets infrastructure templates deploy to
+  // (phase 12): what 'forge create --target' and the Create page choose
+  // from. Empty when this API has no infrastructure repos.
+  rpc ListTargets(ListTargetsRequest) returns (ListTargetsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // ListTemplates returns the templates of one release, the newest by default.
   rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
@@ -92,4 +99,21 @@ message GetTemplateRequest {
 
 message GetTemplateResponse {
   Template template = 1;
+}
+
+// Target is a set of cloud accounts, one per environment, that an
+// infrastructure repo deploys to.
+message Target {
+  string name = 1;
+  string title = 2;
+  // Its environments, in deploy order: staging, production or both.
+  repeated string environments = 3;
+  // The teams that may use it; empty for every team.
+  repeated string teams = 4;
+}
+
+message ListTargetsRequest {}
+
+message ListTargetsResponse {
+  repeated Target targets = 1;
 }

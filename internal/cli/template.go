@@ -23,7 +23,7 @@ func newTemplateCmd(f *Factory) *cobra.Command {
 	cmd.Long = `Templates scaffold new services with 'forge create'. A template is a directory
 with a template.yaml (typed parameters) and a skeleton/ rendered with Go
 text/template. The platform team releases them by tagging the template repo.`
-	cmd.AddCommand(newTemplateListCmd(f), newTemplateGetCmd(f), newTemplateLintCmd(f))
+	cmd.AddCommand(newTemplateListCmd(f), newTemplateGetCmd(f), newTemplateLintCmd(f), newTemplateTargetsCmd(f))
 	return cmd
 }
 
@@ -287,4 +287,50 @@ func plural(n int, word string) string {
 		return fmt.Sprintf("1 %s", word)
 	}
 	return fmt.Sprintf("%d %ss", n, word)
+}
+
+func newTemplateTargetsCmd(f *Factory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "targets",
+		Short: "List the targets infrastructure templates deploy to",
+		Long: `An infrastructure template (type infrastructure) makes a repo that deploys
+itself to a target: a set of cloud accounts, one per environment, that the
+platform team set up. These are what 'forge create --target' takes.`,
+		Example: "  forge template targets\n  forge create infra-network --template opentofu --target azure --team platform",
+		Args:    noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Templates.ListTargets(ctx, connect.NewRequest(&forgev1.ListTargetsRequest{}))
+			if err != nil {
+				return err
+			}
+			ts := resp.Msg.GetTargets()
+			if len(ts) == 0 && format == output.Table {
+				f.infof("No targets: this Forge has no infrastructure repos.")
+				return nil
+			}
+			v := output.View{Headers: []string{"target", "title", "environments", "teams"}, Data: resp.Msg}
+			if len(ts) == 0 {
+				v.Data = map[string]any{"targets": []any{}}
+			}
+			for _, t := range ts {
+				teams := strings.Join(t.GetTeams(), ", ")
+				if teams == "" {
+					teams = "every team"
+				}
+				v.Rows = append(v.Rows, []string{t.GetName(), t.GetTitle(), strings.Join(t.GetEnvironments(), ", "), teams})
+				v.Names = append(v.Names, t.GetName())
+			}
+			return output.Print(f.IO.Out, format, v)
+		},
+	}
 }
