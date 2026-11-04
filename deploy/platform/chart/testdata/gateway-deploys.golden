@@ -772,6 +772,12 @@ spec:
               service:
                 name: forge-web
                 port: {number: 80}
+          - path: /forge.v1.ApprovalService
+            pathType: Prefix
+            backend:
+              service:
+                name: forge-api
+                port: {number: 80}
           - path: /forge.v1.AuditService
             pathType: Prefix
             backend:

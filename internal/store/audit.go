@@ -35,12 +35,13 @@ type AuditStore interface {
 }
 
 // Backend is everything forge-api keeps: the catalog, the audit log,
-// resources and sessions.
+// resources, sessions and approvals.
 type Backend interface {
 	Store
 	AuditStore
 	ResourceStore
 	SessionStore
+	ApprovalStore
 }
 
 const auditPrefix = "auditEvents/"

@@ -224,22 +224,29 @@ repo deployed stays in the cloud account.
 ### The approval
 
 - **Asking:** the shared workflow's production step calls Forge with the job's
-  OIDC token (a CI workload, as for deploys from CI: the new procedures go in
-  `workloadProcedures` with their `ci_scope.go` check). Forge checks the token
-  is this repo's, from `main`, from the shared workflow, and records an
-  approval request: repo, commit, run, who started it (the token's `actor`).
+  OIDC token (a CI workload, as for deploys from CI; the procedures are in
+  `workloadProcedures`). Forge checks the token is this repo's, from the
+  default branch, from the shared workflow, from a `push` run (so its actor
+  is who pushed the commit, not someone commenting on an issue), and that the
+  commit is the branch's head (a re-run of an old push cannot ask). It
+  records an approval request: repo, commit, run, who started it (`actor`)
+  and who started this attempt (`triggering_actor`). A newer commit's
+  request supersedes one still waiting, or approved but not claimed.
 - **Approving:** a member of the owning team approves or rejects in the
   dashboard (the repo's page, and a list of what waits on you) or with
   `forge approval approve|reject <id>`. Forge refuses an approval by the
-  person who started the run, unless the repo has the exception. Membership is
-  read from GitHub (the App has Members: read).
+  person who started the run or re-ran it, unless the repo has the
+  exception. Membership is the login's groups. Logins are compared, which a
+  GitHub user can rename; storing user IDs is a later hardening.
 - **Deploying:** an approval can take a day; no runner waits for it. The
-  production job ends after asking; on approval Forge starts the production
-  run for that commit (`workflow_dispatch` with the approval's ID, which needs
-  the App's Actions: write), and that run checks with Forge that the ID is
-  approved for its commit before it signs in. Builder's call if a better way
-  keeps the same guarantees.
-- Each step (asked, approved, rejected, deployed) is in the audit log.
+  production job ends after asking; on approval Forge starts the repo's
+  workflow (`infrastructure.repoWorkflow`, default `deploy.yml`) on its
+  default branch with the input `approval` (the App's Actions: write). That
+  run claims the approval once, only as a `workflow_dispatch` run of the
+  shared workflow at the approved commit: if the branch moved on, the claim
+  is refused and the newest commit asks for its own approval. A start that
+  failed is kept on the approval; approving again retries it.
+- Each step (asked, approved, rejected, claimed) is in the audit log.
 
 ### The exception
 

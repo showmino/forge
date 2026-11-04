@@ -55,6 +55,17 @@ type Workload struct {
 	Service string
 	// SHA is the commit the job runs at.
 	SHA string
+	// Actor is the GitHub user who started the run, RunID the run, and
+	// JobWorkflowRef the workflow the job is in ("<owner>/<repo>/<path>@<ref>":
+	// a called workflow's, not the caller's).
+	Actor          string
+	RunID          int64
+	JobWorkflowRef string
+	// EventName is what started the run (push, workflow_dispatch, ...), and
+	// TriggeringActor who started this attempt of it (a re-run's is the
+	// person who re-ran it).
+	EventName       string
+	TriggeringActor string
 }
 
 // PermDeploy is a CI caller's permission to deploy service to env.
@@ -135,6 +146,11 @@ var workloadProcedures = []string{
 	forgev1connect.OperationServiceWatchOperationProcedure,
 	forgev1connect.ResourceServicePlanResourcesProcedure,
 	forgev1connect.ResourceServiceGetResourcePlanProcedure,
+	// The shared workflow of an infrastructure repo; Approvals checks the
+	// workflow and the repo.
+	forgev1connect.ApprovalServiceRequestApprovalProcedure,
+	forgev1connect.ApprovalServiceGetApprovalProcedure,
+	forgev1connect.ApprovalServiceClaimApprovalProcedure,
 }
 
 // authInterceptor authenticates every call except the public ones.
