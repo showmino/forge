@@ -128,8 +128,8 @@ type exceptionGitHub struct{ repo *envtest.Repo }
 func (g exceptionGitHub) ProposeFiles(context.Context, string, string, github.Proposal) (string, error) {
 	return "https://github.com/showmino/forge-deploys/pull/7", nil
 }
-func (g exceptionGitHub) PullsForCommit(context.Context, string, string, string) ([]github.Pull, error) {
-	return []github.Pull{{Number: 7, HTMLURL: "https://github.com/showmino/forge-deploys/pull/7", Merged: time.Now(), Base: "main", HeadSHA: "h7"}}, nil
+func (g exceptionGitHub) PullsForCommit(_ context.Context, _, _, sha string) ([]github.Pull, error) {
+	return []github.Pull{{Number: 7, HTMLURL: "https://github.com/showmino/forge-deploys/pull/7", Merged: time.Now(), Base: "main", HeadSHA: "h7", MergeCommit: sha}}, nil
 }
 func (g exceptionGitHub) PullReviews(context.Context, string, string, int) ([]github.Review, error) {
 	return []github.Review{{User: "dee", State: "APPROVED", CommitID: "h7"}}, nil
@@ -155,7 +155,8 @@ func TestApprovalExceptionCommands(t *testing.T) {
 	if r = h.run("approval", "exception", "list"); r.code != 0 || !strings.Contains(r.err, "No exceptions") {
 		t.Errorf("list before the merge: %s", r)
 	}
-	repo.Push("exceptions/infra-net.yaml", []byte("service: infra-net\nteam: billing\nreason: I am alone\nrequestedBy: cy\n"), "Merge pull request #7")
+	repo.Push("exceptions/infra-net.yaml", []byte("service: infra-net\nteam: billing\nreason: I am alone\nrequestedBy: cy\nrequestedAt: "+
+		time.Now().UTC().Format(time.RFC3339)+"\n"), "Merge pull request #7")
 	r = h.run("approval", "exception", "list")
 	if r.code != 0 || !strings.Contains(r.out, "infra-net") || !strings.Contains(r.out, "yes") || !strings.Contains(r.out, "dee") {
 		t.Errorf("list: %s", r)

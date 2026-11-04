@@ -62,13 +62,28 @@ func (f *fakeExceptionGitHub) TeamMember(_ context.Context, org, slug, login str
 	return org == "showmino" && slug == "admins" && f.admins[login], nil
 }
 
-// merge writes infra-net's exception as pull request 7 would, its last
-// commit h7 reviewed as reviews say.
+// exceptionYAML is infra-net's exception file, for team, asked now.
+func exceptionYAML(team string) []byte {
+	return []byte("service: infra-net\nteam: " + team + "\nreason: alone\nrequestedBy: ana\nrequestedAt: " + time.Now().Add(time.Minute).UTC().Format(time.RFC3339) + "\n")
+}
+
+// merge squash-merges infra-net's exception as pull request 7 would, its
+// last commit h7 reviewed as reviews say.
 func (f *fakeExceptionGitHub) merge(reviews ...github.Review) {
-	sha := f.repo.Push("exceptions/infra-net.yaml", []byte("service: infra-net\nteam: platform\nreason: alone\nrequestedBy: ana\nrequestedAt: 2026-11-03T09:00:00Z\n"), "Merge pull request #7")
+	f.mergeAs(exceptionYAML("platform"), true, reviews...)
+}
+
+// mergeAs writes data as pull request 7's merge; with squashed false, the
+// commit on main is not the pull request's merge commit.
+func (f *fakeExceptionGitHub) mergeAs(data []byte, squashed bool, reviews ...github.Review) {
+	sha := f.repo.Push("exceptions/infra-net.yaml", data, "Merge pull request #7")
+	merge := sha
+	if !squashed {
+		merge = "m-elsewhere"
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.pulls[sha] = []github.Pull{{Number: 7, HTMLURL: "https://github.com/showmino/forge-deploys/pull/7", Merged: time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC), Base: "main", HeadSHA: "h7"}}
+	f.pulls[sha] = []github.Pull{{Number: 7, HTMLURL: "https://github.com/showmino/forge-deploys/pull/7", Merged: time.Now(), Base: "main", HeadSHA: "h7", MergeCommit: merge}}
 	f.reviews[7] = reviews
 }
 
@@ -99,7 +114,7 @@ func TestExceptionRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(resp.Msg.GetPullRequestUrl(), "/pull/forge/exception-infra-net") || len(gh.proposals) != 1 {
+	if !strings.Contains(resp.Msg.GetPullRequestUrl(), "/pull/forge/exception-infra-net-") || len(gh.proposals) != 1 || !gh.proposals[0].Fresh {
 		t.Fatalf("request: %v %v", resp.Msg, gh.proposals)
 	}
 	p := gh.proposals[0]
@@ -133,7 +148,7 @@ func TestExceptionRequest(t *testing.T) {
 
 	// Revoke: a pull request that removes it.
 	rv, err := e.client.RevokeException(ctx, as("bo", &forgev1.RevokeExceptionRequest{Service: "services/infra-net", Reason: "Bo joined"}))
-	if err != nil || !strings.HasSuffix(rv.Msg.GetPullRequestUrl(), "/pull/forge/revoke-exception-infra-net") {
+	if err != nil || !strings.Contains(rv.Msg.GetPullRequestUrl(), "/pull/forge/revoke-exception-infra-net-") {
 		t.Fatalf("revoke: %v %v", rv, err)
 	}
 	if last := gh.proposals[len(gh.proposals)-1]; len(last.Remove) != 1 || last.Remove[0] != "exceptions/infra-net.yaml" || len(last.Files) != 0 {
@@ -145,14 +160,21 @@ func TestExceptionRequest(t *testing.T) {
 // commit an admin team member approved; then the team approves its own run.
 func TestExceptionGrant(t *testing.T) {
 	t.Parallel()
+	dee := []github.Review{{User: "dee", State: "APPROVED", CommitID: "h7"}}
 	for _, tc := range []struct {
 		name    string
 		reviews []github.Review
 		direct  bool
+		data    []byte
+		merge   bool // not the pull request's merge commit
 		granted bool
 		problem string
 	}{
 		{name: "an admin approved", reviews: []github.Review{{User: "bo", State: "COMMENTED", CommitID: "h7"}, {User: "dee", State: "APPROVED", CommitID: "h7"}}, granted: true},
+		{name: "the admin who approved asked for it", reviews: dee, data: []byte(strings.Replace(string(exceptionYAML("platform")), "requestedBy: ana", "requestedBy: Dee", 1)), problem: "other than Dee"},
+		{name: "brought back by a merge commit", reviews: dee, merge: true, problem: "is not the merge of"},
+		{name: "another team's", reviews: dee, data: exceptionYAML("web"), problem: "it is for team web"},
+		{name: "an earlier service's", reviews: dee, data: []byte("service: infra-net\nteam: platform\nrequestedBy: ana\nrequestedAt: 2026-01-01T00:00:00Z\n"), problem: "before services/infra-net was made"},
 		{name: "a teammate approved", reviews: []github.Review{{User: "bo", State: "APPROVED", CommitID: "h7"}}, problem: "merged without an approval of its last commit by a member of admins"},
 		{name: "an admin approved an older commit", reviews: []github.Review{{User: "dee", State: "APPROVED", CommitID: "h6"}}, problem: "without an approval"},
 		{name: "no review", problem: "without an approval"},
@@ -161,10 +183,14 @@ func TestExceptionGrant(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			e, gh := newExceptionEnv(t)
+			data := tc.data
+			if data == nil {
+				data = exceptionYAML("platform")
+			}
 			if tc.direct {
-				gh.repo.Push("exceptions/infra-net.yaml", []byte("service: infra-net\nteam: platform\n"), "pushed")
+				gh.repo.Push("exceptions/infra-net.yaml", data, "pushed")
 			} else {
-				gh.merge(tc.reviews...)
+				gh.mergeAs(data, !tc.merge, tc.reviews...)
 			}
 			exs := e.exceptions(t)
 			if len(exs) != 1 || exs[0].GetService() != "services/infra-net" || exs[0].GetGranted() != tc.granted || !strings.Contains(exs[0].GetProblem(), tc.problem) {

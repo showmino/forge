@@ -13,8 +13,9 @@ type Pull struct {
 	HTMLURL string
 	// Merged is when it was merged; zero when it was not.
 	Merged time.Time
-	// Base is the branch it merges into, HeadSHA its last commit.
-	Base, HeadSHA string
+	// Base is the branch it merges into, HeadSHA its last commit, and
+	// MergeCommit the commit its merge made on Base.
+	Base, HeadSHA, MergeCommit string
 }
 
 // Review is one review of a pull request.
@@ -39,13 +40,14 @@ func (c *Client) PullsForCommit(ctx context.Context, owner, repo, sha string) ([
 		Head struct {
 			SHA string `json:"sha"`
 		} `json:"head"`
+		MergeCommitSHA string `json:"merge_commit_sha"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, repoPath(owner, repo)+"/commits/"+sha+"/pulls", nil, &out); err != nil {
 		return nil, err
 	}
 	pulls := make([]Pull, 0, len(out))
 	for _, p := range out {
-		pl := Pull{Number: p.Number, HTMLURL: p.HTMLURL, Base: p.Base.Ref, HeadSHA: p.Head.SHA}
+		pl := Pull{Number: p.Number, HTMLURL: p.HTMLURL, Base: p.Base.Ref, HeadSHA: p.Head.SHA, MergeCommit: p.MergeCommitSHA}
 		if p.MergedAt != nil {
 			pl.Merged = *p.MergedAt
 		}

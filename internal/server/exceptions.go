@@ -15,6 +15,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/infrastructure"
+	"github.com/showmino/forge/internal/manifest"
 	"github.com/showmino/forge/internal/store"
 )
 
@@ -71,8 +72,15 @@ func (a *Approvals) exceptionsReady() error {
 }
 
 // exception reads the exception of svc and whether it holds: the file's
-// last change on the branch belongs to a merged pull request whose last
-// commit a member of an admin team approved. nil, nil without a file.
+// last change on the branch is the merge (squash or rebase) of a pull
+// request into it whose last commit a member of an admin team other than the
+// requester approved, and it names the service's team, asked after the
+// service was made. nil, nil without a file.
+//
+// The last change must be the pull request's own merge commit: a later
+// merge commit that only brings back an approved version (after a revoke)
+// does not show in the file's history, so it would otherwise count. Merge
+// exception pull requests with squash or rebase.
 func (a *Approvals) exception(ctx context.Context, svc string) (*forgev1.Exception, error) {
 	e := a.o.Exceptions
 	data, err := e.Repo.Read(ctx, exceptionPath(svc), "")
@@ -92,6 +100,22 @@ func (a *Approvals) exception(ctx context.Context, svc string) (*forgev1.Excepti
 	if !f.RequestedAt.IsZero() {
 		out.RequestTime = timestamppb.New(f.RequestedAt)
 	}
+	// It is the team's, for this service: not one an earlier service of the
+	// same name, or another team, was given.
+	cur, err := a.o.Catalog.get(ctx, servicePrefix+svc)
+	switch {
+	case connect.CodeOf(err) == connect.CodeNotFound:
+		out.Problem = servicePrefix + svc + " is not in the catalog"
+		return out, nil
+	case err != nil:
+		return nil, err
+	case f.Team != cur.GetOwnerTeam():
+		out.Problem = fmt.Sprintf("it is for team %s, but %s is team %s's", f.Team, cur.GetName(), cur.GetOwnerTeam())
+		return out, nil
+	case cur.GetCreateTime() != nil && f.RequestedAt.Before(cur.GetCreateTime().AsTime()):
+		out.Problem = "it was asked for before " + cur.GetName() + " was made: an earlier service of that name had it"
+		return out, nil
+	}
 	hist, err := e.Repo.History(ctx, exceptionPath(svc), 1)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the history of %s: %w", exceptionPath(svc), err))
@@ -109,12 +133,16 @@ func (a *Approvals) exception(ctx context.Context, svc string) (*forgev1.Excepti
 			continue
 		}
 		out.PullRequestUrl = p.HTMLURL
-		by, err := a.adminApproval(ctx, p)
+		if p.MergeCommit != hist[0].SHA {
+			out.Problem = fmt.Sprintf("its last change (%s) is not the merge of %s: merge exception pull requests with squash or rebase", shortSHA(hist[0].SHA), p.HTMLURL)
+			continue
+		}
+		by, err := a.adminApproval(ctx, p, f.RequestedBy)
 		if err != nil {
 			return nil, err
 		}
 		if by == "" {
-			out.Problem = fmt.Sprintf("%s was merged without an approval of its last commit by a member of %s", p.HTMLURL, strings.Join(e.AdminTeams, " or "))
+			out.Problem = fmt.Sprintf("%s was merged without an approval of its last commit by a member of %s other than %s", p.HTMLURL, strings.Join(e.AdminTeams, " or "), f.RequestedBy)
 			continue
 		}
 		out.Granted, out.GrantedBy, out.GrantTime, out.Problem = true, by, timestamppb.New(p.Merged), ""
@@ -123,16 +151,16 @@ func (a *Approvals) exception(ctx context.Context, svc string) (*forgev1.Excepti
 	return out, nil
 }
 
-// adminApproval returns who of the admin teams approved p's last commit, or
-// "" when none did.
-func (a *Approvals) adminApproval(ctx context.Context, p github.Pull) (string, error) {
+// adminApproval returns who of the admin teams, other than requester,
+// approved p's last commit, or "" when none did.
+func (a *Approvals) adminApproval(ctx context.Context, p github.Pull, requester string) (string, error) {
 	e := a.o.Exceptions
 	reviews, err := e.GitHub.PullReviews(ctx, e.Owner, e.Name, p.Number)
 	if err != nil {
 		return "", connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the reviews of %s: %w", p.HTMLURL, err))
 	}
 	for _, r := range slices.Backward(reviews) {
-		if r.State != "APPROVED" || r.CommitID != p.HeadSHA || r.User == "" {
+		if r.State != "APPROVED" || r.CommitID != p.HeadSHA || r.User == "" || strings.EqualFold(r.User, requester) {
 			continue
 		}
 		for _, team := range e.AdminTeams {
@@ -164,7 +192,7 @@ func (a *Approvals) exceptionService(ctx context.Context, name string) (*forgev1
 		return nil, err
 	}
 	sid, ok := strings.CutPrefix(name, servicePrefix)
-	if !ok || sid == "" {
+	if !ok || !manifest.ValidID(sid) {
 		return nil, invalid(fmt.Sprintf("service %q must be services/<name>", name))
 	}
 	noteAuditService(ctx, name)
@@ -202,17 +230,22 @@ func (a *Approvals) RequestException(ctx context.Context, req *connect.Request[f
 	}
 	e := a.o.Exceptions
 	url, err := e.GitHub.ProposeFiles(ctx, e.Owner, e.Name, github.Proposal{
-		Branch:  "forge/exception-" + sid,
+		Branch:  fmt.Sprintf("forge/exception-%s-%d", sid, f.RequestedAt.Unix()),
+		Fresh:   true,
 		Title:   fmt.Sprintf("Exception: team %s approves its own production runs of %s", svc.GetOwnerTeam(), sid),
 		Message: fmt.Sprintf("exception for %s, asked by %s\n\n%s", sid, f.RequestedBy, reason),
 		Body: fmt.Sprintf("%s asks that team **%s** may approve its own production runs of **%s**, which Forge otherwise refuses "+
 			"(the person who started a run may not approve it).\n\n> %s\n\nMerge this only if the team has nobody else who could approve. "+
-			"It holds once merged with an approval by a member of %s (Forge checks on GitHub); revoke it with `forge approval exception revoke %s`.",
-			f.RequestedBy, svc.GetOwnerTeam(), sid, reason, strings.Join(e.AdminTeams, " or "), sid),
+			"It holds once **squash-merged** with an approval of its last commit by a member of %s other than %s (Forge checks on GitHub); "+
+			"revoke it with `forge approval exception revoke %s`.",
+			f.RequestedBy, svc.GetOwnerTeam(), sid, reason, strings.Join(e.AdminTeams, " or "), f.RequestedBy, sid),
 		Files: []github.File{{Path: exceptionPath(sid), Content: data}},
 	})
 	if errors.Is(err, github.ErrFileExists) {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s has an exception already (%s); see forge approval exception list", svc.GetName(), exceptionPath(sid)))
+	}
+	if errors.Is(err, github.ErrBranchExists) {
+		return nil, connect.NewError(connect.CodeAborted, errors.New("a request for it was opened at the same moment; try again"))
 	}
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("open the pull request in %s/%s: %w", e.Owner, e.Name, err))
@@ -235,7 +268,8 @@ func (a *Approvals) RevokeException(ctx context.Context, req *connect.Request[fo
 	reason := strings.TrimSpace(req.Msg.GetReason())
 	e := a.o.Exceptions
 	url, err := e.GitHub.ProposeFiles(ctx, e.Owner, e.Name, github.Proposal{
-		Branch:  "forge/revoke-exception-" + sid,
+		Branch:  fmt.Sprintf("forge/revoke-exception-%s-%d", sid, a.o.Now().Unix()),
+		Fresh:   true,
 		Title:   fmt.Sprintf("Revoke the exception of %s", sid),
 		Message: fmt.Sprintf("revoke the exception of %s, asked by %s\n\n%s", sid, by, reason),
 		Body:    fmt.Sprintf("%s asks to remove the exception of **%s**: once merged, its team may no longer approve its own production runs.\n\n> %s", by, sid, reason),
@@ -261,7 +295,7 @@ func (a *Approvals) ListExceptions(ctx context.Context, req *connect.Request[for
 	var ids []string
 	if s := req.Msg.GetService(); s != "" {
 		id, ok := strings.CutPrefix(s, servicePrefix)
-		if !ok || id == "" {
+		if !ok || !manifest.ValidID(id) {
 			return nil, invalid(fmt.Sprintf("service %q must be services/<name>", s))
 		}
 		ids = []string{id}
