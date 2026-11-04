@@ -405,7 +405,9 @@ makes the repo's OIDC subject name the workflow first (`job_workflow_ref`,
 `target.yaml` and, per environment, Crossplane objects for the GitHub
 environment (production only from `main`), its secrets (from the target's
 Secret) and variables, and the target's `access` (for Azure a federated
-credential whose subject is the shared workflow's). The
+credential whose subject is the shared workflow's), and the repo variable
+`FORGE_ENVIRONMENTS` (`staging,production`) that the shared workflow reads
+so no job names an environment the repo does not have. The
 `forge-infrastructure` ApplicationSet syncs them into
 `infrastructure.namespace`. Forge never deploys such a repo; deleting it
 removes the folder. Its production runs wait in Forge: the shared workflow

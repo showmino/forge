@@ -211,7 +211,7 @@ func (d *Deploys) readInfrastructure(ctx context.Context, id string) (*infrastru
 // infrastructureFiles are the paths in the deploy repo's folder of id that
 // Forge may have written, whatever its Record says.
 func infrastructureFiles(id string) []string {
-	out := []string{infrastructure.RecordPath(id)}
+	out := []string{infrastructure.RecordPath(id), infrastructure.RepoObjectsPath(id)}
 	for _, env := range infrastructure.Environments {
 		out = append(out, infrastructure.Folder(id)+"/"+env+".yaml")
 	}
