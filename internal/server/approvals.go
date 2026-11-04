@@ -145,16 +145,15 @@ func (a *Approvals) RequestApproval(ctx context.Context, _ *connect.Request[forg
 	}
 	// Who started this attempt: GitHub's OIDC tokens do not say, so ask. A
 	// re-run's is the person who re-ran it, who may not approve it either.
-	triggering := w.TriggeringActor
 	if w.RunID == 0 || w.RunAttempt == 0 {
 		return nil, workloadDenied(w, "ask for an approval only with a token that names its run (run_id, run_attempt)")
 	}
-	_, byGitHub, err := a.o.Dispatch.RunActors(ctx, owner, repo, w.RunID, w.RunAttempt)
+	_, triggering, err := a.o.Dispatch.RunActors(ctx, owner, repo, w.RunID, w.RunAttempt)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read who started run %d (attempt %d) of %s: %w", w.RunID, w.RunAttempt, w.Repository, err))
 	}
-	if byGitHub != "" {
-		triggering = byGitHub
+	if triggering == "" {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("GitHub did not say who started run %d (attempt %d) of %s; try again", w.RunID, w.RunAttempt, w.Repository))
 	}
 	// A re-run of the same job by the same person asks again: it gets the
 	// approval it has. Someone else's re-run gets a new one, naming them.
@@ -170,9 +169,7 @@ func (a *Approvals) RequestApproval(ctx context.Context, _ *connect.Request[forg
 		ID: newApprovalID(), Service: w.Service, Environment: infrastructure.Production, Commit: w.SHA,
 		RunID: w.RunID, RequestedBy: w.Actor, TriggeredBy: triggering, State: store.ApprovalPending, CreatedAt: a.o.Now().UTC(),
 	}
-	if w.RunID != 0 {
-		ap.RunURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d", w.Repository, w.RunID)
-	}
+	ap.RunURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d", w.Repository, w.RunID)
 	if err := a.o.Store.CreateApproval(ctx, ap); err != nil {
 		return nil, storeErr(err)
 	}

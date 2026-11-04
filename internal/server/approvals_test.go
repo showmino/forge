@@ -48,15 +48,15 @@ func (f *fakeDispatch) ResolveRef(_ context.Context, _, repo, _ string) (string,
 	return envSHA, nil
 }
 
-// RunActors answers who started a run and its attempt: the token's actor,
-// and, for attempt 2 and up, reruns[runID] when set.
+// RunActors answers as GitHub does: every run here was started by ana; an
+// attempt 2 or later was started by reruns[runID].
 func (f *fakeDispatch) RunActors(_ context.Context, _, _ string, runID, attempt int64) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if by, ok := f.reruns[runID]; ok && attempt > 1 {
-		return "", by, nil
+		return "ana", by, nil
 	}
-	return "", "", nil
+	return "ana", "ana", nil
 }
 
 func (f *fakeDispatch) setHead(repo, sha string) {
@@ -124,7 +124,8 @@ targets: [{name: azure, environments: {production: {secret: s}}}]
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &approvalEnv{dispatch: &fakeDispatch{}, self: map[string]bool{}}
+	// Bo re-runs run 41 (attempt 2).
+	e := &approvalEnv{dispatch: &fakeDispatch{reruns: map[int64]string{41: "Bo"}}, self: map[string]bool{}}
 	var aps *Approvals
 	if !noApprovals {
 		o := ApprovalOptions{
@@ -147,7 +148,7 @@ targets: [{name: azure, environments: {production: {secret: s}}}]
 	}
 	rerunBy := func(p *Principal, who string) Principal {
 		w := *p.Workload
-		w.TriggeringActor = who
+		w.TriggeringActor, w.RunAttempt = who, 2 // GitHub, not the token, says who
 		q := *p
 		q.Workload = &w
 		return q
@@ -440,10 +441,7 @@ func TestApprovalRerunByGitHub(t *testing.T) {
 	t.Parallel()
 	e := newApprovalEnv(t, false)
 	first := e.request(t, "ci") // attempt 1, pushed by ana
-	e.dispatch.mu.Lock()
-	e.dispatch.reruns = map[int64]string{41: "Bo"}
-	e.dispatch.mu.Unlock()
-	// Bo re-runs it; the token says nothing about Bo.
+	// Bo re-runs it (the fake's run 41, attempt 2); the token says nothing about Bo.
 	rerun := e.request(t, "ci-rerun-attempt-2")
 	if rerun.GetName() == first.GetName() {
 		t.Fatalf("Bo's re-run got ana's approval %s", first.GetName())
@@ -453,4 +451,15 @@ func TestApprovalRerunByGitHub(t *testing.T) {
 	if got := e.get(t, first.GetName()); got.GetState() != forgev1.Approval_STATE_SUPERSEDED {
 		t.Errorf("first: %v", got.GetState())
 	}
+}
+
+// When GitHub does not say who started the attempt, nothing is asked.
+func TestApprovalUnknownTriggeringActor(t *testing.T) {
+	t.Parallel()
+	e := newApprovalEnv(t, false)
+	e.dispatch.mu.Lock()
+	e.dispatch.reruns = map[int64]string{41: ""}
+	e.dispatch.mu.Unlock()
+	_, err := e.client.RequestApproval(context.Background(), as("ci-rerun-attempt-2", &forgev1.RequestApprovalRequest{}))
+	wantCode(t, "unknown", err, connect.CodeUnavailable, "GitHub did not say who started")
 }

@@ -28,7 +28,7 @@ func (noDispatch) DispatchWorkflow(context.Context, string, string, string, stri
 }
 func (noDispatch) DefaultBranch(context.Context, string, string) (string, error) { return "main", nil }
 func (noDispatch) RunActors(context.Context, string, string, int64, int64) (string, string, error) {
-	return "", "", nil
+	return "cy", "cy", nil
 }
 func (noDispatch) ResolveRef(context.Context, string, string, string) (string, error) {
 	return testInfraSHA, nil
