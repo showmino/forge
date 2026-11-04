@@ -1,6 +1,7 @@
 package repositories
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,8 +20,9 @@ func TestRules(t *testing.T) {
 		}
 		var obj struct {
 			Spec struct {
-				DeletionPolicy string `yaml:"deletionPolicy"`
-				ForProvider    struct {
+				DeletionPolicy     string   `yaml:"deletionPolicy"`
+				ManagementPolicies []string `yaml:"managementPolicies"`
+				ForProvider        struct {
 					Enforcement  string `yaml:"enforcement"`
 					BypassActors []any  `yaml:"bypassActors"`
 					Rules        []struct {
@@ -42,7 +44,8 @@ func TestRules(t *testing.T) {
 			t.Fatal(err)
 		}
 		p := obj.Spec.ForProvider
-		if obj.Spec.DeletionPolicy != "Orphan" || p.Enforcement != "active" || len(p.BypassActors) != 0 || len(p.Rules) != 1 {
+		if obj.Spec.DeletionPolicy != "" || !slices.Equal(obj.Spec.ManagementPolicies, []string{"Observe", "Create", "Update", "LateInitialize"}) ||
+			p.Enforcement != "active" || len(p.BypassActors) != 0 || len(p.Rules) != 1 {
 			t.Fatalf("unsafe ruleset:\n%s", data)
 		}
 		r := p.Rules[0]

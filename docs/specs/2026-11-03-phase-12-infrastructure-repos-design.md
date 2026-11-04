@@ -188,8 +188,10 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
   the audit log; a dry run, a failed create or a connected repo is not proof.
   Audit records omit false flags, so an absent `validate_only` means a real
   create, as does explicit `false`; `true` and unknown values never qualify.
-  Catalog deletion does not remove protection. Rulesets use `Orphan` so
-  accidentally removing their Kubernetes objects does not open `main`.
+  Catalog deletion does not remove protection. Rulesets use
+  `managementPolicies: [Observe, Create, Update, LateInitialize]`, excluding
+  `Delete`, so removing their Kubernetes objects does not open `main`.
+  The namespaced provider does not support the older `deletionPolicy` field.
 - Infrastructure rules require `infrastructure / pr-checks` from GitHub
   Actions and an up-to-date branch. That check succeeds only if validation
   and every account's plan/what-if succeed; missing configuration fails.
