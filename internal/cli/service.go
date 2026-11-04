@@ -225,6 +225,19 @@ func newServiceGetCmd(f *Factory) *cobra.Command {
 					[]string{"infrastructure", i.GetTool() + ", deploys itself from GitHub Actions"},
 					[]string{"target", i.GetTarget()},
 					[]string{"environments", strings.Join(i.GetEnvironments(), ", ")})
+				// The exception, when this API has them; a table only.
+				if format == output.Table {
+					if ex, err := f.exceptionOf(cmd, s.GetName()); err == nil {
+						line := "none: the person who starts a production run may not approve it"
+						for _, e := range ex.Msg.GetExceptions() {
+							line = "the team approves its own runs (granted by " + e.GetGrantedBy() + ")"
+							if !e.GetGranted() {
+								line = "asked, not in force: " + e.GetProblem()
+							}
+						}
+						rows = append(rows, []string{"exception", line})
+					}
+				}
 			}
 			if format == output.Table {
 				if can := f.allowedOn(cmd, s.GetName()); can != "" {
@@ -677,4 +690,15 @@ never taken from forge.yaml.`,
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "check that the delete would be accepted without deleting anything")
 	return cmd
+}
+
+// exceptionOf asks the API for the exception of the service name.
+func (f *Factory) exceptionOf(cmd *cobra.Command, name string) (*connect.Response[forgev1.ListExceptionsResponse], error) {
+	ctx, cancel := f.withTimeout(cmd.Context())
+	defer cancel()
+	c, err := f.Client(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	return c.Approvals.ListExceptions(ctx, connect.NewRequest(&forgev1.ListExceptionsRequest{Service: name}))
 }

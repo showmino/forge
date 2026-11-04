@@ -425,6 +425,14 @@ var auditActions = map[string]auditAction{
 	forgev1connect.ApprovalServiceClaimApprovalProcedure: {"approval.claim", func(m any) (string, string, map[string]string) {
 		return "", m.(*forgev1.ClaimApprovalRequest).GetName(), nil
 	}},
+	forgev1connect.ApprovalServiceRequestExceptionProcedure: {"approval.exception.request", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.RequestExceptionRequest)
+		return serviceName(r.GetService()), "", details("reason", r.GetReason())
+	}},
+	forgev1connect.ApprovalServiceRevokeExceptionProcedure: {"approval.exception.revoke", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.RevokeExceptionRequest)
+		return serviceName(r.GetService()), "", details("reason", r.GetReason())
+	}},
 	forgev1connect.DeployServiceStartDeployProcedure: {"deploy.start", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.StartDeployRequest)
 		s := serviceName(r.GetService())
@@ -473,6 +481,7 @@ var auditActions = map[string]auditAction{
 var auditReads = []string{
 	forgev1connect.ApprovalServiceGetApprovalProcedure,
 	forgev1connect.ApprovalServiceListApprovalsProcedure,
+	forgev1connect.ApprovalServiceListExceptionsProcedure,
 	forgev1connect.ServiceCatalogServiceListServicesProcedure,
 	forgev1connect.ServiceCatalogServiceGetServiceProcedure,
 	forgev1connect.AuthServiceGetServerInfoProcedure,

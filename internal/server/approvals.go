@@ -44,8 +44,10 @@ type ApprovalOptions struct {
 	// asking commit cannot be checked against its branch.
 	Dispatch Dispatcher
 	Org      string
+	// Exceptions let a team of one approve its own runs; nil: no exceptions.
+	Exceptions *ExceptionOptions
 	// SelfApproval reports whether the team of the service may approve its
-	// own runs (the exception); nil: never.
+	// own runs; nil: the exception decides (never without Exceptions).
 	SelfApproval func(ctx context.Context, service string) (bool, error)
 	Now          func() time.Time
 	Log          *slog.Logger
@@ -67,7 +69,14 @@ func NewApprovals(o ApprovalOptions) *Approvals {
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Approvals{o: o}
+	if o.Exceptions != nil && o.Exceptions.Branch == "" {
+		o.Exceptions.Branch = "main"
+	}
+	a := &Approvals{o: o}
+	if a.o.SelfApproval == nil && o.Exceptions != nil {
+		a.o.SelfApproval = a.selfApproval
+	}
+	return a
 }
 
 // ready reports whether this API has approvals.

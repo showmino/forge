@@ -85,6 +85,13 @@ type approvalEnv struct {
 // platform without a GitHub user; ci-* are CI tokens.
 func newApprovalEnv(t *testing.T, noApprovals bool) *approvalEnv {
 	t.Helper()
+	return newApprovalEnvWith(t, noApprovals, nil)
+}
+
+// newApprovalEnvWith is newApprovalEnv with the approvals' options changed by
+// tweak when it is set.
+func newApprovalEnvWith(t *testing.T, noApprovals bool, tweak func(*ApprovalOptions)) *approvalEnv {
+	t.Helper()
 	cat := NewCatalog(nil)
 	for _, s := range []*forgev1.Service{
 		{OwnerTeam: "platform", RepoUrl: "https://github.com/showmino/infra-net", Infrastructure: &forgev1.InfrastructureRepo{Tool: "opentofu", Target: "azure", Environments: []string{"production"}}},
@@ -108,14 +115,18 @@ targets: [{name: azure, environments: {production: {secret: s}}}]
 	e := &approvalEnv{dispatch: &fakeDispatch{}, self: map[string]bool{}}
 	var aps *Approvals
 	if !noApprovals {
-		aps = NewApprovals(ApprovalOptions{
+		o := ApprovalOptions{
 			Store: store.NewMemory(), Catalog: cat, Infra: cfg, Dispatch: e.dispatch, Org: "showmino",
 			SelfApproval: func(_ context.Context, svc string) (bool, error) {
 				e.mu.Lock()
 				defer e.mu.Unlock()
 				return e.self[svc], nil
 			},
-		})
+		}
+		if tweak != nil {
+			tweak(&o)
+		}
+		aps = NewApprovals(o)
 	}
 	ci := func(repo, sha, actor, wf string, run int64, event string) *Principal {
 		return &Principal{Subject: "github:showmino/" + repo, Permissions: []string{PermDeploy(repo, "staging")},

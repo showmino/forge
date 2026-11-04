@@ -21,6 +21,8 @@ var ErrBranchExists = errors.New("the branch already exists")
 type Proposal struct {
 	Branch, Title, Body, Message string
 	Files                        []File
+	// Remove are paths the pull request deletes; each must exist.
+	Remove []string
 	// Fresh refuses a branch that exists, even with an open pull request,
 	// which ProposeFiles otherwise takes as its own earlier try: for a
 	// branch anyone with push could have made, such as forge/connect.
@@ -70,6 +72,12 @@ func (c *Client) ProposeFiles(ctx context.Context, owner, repo string, p Proposa
 			e["sha"] = blob.SHA
 		}
 		entries = append(entries, e)
+	}
+	for _, path := range p.Remove {
+		if _, err := c.FileAt(ctx, owner, repo, path, head); err != nil {
+			return "", fmt.Errorf("remove %s in %s/%s: %w", path, owner, repo, err)
+		}
+		entries = append(entries, map[string]any{"path": path, "mode": "100644", "type": "blob", "sha": nil})
 	}
 	var newTree, commit struct {
 		SHA string `json:"sha"`

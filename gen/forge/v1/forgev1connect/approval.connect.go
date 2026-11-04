@@ -51,6 +51,15 @@ const (
 	// ApprovalServiceClaimApprovalProcedure is the fully-qualified name of the ApprovalService's
 	// ClaimApproval RPC.
 	ApprovalServiceClaimApprovalProcedure = "/forge.v1.ApprovalService/ClaimApproval"
+	// ApprovalServiceRequestExceptionProcedure is the fully-qualified name of the ApprovalService's
+	// RequestException RPC.
+	ApprovalServiceRequestExceptionProcedure = "/forge.v1.ApprovalService/RequestException"
+	// ApprovalServiceRevokeExceptionProcedure is the fully-qualified name of the ApprovalService's
+	// RevokeException RPC.
+	ApprovalServiceRevokeExceptionProcedure = "/forge.v1.ApprovalService/RevokeException"
+	// ApprovalServiceListExceptionsProcedure is the fully-qualified name of the ApprovalService's
+	// ListExceptions RPC.
+	ApprovalServiceListExceptionsProcedure = "/forge.v1.ApprovalService/ListExceptions"
 )
 
 // ApprovalServiceClient is a client for the forge.v1.ApprovalService service.
@@ -76,6 +85,17 @@ type ApprovalServiceClient interface {
 	// It returns the commit to deploy. Only a CI token from the shared
 	// workflow may call it, once.
 	ClaimApproval(context.Context, *connect.Request[v1.ClaimApprovalRequest]) (*connect.Response[v1.ClaimApprovalResponse], error)
+	// RequestException asks the platform team to let an infrastructure repo's
+	// team approve its own production runs, for a team of one: it opens a pull
+	// request in the deploy repo adding exceptions/{service}.yaml. The
+	// exception holds only once that pull request is merged with an approval
+	// by a member of an admin team; Forge checks that on GitHub.
+	RequestException(context.Context, *connect.Request[v1.RequestExceptionRequest]) (*connect.Response[v1.RequestExceptionResponse], error)
+	// RevokeException opens the pull request that removes the exception.
+	RevokeException(context.Context, *connect.Request[v1.RevokeExceptionRequest]) (*connect.Response[v1.RevokeExceptionResponse], error)
+	// ListExceptions returns the exceptions in the deploy repo, each with
+	// whether it holds.
+	ListExceptions(context.Context, *connect.Request[v1.ListExceptionsRequest]) (*connect.Response[v1.ListExceptionsResponse], error)
 }
 
 // NewApprovalServiceClient constructs a client for the forge.v1.ApprovalService service. By
@@ -127,17 +147,39 @@ func NewApprovalServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(approvalServiceMethods.ByName("ClaimApproval")),
 			connect.WithClientOptions(opts...),
 		),
+		requestException: connect.NewClient[v1.RequestExceptionRequest, v1.RequestExceptionResponse](
+			httpClient,
+			baseURL+ApprovalServiceRequestExceptionProcedure,
+			connect.WithSchema(approvalServiceMethods.ByName("RequestException")),
+			connect.WithClientOptions(opts...),
+		),
+		revokeException: connect.NewClient[v1.RevokeExceptionRequest, v1.RevokeExceptionResponse](
+			httpClient,
+			baseURL+ApprovalServiceRevokeExceptionProcedure,
+			connect.WithSchema(approvalServiceMethods.ByName("RevokeException")),
+			connect.WithClientOptions(opts...),
+		),
+		listExceptions: connect.NewClient[v1.ListExceptionsRequest, v1.ListExceptionsResponse](
+			httpClient,
+			baseURL+ApprovalServiceListExceptionsProcedure,
+			connect.WithSchema(approvalServiceMethods.ByName("ListExceptions")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // approvalServiceClient implements ApprovalServiceClient.
 type approvalServiceClient struct {
-	requestApproval *connect.Client[v1.RequestApprovalRequest, v1.RequestApprovalResponse]
-	getApproval     *connect.Client[v1.GetApprovalRequest, v1.GetApprovalResponse]
-	listApprovals   *connect.Client[v1.ListApprovalsRequest, v1.ListApprovalsResponse]
-	approveApproval *connect.Client[v1.ApproveApprovalRequest, v1.ApproveApprovalResponse]
-	rejectApproval  *connect.Client[v1.RejectApprovalRequest, v1.RejectApprovalResponse]
-	claimApproval   *connect.Client[v1.ClaimApprovalRequest, v1.ClaimApprovalResponse]
+	requestApproval  *connect.Client[v1.RequestApprovalRequest, v1.RequestApprovalResponse]
+	getApproval      *connect.Client[v1.GetApprovalRequest, v1.GetApprovalResponse]
+	listApprovals    *connect.Client[v1.ListApprovalsRequest, v1.ListApprovalsResponse]
+	approveApproval  *connect.Client[v1.ApproveApprovalRequest, v1.ApproveApprovalResponse]
+	rejectApproval   *connect.Client[v1.RejectApprovalRequest, v1.RejectApprovalResponse]
+	claimApproval    *connect.Client[v1.ClaimApprovalRequest, v1.ClaimApprovalResponse]
+	requestException *connect.Client[v1.RequestExceptionRequest, v1.RequestExceptionResponse]
+	revokeException  *connect.Client[v1.RevokeExceptionRequest, v1.RevokeExceptionResponse]
+	listExceptions   *connect.Client[v1.ListExceptionsRequest, v1.ListExceptionsResponse]
 }
 
 // RequestApproval calls forge.v1.ApprovalService.RequestApproval.
@@ -170,6 +212,21 @@ func (c *approvalServiceClient) ClaimApproval(ctx context.Context, req *connect.
 	return c.claimApproval.CallUnary(ctx, req)
 }
 
+// RequestException calls forge.v1.ApprovalService.RequestException.
+func (c *approvalServiceClient) RequestException(ctx context.Context, req *connect.Request[v1.RequestExceptionRequest]) (*connect.Response[v1.RequestExceptionResponse], error) {
+	return c.requestException.CallUnary(ctx, req)
+}
+
+// RevokeException calls forge.v1.ApprovalService.RevokeException.
+func (c *approvalServiceClient) RevokeException(ctx context.Context, req *connect.Request[v1.RevokeExceptionRequest]) (*connect.Response[v1.RevokeExceptionResponse], error) {
+	return c.revokeException.CallUnary(ctx, req)
+}
+
+// ListExceptions calls forge.v1.ApprovalService.ListExceptions.
+func (c *approvalServiceClient) ListExceptions(ctx context.Context, req *connect.Request[v1.ListExceptionsRequest]) (*connect.Response[v1.ListExceptionsResponse], error) {
+	return c.listExceptions.CallUnary(ctx, req)
+}
+
 // ApprovalServiceHandler is an implementation of the forge.v1.ApprovalService service.
 type ApprovalServiceHandler interface {
 	// RequestApproval asks for production's approval of the calling job's
@@ -193,6 +250,17 @@ type ApprovalServiceHandler interface {
 	// It returns the commit to deploy. Only a CI token from the shared
 	// workflow may call it, once.
 	ClaimApproval(context.Context, *connect.Request[v1.ClaimApprovalRequest]) (*connect.Response[v1.ClaimApprovalResponse], error)
+	// RequestException asks the platform team to let an infrastructure repo's
+	// team approve its own production runs, for a team of one: it opens a pull
+	// request in the deploy repo adding exceptions/{service}.yaml. The
+	// exception holds only once that pull request is merged with an approval
+	// by a member of an admin team; Forge checks that on GitHub.
+	RequestException(context.Context, *connect.Request[v1.RequestExceptionRequest]) (*connect.Response[v1.RequestExceptionResponse], error)
+	// RevokeException opens the pull request that removes the exception.
+	RevokeException(context.Context, *connect.Request[v1.RevokeExceptionRequest]) (*connect.Response[v1.RevokeExceptionResponse], error)
+	// ListExceptions returns the exceptions in the deploy repo, each with
+	// whether it holds.
+	ListExceptions(context.Context, *connect.Request[v1.ListExceptionsRequest]) (*connect.Response[v1.ListExceptionsResponse], error)
 }
 
 // NewApprovalServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -240,6 +308,25 @@ func NewApprovalServiceHandler(svc ApprovalServiceHandler, opts ...connect.Handl
 		connect.WithSchema(approvalServiceMethods.ByName("ClaimApproval")),
 		connect.WithHandlerOptions(opts...),
 	)
+	approvalServiceRequestExceptionHandler := connect.NewUnaryHandler(
+		ApprovalServiceRequestExceptionProcedure,
+		svc.RequestException,
+		connect.WithSchema(approvalServiceMethods.ByName("RequestException")),
+		connect.WithHandlerOptions(opts...),
+	)
+	approvalServiceRevokeExceptionHandler := connect.NewUnaryHandler(
+		ApprovalServiceRevokeExceptionProcedure,
+		svc.RevokeException,
+		connect.WithSchema(approvalServiceMethods.ByName("RevokeException")),
+		connect.WithHandlerOptions(opts...),
+	)
+	approvalServiceListExceptionsHandler := connect.NewUnaryHandler(
+		ApprovalServiceListExceptionsProcedure,
+		svc.ListExceptions,
+		connect.WithSchema(approvalServiceMethods.ByName("ListExceptions")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.ApprovalService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ApprovalServiceRequestApprovalProcedure:
@@ -254,6 +341,12 @@ func NewApprovalServiceHandler(svc ApprovalServiceHandler, opts ...connect.Handl
 			approvalServiceRejectApprovalHandler.ServeHTTP(w, r)
 		case ApprovalServiceClaimApprovalProcedure:
 			approvalServiceClaimApprovalHandler.ServeHTTP(w, r)
+		case ApprovalServiceRequestExceptionProcedure:
+			approvalServiceRequestExceptionHandler.ServeHTTP(w, r)
+		case ApprovalServiceRevokeExceptionProcedure:
+			approvalServiceRevokeExceptionHandler.ServeHTTP(w, r)
+		case ApprovalServiceListExceptionsProcedure:
+			approvalServiceListExceptionsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -285,4 +378,16 @@ func (UnimplementedApprovalServiceHandler) RejectApproval(context.Context, *conn
 
 func (UnimplementedApprovalServiceHandler) ClaimApproval(context.Context, *connect.Request[v1.ClaimApprovalRequest]) (*connect.Response[v1.ClaimApprovalResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApprovalService.ClaimApproval is not implemented"))
+}
+
+func (UnimplementedApprovalServiceHandler) RequestException(context.Context, *connect.Request[v1.RequestExceptionRequest]) (*connect.Response[v1.RequestExceptionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApprovalService.RequestException is not implemented"))
+}
+
+func (UnimplementedApprovalServiceHandler) RevokeException(context.Context, *connect.Request[v1.RevokeExceptionRequest]) (*connect.Response[v1.RevokeExceptionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApprovalService.RevokeException is not implemented"))
+}
+
+func (UnimplementedApprovalServiceHandler) ListExceptions(context.Context, *connect.Request[v1.ListExceptionsRequest]) (*connect.Response[v1.ListExceptionsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApprovalService.ListExceptions is not implemented"))
 }
