@@ -35,6 +35,70 @@ service ApprovalService {
   // It returns the commit to deploy. Only a CI token from the shared
   // workflow may call it, once.
   rpc ClaimApproval(ClaimApprovalRequest) returns (ClaimApprovalResponse) {}
+
+  // RequestException asks the platform team to let an infrastructure repo's
+  // team approve its own production runs, for a team of one: it opens a pull
+  // request in the deploy repo adding exceptions/{service}.yaml. The
+  // exception holds only once that pull request is merged with an approval
+  // by a member of an admin team; Forge checks that on GitHub.
+  rpc RequestException(RequestExceptionRequest) returns (RequestExceptionResponse) {}
+  // RevokeException opens the pull request that removes the exception.
+  rpc RevokeException(RevokeExceptionRequest) returns (RevokeExceptionResponse) {}
+  // ListExceptions returns the exceptions in the deploy repo, each with
+  // whether it holds.
+  rpc ListExceptions(ListExceptionsRequest) returns (ListExceptionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Exception lets the team of an infrastructure repo approve its own
+// production runs.
+message Exception {
+  // "services/{service}".
+  string service = 1;
+  string team = 2;
+  string reason = 3;
+  // Who asked for it (their GitHub user), and when.
+  string requested_by = 4;
+  google.protobuf.Timestamp request_time = 5;
+  // Whether it holds: merged with an admin team member's approval.
+  bool granted = 6;
+  // Who approved its pull request, and when that was merged.
+  string granted_by = 7;
+  google.protobuf.Timestamp grant_time = 8;
+  string pull_request_url = 9;
+  // Why it does not hold, when it does not.
+  string problem = 10;
+}
+
+message RequestExceptionRequest {
+  // "services/{service}".
+  string service = 1;
+  // Why the team needs it, for the platform team; required.
+  string reason = 2;
+}
+
+message RequestExceptionResponse {
+  // The pull request the platform team reviews.
+  string pull_request_url = 1;
+}
+
+message RevokeExceptionRequest {
+  string service = 1;
+  string reason = 2;
+}
+
+message RevokeExceptionResponse {
+  string pull_request_url = 1;
+}
+
+message ListExceptionsRequest {
+  // "services/{service}"; empty for every service.
+  string service = 1;
+}
+
+message ListExceptionsResponse {
+  repeated Exception exceptions = 1;
 }
 
 // Approval is one production run of an infrastructure repo, waiting for or

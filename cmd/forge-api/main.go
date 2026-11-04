@@ -271,9 +271,22 @@ func run() error {
 		if gh, ok := repoHost(app).(server.Dispatcher); ok {
 			dispatch = gh
 		}
-		approvals = server.NewApprovals(server.ApprovalOptions{
-			Store: st, Catalog: catalog, Infra: infra, Dispatch: dispatch, Org: *githubOrg, Log: log,
-		})
+		o := server.ApprovalOptions{Store: st, Catalog: catalog, Infra: infra, Dispatch: dispatch, Org: *githubOrg, Log: log}
+		if gh, ok := repoHost(app).(*github.Client); ok && *deployRepo != "" {
+			owner, name, _ := strings.Cut(*deployRepo, "/")
+			// The admin groups that are teams of the org grant exceptions.
+			var teams []string
+			for _, g := range groups {
+				if slug, ok := strings.CutPrefix(g, *githubOrg+":"); ok && slug != "" {
+					teams = append(teams, slug)
+				}
+			}
+			o.Exceptions = &server.ExceptionOptions{
+				Repo: &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"}, Owner: owner, Name: name,
+				GitHub: gh, AdminTeams: teams,
+			}
+		}
+		approvals = server.NewApprovals(o)
 	}
 	h, err := server.New(server.Options{
 		Catalog:          catalog,

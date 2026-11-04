@@ -1,0 +1,191 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"connectrpc.com/connect"
+
+	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/internal/envtest"
+	"github.com/showmino/forge/internal/github"
+)
+
+// fakeExceptionGitHub is the deploy repo's pull requests: pulls by commit,
+// reviews by pull request, and the admin team's members.
+type fakeExceptionGitHub struct {
+	repo      *envtest.Repo
+	mu        sync.Mutex
+	proposals []github.Proposal
+	pulls     map[string][]github.Pull
+	reviews   map[int][]github.Review
+	admins    map[string]bool
+}
+
+func (f *fakeExceptionGitHub) ProposeFiles(ctx context.Context, owner, repo string, p github.Proposal) (string, error) {
+	if owner != "showmino" || repo != "forge-deploys" {
+		return "", errors.New("proposed outside the deploy repo")
+	}
+	for _, file := range p.Files {
+		if _, err := f.repo.Read(ctx, file.Path, ""); err == nil {
+			return "", github.ErrFileExists
+		}
+	}
+	for _, path := range p.Remove {
+		if _, err := f.repo.Read(ctx, path, ""); err != nil {
+			return "", err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.proposals = append(f.proposals, p)
+	return "https://github.com/showmino/forge-deploys/pull/" + p.Branch, nil
+}
+
+func (f *fakeExceptionGitHub) PullsForCommit(_ context.Context, _, _, sha string) ([]github.Pull, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pulls[sha], nil
+}
+
+func (f *fakeExceptionGitHub) PullReviews(_ context.Context, _, _ string, n int) ([]github.Review, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reviews[n], nil
+}
+
+func (f *fakeExceptionGitHub) TeamMember(_ context.Context, org, slug, login string) (bool, error) {
+	return org == "showmino" && slug == "admins" && f.admins[login], nil
+}
+
+// merge writes infra-net's exception as pull request 7 would, its last
+// commit h7 reviewed as reviews say.
+func (f *fakeExceptionGitHub) merge(reviews ...github.Review) {
+	sha := f.repo.Push("exceptions/infra-net.yaml", []byte("service: infra-net\nteam: platform\nreason: alone\nrequestedBy: ana\nrequestedAt: 2026-11-03T09:00:00Z\n"), "Merge pull request #7")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pulls[sha] = []github.Pull{{Number: 7, HTMLURL: "https://github.com/showmino/forge-deploys/pull/7", Merged: time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC), Base: "main", HeadSHA: "h7"}}
+	f.reviews[7] = reviews
+}
+
+func newExceptionEnv(t *testing.T) (*approvalEnv, *fakeExceptionGitHub) {
+	t.Helper()
+	gh := &fakeExceptionGitHub{repo: &envtest.Repo{}, pulls: map[string][]github.Pull{}, reviews: map[int][]github.Review{}, admins: map[string]bool{"dee": true}}
+	e := newApprovalEnvWith(t, false, func(o *ApprovalOptions) {
+		o.SelfApproval = nil // the exception decides
+		o.Exceptions = &ExceptionOptions{Repo: gh.repo, Owner: "showmino", Name: "forge-deploys", GitHub: gh, AdminTeams: []string{"admins"}}
+	})
+	return e, gh
+}
+
+func (e *approvalEnv) exceptions(t *testing.T) []*forgev1.Exception {
+	t.Helper()
+	resp, err := e.client.ListExceptions(context.Background(), as("cy", &forgev1.ListExceptionsRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.Msg.GetExceptions()
+}
+
+func TestExceptionRequest(t *testing.T) {
+	t.Parallel()
+	e, gh := newExceptionEnv(t)
+	ctx := context.Background()
+	resp, err := e.client.RequestException(ctx, as("ana", &forgev1.RequestExceptionRequest{Service: "services/infra-net", Reason: "I am the only one on the team"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(resp.Msg.GetPullRequestUrl(), "/pull/forge/exception-infra-net") || len(gh.proposals) != 1 {
+		t.Fatalf("request: %v %v", resp.Msg, gh.proposals)
+	}
+	p := gh.proposals[0]
+	if len(p.Files) != 1 || p.Files[0].Path != "exceptions/infra-net.yaml" || !strings.Contains(string(p.Files[0].Content), "reason: I am the only one on the team") ||
+		!strings.Contains(string(p.Files[0].Content), "requestedBy: ana") || !strings.Contains(p.Body, "admins") {
+		t.Errorf("proposal %+v", p)
+	}
+	// Forge itself never writes there: the request is a pull request only.
+	if _, err := gh.repo.Read(ctx, "exceptions/infra-net.yaml", ""); err == nil {
+		t.Error("the exception was written to the deploy repo")
+	}
+
+	for _, tc := range []struct {
+		token string
+		req   *forgev1.RequestExceptionRequest
+		code  connect.Code
+		msg   string
+	}{
+		{"ana", &forgev1.RequestExceptionRequest{Service: "services/infra-net"}, connect.CodeInvalidArgument, "reason is required"},
+		{"cy", &forgev1.RequestExceptionRequest{Service: "services/infra-net", Reason: "x"}, connect.CodePermissionDenied, ""},
+		{"ana", &forgev1.RequestExceptionRequest{Service: "services/infra-dev", Reason: "x"}, connect.CodeFailedPrecondition, "not an infrastructure repo with production"},
+		{"ci", &forgev1.RequestExceptionRequest{Service: "services/infra-net", Reason: "x"}, connect.CodePermissionDenied, ""},
+	} {
+		_, err := e.client.RequestException(ctx, as(tc.token, tc.req))
+		wantCode(t, tc.token+" "+tc.req.GetService(), err, tc.code, tc.msg)
+	}
+
+	gh.merge(github.Review{User: "dee", State: "APPROVED", CommitID: "h7"})
+	_, err = e.client.RequestException(ctx, as("ana", &forgev1.RequestExceptionRequest{Service: "services/infra-net", Reason: "again"}))
+	wantCode(t, "again", err, connect.CodeAlreadyExists, "has an exception already")
+
+	// Revoke: a pull request that removes it.
+	rv, err := e.client.RevokeException(ctx, as("bo", &forgev1.RevokeExceptionRequest{Service: "services/infra-net", Reason: "Bo joined"}))
+	if err != nil || !strings.HasSuffix(rv.Msg.GetPullRequestUrl(), "/pull/forge/revoke-exception-infra-net") {
+		t.Fatalf("revoke: %v %v", rv, err)
+	}
+	if last := gh.proposals[len(gh.proposals)-1]; len(last.Remove) != 1 || last.Remove[0] != "exceptions/infra-net.yaml" || len(last.Files) != 0 {
+		t.Errorf("revoke proposal %+v", last)
+	}
+}
+
+// The exception holds only when merged through a pull request whose last
+// commit an admin team member approved; then the team approves its own run.
+func TestExceptionGrant(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		reviews []github.Review
+		direct  bool
+		granted bool
+		problem string
+	}{
+		{name: "an admin approved", reviews: []github.Review{{User: "bo", State: "COMMENTED", CommitID: "h7"}, {User: "dee", State: "APPROVED", CommitID: "h7"}}, granted: true},
+		{name: "a teammate approved", reviews: []github.Review{{User: "bo", State: "APPROVED", CommitID: "h7"}}, problem: "merged without an approval of its last commit by a member of admins"},
+		{name: "an admin approved an older commit", reviews: []github.Review{{User: "dee", State: "APPROVED", CommitID: "h6"}}, problem: "without an approval"},
+		{name: "no review", problem: "without an approval"},
+		{name: "committed without a pull request", direct: true, problem: "was not merged through a pull request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e, gh := newExceptionEnv(t)
+			if tc.direct {
+				gh.repo.Push("exceptions/infra-net.yaml", []byte("service: infra-net\nteam: platform\n"), "pushed")
+			} else {
+				gh.merge(tc.reviews...)
+			}
+			exs := e.exceptions(t)
+			if len(exs) != 1 || exs[0].GetService() != "services/infra-net" || exs[0].GetGranted() != tc.granted || !strings.Contains(exs[0].GetProblem(), tc.problem) {
+				t.Fatalf("exceptions %v", exs)
+			}
+			ap := e.request(t, "ci")
+			got, err := e.approve("ana", ap.GetName())
+			if tc.granted {
+				if err != nil || got.GetState() != forgev1.Approval_STATE_APPROVED || exs[0].GetGrantedBy() != "dee" || exs[0].GetPullRequestUrl() == "" {
+					t.Fatalf("self-approve with the exception: %v %v %v", got, err, exs[0])
+				}
+				return
+			}
+			wantCode(t, "self-approve", err, connect.CodePermissionDenied, "you started this run")
+		})
+	}
+}
+
+func TestExceptionsNotConfigured(t *testing.T) {
+	t.Parallel()
+	e := newApprovalEnv(t, false)
+	_, err := e.client.ListExceptions(context.Background(), as("cy", &forgev1.ListExceptionsRequest{}))
+	wantCode(t, "list", err, connect.CodeFailedPrecondition, "exceptions need the deploy repo")
+}

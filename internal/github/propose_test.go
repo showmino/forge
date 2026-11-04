@@ -161,3 +161,23 @@ func TestProposeFiles(t *testing.T) {
 		t.Error("the branch of a refused pull request is left behind")
 	}
 }
+
+// Remove deletes files in the pull request: each must be there.
+func TestProposeRemove(t *testing.T) {
+	t.Parallel()
+	f, c := newFakeLZ(t)
+	p := Proposal{Branch: "forge/rm", Title: "Remove", Message: "Remove", Remove: []string{"zones/taken.txt"}}
+	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	entries := f.tree["tree"].([]any)
+	f.mu.Unlock()
+	if e := entries[0].(map[string]any); len(entries) != 1 || e["path"] != "zones/taken.txt" || e["sha"] != nil {
+		t.Errorf("tree %v", entries)
+	}
+	p.Branch, p.Remove = "forge/rm2", []string{"zones/missing.txt"}
+	if _, err := c.ProposeFiles(context.Background(), "showmino", "lz", p); !errors.Is(err, ErrNotFound) {
+		t.Errorf("a missing file: %v", err)
+	}
+}

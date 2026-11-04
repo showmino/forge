@@ -415,7 +415,16 @@ approval list --state pending`, `forge approval approve <id>`, the action
 `approval.decide`), and Forge starts the repo's `deploy.yml`
 (`infrastructure.repoWorkflow`) with the input `approval`; that run's
 `forge approval claim <id>` prints the commit to deploy, once. A newer
-commit's request supersedes a waiting one. See
+commit's request supersedes a waiting one. A team of one asks the platform
+team for an exception with `forge approval exception request <name> --reason
+...`: a pull request in the deploy repo that adds `exceptions/<name>.yaml`
+(action `approval.exception`). It holds only once that file's last change
+was merged through a pull request whose last commit a member of an admin team
+(the `--admin-groups` that are `<org>:<team>`) approved; forge-api checks
+that on GitHub, so the file alone is not enough and forge-api never writes
+there. Then the team may approve its own runs. `forge approval exception
+list` shows each and whether it holds; `revoke` opens the pull request that
+removes it. See
 `docs/specs/2026-11-03-phase-12-infrastructure-repos-design.md`.
 `forge service connect github.com/<org>/<repo> --team <team>` connects an
 existing repo of the organization that has a Dockerfile, or Go, Node or

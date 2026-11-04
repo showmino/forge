@@ -53,6 +53,7 @@ const (
 	ActResourceApplyProduction = "resource.apply.production"
 	ActClusterRead             = "cluster.read"
 	ActApprovalDecide          = "approval.decide"
+	ActApprovalException       = "approval.exception"
 )
 
 // actionRoles is the lowest role that may do each action. An action that is
@@ -77,6 +78,7 @@ var actionRoles = map[string]role{
 	ActResourceApplyProduction: roleAdmin,
 	ActClusterRead:             roleAdmin,
 	ActApprovalDecide:          roleTeam,
+	ActApprovalException:       roleTeam,
 }
 
 // Actions lists every action, sorted.

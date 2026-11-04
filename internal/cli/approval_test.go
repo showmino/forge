@@ -5,8 +5,11 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/internal/envtest"
+	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/server"
 	"github.com/showmino/forge/internal/store"
@@ -33,6 +36,12 @@ func (noDispatch) ResolveRef(context.Context, string, string, string) (string, e
 // (cy, of billing), t-mate (dee, of billing), t-reader.
 func serveApprovals(t *testing.T, h *harness) {
 	t.Helper()
+	serveApprovalsWith(t, h, nil)
+}
+
+// serveApprovalsWith is serveApprovals with exceptions when ex is set.
+func serveApprovalsWith(t *testing.T, h *harness, ex *server.ExceptionOptions) {
+	t.Helper()
 	st := store.NewMemory()
 	ctx := context.Background()
 	if err := st.Write(ctx, func(tx store.Tx) error {
@@ -47,7 +56,7 @@ func serveApprovals(t *testing.T, h *harness) {
 		t.Fatal(err)
 	}
 	h.catalog = server.NewCatalogWithStore(st, nil)
-	h.approvals = server.NewApprovals(server.ApprovalOptions{Store: st, Catalog: h.catalog, Infra: cfg, Org: "showmino", Dispatch: noDispatch{}})
+	h.approvals = server.NewApprovals(server.ApprovalOptions{Store: st, Catalog: h.catalog, Infra: cfg, Org: "showmino", Dispatch: noDispatch{}, Exceptions: ex})
 	ci := func(event string) server.Principal {
 		return server.Principal{Subject: "github:showmino/infra-net", Workload: &server.Workload{
 			Repository: "showmino/infra-net", Service: "infra-net", SHA: testInfraSHA, Actor: "cy", RunID: 7, JobWorkflowRef: testSharedWorkflow, EventName: event}}
@@ -109,5 +118,57 @@ func TestApprovalCommands(t *testing.T) {
 	}
 	if r = h.run("approval", "get", "nope"); r.code != 2 {
 		t.Errorf("bad name: %s", r)
+	}
+}
+
+// exceptionGitHub opens every pull request, and plays #7 as merged with
+// dee's approval of its last commit.
+type exceptionGitHub struct{ repo *envtest.Repo }
+
+func (g exceptionGitHub) ProposeFiles(context.Context, string, string, github.Proposal) (string, error) {
+	return "https://github.com/showmino/forge-deploys/pull/7", nil
+}
+func (g exceptionGitHub) PullsForCommit(context.Context, string, string, string) ([]github.Pull, error) {
+	return []github.Pull{{Number: 7, HTMLURL: "https://github.com/showmino/forge-deploys/pull/7", Merged: time.Now(), Base: "main", HeadSHA: "h7"}}, nil
+}
+func (g exceptionGitHub) PullReviews(context.Context, string, string, int) ([]github.Review, error) {
+	return []github.Review{{User: "dee", State: "APPROVED", CommitID: "h7"}}, nil
+}
+func (g exceptionGitHub) TeamMember(_ context.Context, _, slug, login string) (bool, error) {
+	return slug == "admins" && login == "dee", nil
+}
+
+func TestApprovalExceptionCommands(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	repo := &envtest.Repo{}
+	serveApprovalsWith(t, h, &server.ExceptionOptions{Repo: repo, Owner: "showmino", Name: "forge-deploys", GitHub: exceptionGitHub{repo}, AdminTeams: []string{"admins"}})
+
+	h.env["FORGE_TOKEN"] = teamToken
+	if r := h.run("approval", "exception", "request", "infra-net"); r.code != 2 || !strings.Contains(r.err, "--reason is required") {
+		t.Errorf("no reason: %s", r)
+	}
+	r := h.run("approval", "exception", "request", "infra-net", "--reason", "I am alone")
+	if r.code != 0 || !strings.Contains(r.out, "/pull/7") {
+		t.Fatalf("request: %s", r)
+	}
+	if r = h.run("approval", "exception", "list"); r.code != 0 || !strings.Contains(r.err, "No exceptions") {
+		t.Errorf("list before the merge: %s", r)
+	}
+	repo.Push("exceptions/infra-net.yaml", []byte("service: infra-net\nteam: billing\nreason: I am alone\nrequestedBy: cy\n"), "Merge pull request #7")
+	r = h.run("approval", "exception", "list")
+	if r.code != 0 || !strings.Contains(r.out, "infra-net") || !strings.Contains(r.out, "yes") || !strings.Contains(r.out, "dee") {
+		t.Errorf("list: %s", r)
+	}
+	r = h.run("service", "get", "infra-net")
+	if r.code != 0 || !strings.Contains(r.out, "the team approves its own runs (granted by dee)") {
+		t.Errorf("service get: %s", r)
+	}
+	// With it, the one who started the run approves it.
+	h.env["FORGE_TOKEN"] = "t-ci"
+	id := strings.TrimPrefix(strings.TrimSpace(h.run("approval", "request", "-o", "name").out), "approvals/")
+	h.env["FORGE_TOKEN"] = teamToken
+	if r = h.run("approval", "approve", id); !strings.Contains(r.err, "could not be started") {
+		t.Errorf("self-approve with the exception: %s", r)
 	}
 }

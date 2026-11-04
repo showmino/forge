@@ -259,10 +259,12 @@ repo's team approve its own production runs:
 - **Grant:** only the platform team, the install's admin groups
   (`--admin-groups`), can approve it. The operator gives the deploy repo
   `CODEOWNERS` for `exceptions/` and a ruleset that requires a code owner's
-  review. forge-api never commits to `exceptions/` itself (a test says so),
-  and honours a file only if it reached `main` through a merged pull request
-  approved by a member of an admin group; it checks that with the GitHub API,
-  so the file alone is not enough.
+  review. forge-api never commits to `exceptions/` itself, and honours a
+  file only if its last change on `main` belongs to a merged pull request
+  whose last commit a member of an admin team approved (the admin groups
+  that are `<org>:<team>`); it checks that with the GitHub API each time a
+  self-approval is asked, so the file alone is not enough, and a commit
+  pushed past the ruleset does not count.
 - **Revoke:** `forge approval exception revoke <repo>` opens the pull request
   that removes it; when it merges, the exception ends.
 - `forge approval exception list`, the repo's page and `forge service get`

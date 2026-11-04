@@ -22,7 +22,121 @@ repo's production run, which claims the approval ('forge approval claim')
 before it signs in to the cloud. The person who started the run cannot
 approve it, unless the platform team gave the repo an exception.`
 	cmd.AddCommand(newApprovalListCmd(f), newApprovalGetCmd(f), newApprovalDecideCmd(f, true), newApprovalDecideCmd(f, false),
-		newApprovalRequestCmd(f), newApprovalClaimCmd(f))
+		newApprovalRequestCmd(f), newApprovalClaimCmd(f), newApprovalExceptionCmd(f))
+	return cmd
+}
+
+func newApprovalExceptionCmd(f *Factory) *cobra.Command {
+	cmd := group("exception", "Let a team of one approve its own production runs", "exceptions")
+	cmd.Long = `A team with one member cannot get a second approver. The platform team can
+let such a team approve its own production runs of one infrastructure repo:
+'forge approval exception request' opens a pull request in the deploy repo,
+and the exception holds once it is merged with an approval by a member of an
+admin team (Forge checks that on GitHub, not just the file).`
+	cmd.AddCommand(newExceptionRequestCmd(f, true), newExceptionRequestCmd(f, false), newExceptionListCmd(f))
+	return cmd
+}
+
+// newExceptionRequestCmd is 'request' when request, else 'revoke'.
+func newExceptionRequestCmd(f *Factory, request bool) *cobra.Command {
+	var reason string
+	verb, short, example := "revoke", "Open the pull request that removes an exception", "  forge approval exception revoke infra-network --reason 'Bo joined the team'"
+	if request {
+		verb, short, example = "request", "Ask the platform team for an exception", "  forge approval exception request infra-network --reason 'I am the only one on the team'"
+	}
+	cmd := &cobra.Command{
+		Use:     verb + " <service>",
+		Short:   short,
+		Example: example,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			if request && strings.TrimSpace(reason) == "" {
+				return exitcode.Usagef("--reason is required: say why the team needs to approve its own runs")
+			}
+			svc := "services/" + strings.TrimPrefix(args[0], "services/")
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			var url string
+			if request {
+				resp, err := c.Approvals.RequestException(ctx, connect.NewRequest(&forgev1.RequestExceptionRequest{Service: svc, Reason: reason}))
+				if err != nil {
+					return err
+				}
+				url = resp.Msg.GetPullRequestUrl()
+			} else {
+				resp, err := c.Approvals.RevokeException(ctx, connect.NewRequest(&forgev1.RevokeExceptionRequest{Service: svc, Reason: reason}))
+				if err != nil {
+					return err
+				}
+				url = resp.Msg.GetPullRequestUrl()
+			}
+			if format != output.Table {
+				return output.Print(f.IO.Out, format, output.View{Names: []string{url}, Data: map[string]any{"pullRequestUrl": url}})
+			}
+			_, err = fmt.Fprintf(f.IO.Out, "%s\nThe platform team reviews it; the change holds once it is merged.\n", url)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "why, for the platform team")
+	return cmd
+}
+
+func newExceptionListCmd(f *Factory) *cobra.Command {
+	var service string
+	cmd := &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List the exceptions, and whether each holds",
+		Example: "  forge approval exception list\n  forge approval exception list --service infra-network -o json",
+		Args:    noArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			req := &forgev1.ListExceptionsRequest{}
+			if service != "" {
+				req.Service = "services/" + strings.TrimPrefix(service, "services/")
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.Client(ctx, true)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Approvals.ListExceptions(ctx, connect.NewRequest(req))
+			if err != nil {
+				return err
+			}
+			exs := resp.Msg.GetExceptions()
+			if len(exs) == 0 && format == output.Table {
+				f.infof("No exceptions.")
+				return nil
+			}
+			v := output.View{Headers: []string{"service", "team", "holds", "granted by", "reason"}, Data: resp.Msg}
+			if len(exs) == 0 {
+				v.Data = map[string]any{"exceptions": []any{}}
+			}
+			for _, e := range exs {
+				holds := "yes"
+				if !e.GetGranted() {
+					holds = "no: " + e.GetProblem()
+				}
+				v.Rows = append(v.Rows, []string{strings.TrimPrefix(e.GetService(), "services/"), e.GetTeam(), holds, e.GetGrantedBy(), e.GetReason()})
+				v.Names = append(v.Names, e.GetService())
+			}
+			return output.Print(f.IO.Out, format, v)
+		},
+	}
+	cmd.Flags().StringVar(&service, "service", "", "only this service's exception")
 	return cmd
 }
 
