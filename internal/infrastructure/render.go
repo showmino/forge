@@ -35,9 +35,11 @@ type Record struct {
 // Repo is one infrastructure repo to set up.
 type Repo struct {
 	Org, Name, Team string
-	// OwnerID and RepoID are GitHub's IDs of the organization and the repo;
-	// zero before the repo exists (a dry run).
+	// OwnerID and RepoID are GitHub's IDs of the organization and the repo.
 	OwnerID, RepoID int64
+	// DryRun renders before the repo exists, without IDs: for checking only,
+	// never to be written.
+	DryRun bool
 	// Environments are the chosen environments of the target.
 	Environments []string
 }
@@ -63,6 +65,9 @@ func RecordPath(name string) string { return Folder(name) + "/" + RecordFile }
 func (c *Config) Files(t Target, r Repo) (map[string][]byte, error) {
 	if len(r.Environments) == 0 {
 		return nil, errors.New("choose at least one environment")
+	}
+	if !r.DryRun && (r.OwnerID == 0 || r.RepoID == 0) {
+		return nil, errors.New("the repo's GitHub IDs are unknown: its OIDC subject names them")
 	}
 	rec, err := marshal(Record{Target: t.Name, Team: r.Team, Environments: r.Environments, OwnerID: r.OwnerID, RepoID: r.RepoID})
 	if err != nil {

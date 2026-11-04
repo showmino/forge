@@ -114,7 +114,7 @@ func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateSer
 	if res.Denied() {
 		return nil, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("the target rules refuse it: %s", strings.Join(res.Deny, "; ")))
 	}
-	files, err := c.infra.Files(t, infrastructure.Repo{Org: c.org, Name: req.GetServiceId(), Team: team, Environments: ordered})
+	files, err := c.infra.Files(t, infrastructure.Repo{Org: c.org, Name: req.GetServiceId(), Team: team, Environments: ordered, DryRun: true})
 	if err != nil {
 		return nil, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("target %s: %w", t.Name, err))
 	}
@@ -194,7 +194,12 @@ func (c *creator) awaitInfrastructure(ctx context.Context, id string, p *infraPl
 // readInfrastructure returns the Record of the infrastructure repo id, or
 // nil when the deploy repo has none.
 func (d *Deploys) readInfrastructure(ctx context.Context, id string) (*infrastructure.Record, error) {
-	data, err := d.o.Repo.Read(ctx, infrastructure.RecordPath(id), "")
+	return d.readInfrastructureAt(ctx, id, "")
+}
+
+// readInfrastructureAt is readInfrastructure at the commit ref ("" for the head).
+func (d *Deploys) readInfrastructureAt(ctx context.Context, id, ref string) (*infrastructure.Record, error) {
+	data, err := d.o.Repo.Read(ctx, infrastructure.RecordPath(id), ref)
 	if errors.Is(err, github.ErrNotFound) {
 		return nil, nil
 	}

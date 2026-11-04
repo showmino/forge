@@ -140,8 +140,22 @@ func TestFilesRefuses(t *testing.T) {
 	if _, err := c.Files(tg, Repo{Org: "my-org", Name: "x", Team: "platform"}); err == nil {
 		t.Error("no environments: no error")
 	}
-	if _, err := c.Files(tg, Repo{Org: "my-org", Name: "x", Team: "platform", Environments: []string{"production", "qa"}}); err == nil || !strings.Contains(err.Error(), "has no qa") {
+	if _, err := c.Files(tg, Repo{Org: "my-org", Name: "x", Team: "platform", Environments: []string{"production", "qa"}, DryRun: true}); err == nil || !strings.Contains(err.Error(), "has no qa") {
 		t.Errorf("unknown environment: err = %v", err)
+	}
+}
+
+// Only a dry run renders without GitHub's IDs.
+func TestFilesNeedIDs(t *testing.T) {
+	c := mustParse(t, sample)
+	tg, _ := c.Target("azure")
+	r := Repo{Org: "my-org", Name: "x", Team: "platform", Environments: []string{"production"}}
+	if _, err := c.Files(tg, r); err == nil || !strings.Contains(err.Error(), "IDs are unknown") {
+		t.Errorf("without IDs: %v", err)
+	}
+	r.DryRun = true
+	if _, err := c.Files(tg, r); err != nil {
+		t.Errorf("dry run: %v", err)
 	}
 }
 

@@ -391,3 +391,33 @@ func TestReconcileInfrastructure(t *testing.T) {
 		t.Errorf("again: %v %v", changed, err)
 	}
 }
+
+// A repo being deleted, or whose team its target no longer allows, is left
+// alone: a delete must not see its folder come back.
+func TestReconcileInfrastructureLeavesAlone(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	if _, err := e.create(ctx, "writer", infraRequest("infra-net", "staging")); err != nil {
+		t.Fatal(err)
+	}
+	// A change to the target's values would be written...
+	cfg, _ := infrastructure.Parse([]byte(strings.Replace(infraConfig, "githubSecrets: {AZURE_CLIENT_ID: clientId}\n      production", "githubSecrets: {AZURE_CLIENT_ID: clientId, AZURE_TENANT_ID: tenantId}\n      production", 1)))
+	o := ReconcileOptions{Catalog: e.catalog, Deploys: e.deploys, Infra: cfg, GitHub: e.repos, Org: "showmino"}
+	// ...but not while it is being deleted,
+	e.catalog.markDeleting("services/infra-net", "operations/op_x")
+	if changed, err := ReconcileInfrastructure(ctx, o); len(changed) != 0 || err == nil || !strings.Contains(err.Error(), "being deleted") {
+		t.Errorf("while deleting: %v %v", changed, err)
+	}
+	e.catalog.unmarkDeleting("services/infra-net")
+	// nor when the target no longer allows its team.
+	closed, _ := infrastructure.Parse([]byte(strings.Replace(infraConfig, "  - name: azure\n", "  - name: azure\n    teams: [web]\n", 1)))
+	o.Infra = closed
+	if changed, err := ReconcileInfrastructure(ctx, o); len(changed) != 0 || err == nil || !strings.Contains(err.Error(), "no longer allows team platform") {
+		t.Errorf("team not allowed: %v %v", changed, err)
+	}
+	o.Infra = cfg
+	if changed, err := ReconcileInfrastructure(ctx, o); err != nil || strings.Join(changed, ",") != "infra-net" {
+		t.Errorf("the change: %v %v", changed, err)
+	}
+}

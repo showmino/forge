@@ -276,11 +276,14 @@ func (d *Deploys) undeploy(ctx context.Context, svc, env string, emit func(strin
 // lockService claims every deploy environment of svc, so nothing is deployed
 // while the service is being deleted. It returns the release, or the reason
 // (a deploy, promote or rollback that is still running).
-func (d *Deploys) lockService(svc string) (func(), error) {
+func (d *Deploys) lockService(svc string) (func(), error) { return d.lockServiceFor(svc, "a delete") }
+
+// lockServiceFor is lockService, saying what holds the lock.
+func (d *Deploys) lockServiceFor(svc, what string) (func(), error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for i, env := range deployEnvs {
-		if err := d.lock(svc+"/"+env, "a delete"); err != nil {
+		if err := d.lock(svc+"/"+env, what); err != nil {
 			for _, held := range deployEnvs[:i] {
 				delete(d.running, svc+"/"+held)
 			}
