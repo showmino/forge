@@ -26,11 +26,18 @@ type Record struct {
 	Target       string   `yaml:"target"`
 	Team         string   `yaml:"team"`
 	Environments []string `yaml:"environments"`
+	// OwnerID and RepoID are GitHub's IDs of the organization and the repo:
+	// the repo's OIDC subject names them.
+	OwnerID int64 `yaml:"ownerID,omitempty"`
+	RepoID  int64 `yaml:"repoID,omitempty"`
 }
 
 // Repo is one infrastructure repo to set up.
 type Repo struct {
 	Org, Name, Team string
+	// OwnerID and RepoID are GitHub's IDs of the organization and the repo;
+	// zero before the repo exists (a dry run).
+	OwnerID, RepoID int64
 	// Environments are the chosen environments of the target.
 	Environments []string
 }
@@ -57,7 +64,7 @@ func (c *Config) Files(t Target, r Repo) (map[string][]byte, error) {
 	if len(r.Environments) == 0 {
 		return nil, errors.New("choose at least one environment")
 	}
-	rec, err := marshal(Record{Target: t.Name, Team: r.Team, Environments: r.Environments})
+	rec, err := marshal(Record{Target: t.Name, Team: r.Team, Environments: r.Environments, OwnerID: r.OwnerID, RepoID: r.RepoID})
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +148,7 @@ func (c *Config) objects(e Environment, r Repo, env string) ([]byte, error) {
 		out.Write(b)
 	}
 	if e.access != nil {
-		access, err := e.renderAccess(AccessValues{Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env, Subject: c.Subject(r.Org, r.Name, env)}, labels)
+		access, err := e.renderAccess(AccessValues{Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env, Subject: c.Subject(r, env)}, labels)
 		if err != nil {
 			return nil, fmt.Errorf("access: %w", err)
 		}

@@ -318,6 +318,19 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if gh, ok := repoHost(app).(*github.Client); ok && infra != nil && deps != nil {
+		// Bring the infrastructure repos' folders up to the current targets.
+		go func() {
+			changed, err := server.ReconcileInfrastructure(ctx, server.ReconcileOptions{
+				Catalog: catalog, Deploys: deps, Infra: infra, GitHub: gh, OIDC: gh, Org: *githubOrg, Log: log,
+			})
+			if err != nil {
+				log.Warn("infrastructure repos reconciled with errors", "changed", changed, "error", err)
+				return
+			}
+			log.Info("infrastructure repos reconciled", "changed", changed)
+		}()
+	}
 	if len(origins) > 0 {
 		log.Info("the web dashboard may call the API from a browser", "origins", origins, "client", *webClientID)
 	}

@@ -161,7 +161,20 @@ func (f *fakeRepos) CreateOrgRepo(_ context.Context, org, name, _ string) (*gith
 	}
 	f.creates++
 	f.repos[name] = nil
-	return &github.Repo{FullName: org + "/" + name, DefaultBranch: "main"}, nil
+	r := &github.Repo{ID: 1445, FullName: org + "/" + name, DefaultBranch: "main"}
+	r.Owner.ID = 155
+	return r, nil
+}
+
+func (f *fakeRepos) GetRepo(_ context.Context, owner, name string) (*github.Repo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.repos[name]; !ok {
+		return nil, github.ErrNotFound
+	}
+	r := &github.Repo{ID: 1445, FullName: owner + "/" + name, DefaultBranch: "main"}
+	r.Owner.ID = 155
+	return r, nil
 }
 
 func (f *fakeRepos) DeleteRepo(_ context.Context, _, name string) error {

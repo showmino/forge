@@ -105,15 +105,20 @@ func TestParseRefuses(t *testing.T) {
 func TestSubject(t *testing.T) {
 	c := mustParse(t, sample)
 	want := "job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org/infra-net:environment:production"
-	if got := c.Subject("my-org", "infra-net", "production"); got != want {
+	if got := c.Subject(Repo{Org: "my-org", Name: "infra-net"}, "production"); got != want {
 		t.Errorf("Subject = %s\nwant %s", got, want)
+	}
+	// With GitHub's IDs, as GitHub writes an immutable subject.
+	want = "job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org@155/infra-net@1445:environment:production"
+	if got := c.Subject(Repo{Org: "my-org", Name: "infra-net", OwnerID: 155, RepoID: 1445}, "production"); got != want {
+		t.Errorf("Subject with IDs = %s\nwant %s", got, want)
 	}
 }
 
 func TestFiles(t *testing.T) {
 	c := mustParse(t, sample)
 	tg, _ := c.Target("azure")
-	files, err := c.Files(tg, Repo{Org: "my-org", Name: "infra-net", Team: "platform", Environments: []string{"staging", "production"}})
+	files, err := c.Files(tg, Repo{Org: "my-org", Name: "infra-net", Team: "platform", Environments: []string{"staging", "production"}, OwnerID: 155, RepoID: 1445})
 	if err != nil {
 		t.Fatal(err)
 	}

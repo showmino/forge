@@ -14,8 +14,9 @@ import (
 func (c *Client) SetOIDCSubjectClaims(ctx context.Context, owner, repo string, claims []string) error {
 	body := struct {
 		UseDefault bool     `json:"use_default"`
+		Immutable  bool     `json:"use_immutable_subject"`
 		Claims     []string `json:"include_claim_keys"`
-	}{false, claims}
+	}{false, true, claims}
 	return c.doJSON(ctx, http.MethodPut, repoPath(owner, repo)+"/actions/oidc/customization/sub", body, nil)
 }
 

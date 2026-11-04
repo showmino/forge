@@ -409,8 +409,13 @@ credential whose subject is the shared workflow's), and the repo variable
 `FORGE_ENVIRONMENTS` (`staging,production`) that the shared workflow reads
 so no job names an environment the repo does not have. The
 `forge-infrastructure` ApplicationSet syncs them into
-`infrastructure.namespace`. Forge never deploys such a repo; deleting it
-removes the folder. Its production runs wait in Forge: the shared workflow
+`infrastructure.namespace`. The OIDC subject is GitHub's immutable one
+(`repo:<org>@<org id>/<repo>@<repo id>`), so a repo deleted and made again
+under the same name is not trusted; `target.yaml` keeps the IDs. When
+forge-api starts it writes every infrastructure repo's folder again from the
+current targets (only what changed), so a changed target reaches the repos
+made before. Forge never deploys such a repo; deleting it removes the
+folder. Its production runs wait in Forge: the shared workflow
 runs `forge approval request` with the job's token (only that workflow may),
 a member of the owning team who did not start the run approves it (`forge
 approval list --state pending`, `forge approval approve <id>`, the action
