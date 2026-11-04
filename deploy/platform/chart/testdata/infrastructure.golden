@@ -998,6 +998,7 @@ spec:
     - {group: repo.github.m.upbound.io, kind: EnvironmentDeploymentPolicy}
     - {group: actions.github.m.upbound.io, kind: EnvironmentSecret}
     - {group: actions.github.m.upbound.io, kind: EnvironmentVariable}
+    - {group: actions.github.m.upbound.io, kind: ActionsVariable}
     - {group: "managedidentity.azure.m.upbound.io", kind: "FederatedIdentityCredential"}
 ---
 # Source: forge/templates/deploys.yaml

@@ -1,0 +1,15 @@
+---
+apiVersion: actions.github.m.upbound.io/v1alpha1
+kind: ActionsVariable
+metadata:
+  labels:
+    forge.dev/service: infra-net
+  name: infra-net-environments
+spec:
+  forProvider:
+    repository: infra-net
+    value: staging,production
+    variableName: FORGE_ENVIRONMENTS
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: github

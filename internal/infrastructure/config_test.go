@@ -117,15 +117,15 @@ func TestFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"infrastructure/infra-net/target.yaml", "infrastructure/infra-net/staging.yaml", "infrastructure/infra-net/production.yaml"} {
+	for _, p := range []string{"infrastructure/infra-net/target.yaml", "infrastructure/infra-net/staging.yaml", "infrastructure/infra-net/production.yaml", "infrastructure/infra-net/repo.yaml"} {
 		got, ok := files[p]
 		if !ok {
 			t.Fatalf("no %s in %v", p, files)
 		}
 		golden(t, filepath.Join("testdata", strings.ReplaceAll(strings.TrimPrefix(p, "infrastructure/"), "/", "_")+".golden"), got)
 	}
-	if len(files) != 3 {
-		t.Errorf("%d files, want 3", len(files))
+	if len(files) != 4 {
+		t.Errorf("%d files, want 4", len(files))
 	}
 }
 

@@ -38,6 +38,16 @@ type Repo struct {
 // Folder is the deploy repo folder of the repo called name.
 func Folder(name string) string { return Dir + "/" + name }
 
+// EnvironmentsVariable is the repo variable that lists the repo's
+// environments ("staging,production"), for the shared workflow: a job must
+// not name an environment the repo does not have, or GitHub makes it, with
+// no rules and no secrets.
+const EnvironmentsVariable = "FORGE_ENVIRONMENTS"
+
+// RepoObjectsPath is the file of the repo's own Crossplane objects (not one
+// environment's).
+func RepoObjectsPath(name string) string { return Folder(name) + "/repo.yaml" }
+
 // RecordPath is the path of the repo's Record in the deploy repo.
 func RecordPath(name string) string { return Folder(name) + "/" + RecordFile }
 
@@ -63,6 +73,19 @@ func (c *Config) Files(t Target, r Repo) (map[string][]byte, error) {
 		}
 		files[Folder(r.Name)+"/"+env+".yaml"] = data
 	}
+	repo, err := marshal(map[string]any{
+		"apiVersion": "actions.github.m.upbound.io/v1alpha1",
+		"kind":       "ActionsVariable",
+		"metadata":   map[string]any{"name": r.Name + "-environments", "labels": map[string]string{"forge.dev/service": r.Name}},
+		"spec": map[string]any{
+			"providerConfigRef": map[string]string{"kind": c.ProviderConfig.Kind, "name": c.ProviderConfig.Name},
+			"forProvider":       map[string]any{"repository": r.Name, "variableName": EnvironmentsVariable, "value": strings.Join(r.Environments, ",")},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	files[RepoObjectsPath(r.Name)] = append([]byte("---\n"), repo...)
 	return files, nil
 }
 
