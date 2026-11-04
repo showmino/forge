@@ -341,6 +341,14 @@ From the independent reviews of the parts, kept as they are for now:
   makes a few GitHub calls, without a cache.
 - Provider and module versions are whatever the repo pins: commit
   `.terraform.lock.hcl` to pin providers.
+- When a bot pushes the commit or re-runs the job (the scaffold's first
+  commit, a merge queue, an auto-merge, a re-run through the API), the
+  approval names the bot, so the person behind it may approve it. Accepted
+  by the owner, 2026-11-04.
+- GitHub's OIDC tokens carry no `triggering_actor`: Forge reads who started
+  the attempt from GitHub, and refuses when it cannot (since v0.40.1).
+- The very first push of a new repo runs before Forge has set
+  `FORGE_ENVIRONMENTS`, and fails; re-run it once the setup is Ready.
 
 ## Left to the builder
 
