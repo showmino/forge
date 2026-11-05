@@ -103,9 +103,12 @@ func (p *PlanAccess) environment() Environment {
 // AccessValues are what an access template can use.
 type AccessValues struct {
 	Org, Repo, Team, Environment string
+	RepoID                       int64
 	// Subject is the OIDC subject of the repo's runs in this environment
 	// through the shared workflow (see Subject).
 	Subject string
+	// PlanSubject is the OIDC subject of the repo's pull-request plan jobs.
+	PlanSubject string
 }
 
 var (
@@ -244,14 +247,22 @@ func (e *Environment) check(kinds []string) error {
 		return fmt.Errorf("maxRepos %d must not be negative", e.MaxRepos)
 	}
 	if strings.TrimSpace(e.Access) != "" {
-		t, err := template.New("access").Option("missingkey=error").Parse(e.Access)
+		t, err := template.New("access").
+			Funcs(template.FuncMap{"upper": strings.ToUpper}).
+			Option("missingkey=error").
+			Parse(e.Access)
 		if err != nil {
 			return fmt.Errorf("access: %w", err)
 		}
 		e.access = t
 		// A sample repo shows a template that cannot render now, not at the
 		// first create.
-		sample, err := e.renderAccess(AccessValues{Org: "my-org", Repo: "sample", Team: "team", Environment: "staging", Subject: "repo:my-org/sample:environment:staging"}, nil)
+		sample, err := e.renderAccess(AccessValues{
+			Org: "my-org", Repo: "sample", Team: "team", Environment: "staging",
+			RepoID:      1,
+			Subject:     "repo:my-org/sample:environment:staging",
+			PlanSubject: "job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org/sample:pull_request",
+		}, nil)
 		if err != nil {
 			return fmt.Errorf("access: %w", err)
 		}

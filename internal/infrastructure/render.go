@@ -123,7 +123,9 @@ func (c *Config) Files(t Target, r Repo) (map[string][]byte, error) {
 		if p.access != nil {
 			e := p.environment()
 			data, err := e.renderAccess(AccessValues{
-				Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env, Subject: c.PlanSubject(r),
+				Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env,
+				RepoID:  r.RepoID,
+				Subject: c.PlanSubject(r), PlanSubject: c.PlanSubject(r),
 			}, map[string]string{"forge.dev/service": r.Name, "forge.dev/deploy-env": env})
 			if err != nil {
 				return nil, fmt.Errorf("%s plan access: %w", env, err)
@@ -211,7 +213,11 @@ func (c *Config) objects(e Environment, r Repo, env string) ([]byte, error) {
 		out.Write(b)
 	}
 	if e.access != nil {
-		access, err := e.renderAccess(AccessValues{Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env, Subject: c.Subject(r, env)}, labels)
+		access, err := e.renderAccess(AccessValues{
+			Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env,
+			RepoID:  r.RepoID,
+			Subject: c.Subject(r, env), PlanSubject: c.PlanSubject(r),
+		}, labels)
 		if err != nil {
 			return nil, fmt.Errorf("access: %w", err)
 		}

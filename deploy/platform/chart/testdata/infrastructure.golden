@@ -415,6 +415,11 @@ data:
   config.yaml: |
     accessKinds:
     - managedidentity.azure.m.upbound.io/FederatedIdentityCredential
+    - azure.forge.dev/AzureInfrastructureEnvironment
+    - actions.github.m.upbound.io/EnvironmentSecret
+    - actions.github.m.upbound.io/EnvironmentVariable
+    - actions.github.m.upbound.io/ActionsSecret
+    - actions.github.m.upbound.io/ActionsVariable
     namespace: forge-infrastructure
     providerConfig:
       kind: ClusterProviderConfig
@@ -734,7 +739,7 @@ spec:
       annotations:
         checksum/repositories: 3140bd297f9effecee4176a035d41f43e8cc698c22525cca125a318bd2c86a46
         # forge-api reads the targets when it starts.
-        checksum/infrastructure: c6b7b1a1a36a800bca61e2417557013987cd8c750b13637e893ab91a989199b1
+        checksum/infrastructure: c98552600bfb6dfe55a5026be0a731cfb41468d0ee33b4ec93c9e64950baf8c6
     spec:
       serviceAccountName: forge-api
       securityContext:
@@ -1046,6 +1051,11 @@ spec:
     - {group: actions.github.m.upbound.io, kind: ActionsVariable}
     - {group: actions.github.m.upbound.io, kind: ActionsSecret}
     - {group: "managedidentity.azure.m.upbound.io", kind: "FederatedIdentityCredential"}
+    - {group: "azure.forge.dev", kind: "AzureInfrastructureEnvironment"}
+    - {group: "actions.github.m.upbound.io", kind: "EnvironmentSecret"}
+    - {group: "actions.github.m.upbound.io", kind: "EnvironmentVariable"}
+    - {group: "actions.github.m.upbound.io", kind: "ActionsSecret"}
+    - {group: "actions.github.m.upbound.io", kind: "ActionsVariable"}
 ---
 # Source: forge/templates/repositories.yaml
 apiVersion: argoproj.io/v1alpha1

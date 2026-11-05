@@ -13,7 +13,13 @@ repositories:
 infrastructure:
   enabled: true
   workflow: acme/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
-  accessKinds: [managedidentity.azure.m.upbound.io/FederatedIdentityCredential]
+  accessKinds:
+    - managedidentity.azure.m.upbound.io/FederatedIdentityCredential
+    - azure.forge.dev/AzureInfrastructureEnvironment
+    - actions.github.m.upbound.io/EnvironmentSecret
+    - actions.github.m.upbound.io/EnvironmentVariable
+    - actions.github.m.upbound.io/ActionsSecret
+    - actions.github.m.upbound.io/ActionsVariable
   targets:
     - name: azure
       title: Azure
