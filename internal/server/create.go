@@ -499,7 +499,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	var protectionCommit string
 	if c.repositories != nil {
 		started("protect_main")
-		data, err := c.repositories.Rules(id, infra != nil)
+		data, err := c.repositories.Rules(id, infra != nil, true)
 		if err != nil {
 			return fail("protect_main", err)
 		}

@@ -55,17 +55,22 @@ func Parse(data []byte) (*Config, error) {
 func Path(repo string) string { return "repositories/" + repo + "/rules.yaml" }
 
 // Rules requires pull requests on main, without administrator or App bypasses.
-func (c *Config) Rules(repo string, infrastructure bool) ([]byte, error) {
+func (c *Config) Rules(repo string, infrastructure, requireReview bool) ([]byte, error) {
 	if !manifest.ValidID(repo) {
 		return nil, fmt.Errorf("repository %q must be a Forge repository name", repo)
+	}
+	pullRequest := map[string]any{
+		"requiredApprovingReviewCount": 0,
+		"requireCodeOwnerReview":       false,
+	}
+	if requireReview {
+		pullRequest["requiredApprovingReviewCount"] = 1
+		pullRequest["requireCodeOwnerReview"] = true
 	}
 	rules := map[string]any{
 		"deletion":       true,
 		"nonFastForward": true,
-		"pullRequest": []any{map[string]any{
-			"requiredApprovingReviewCount": 1,
-			"requireCodeOwnerReview":       true,
-		}},
+		"pullRequest":    []any{pullRequest},
 	}
 	if infrastructure {
 		rules["requiredStatusChecks"] = []any{map[string]any{

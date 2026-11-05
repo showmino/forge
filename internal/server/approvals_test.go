@@ -85,10 +85,11 @@ func (f *fakeDispatch) all() []string {
 }
 
 type approvalEnv struct {
-	client   forgev1connect.ApprovalServiceClient
-	dispatch *fakeDispatch
-	self     map[string]bool
-	mu       sync.Mutex
+	client    forgev1connect.ApprovalServiceClient
+	dispatch  *fakeDispatch
+	approvals *Approvals
+	self      map[string]bool
+	mu        sync.Mutex
 }
 
 // newApprovalEnv serves approvals for infra-net (an infrastructure repo of
@@ -187,6 +188,7 @@ targets: [{name: azure, environments: {production: {secret: s}}}]
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.approvals = aps
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	e.client = forgev1connect.NewApprovalServiceClient(srv.Client(), srv.URL)
