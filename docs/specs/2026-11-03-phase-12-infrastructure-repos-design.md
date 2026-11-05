@@ -89,6 +89,15 @@ state storage and deployment behavior. Configure a separate, read-only
 identity for pull-request plans; never give unreviewed PR code deployment
 permissions or state write access.
 
+Keep the identities outside the scope they deploy to (owner's amendment,
+2026-11-05). A role that may write in that scope must not reach the identity
+itself: on Azure, Contributor on a resource group includes writing federated
+credentials on identities in that group, so code deployed with the identity
+could add a sign-in of its own and skip Forge's approval. Put the identities
+in a separate scope where they have no role (for Azure, a management resource
+group per environment), give them roles on the service's scope only, and
+provision that scope empty.
+
 ### Templates
 
 Two new templates in the templates repo, both `type: infrastructure`:
@@ -138,6 +147,10 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
   in with OIDC (`use_oidc`, `use_azuread_auth`). The deploy identity gets
   **Storage Blob Data Contributor** and the plan identity gets **Storage Blob
   Data Reader** on that container only; Owner alone does not give data access.
+- The templates read the scope Forge provisions instead of declaring it: the
+  `opentofu` template uses `data "azurerm_resource_group"` and the `bicep`
+  template an `existing` resource group, so neither tool can create or
+  delete the group, and a deployment stack does not manage it (2026-11-05).
 - Other providers use their own state backend and provider-specific access
   model. Forge does not require the Azure account or resource layout.
 
