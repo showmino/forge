@@ -5,6 +5,9 @@ phase 12 of `2026-10-29-deploy-sources-design.md` (the app catalog), which
 moves to phase 14. The owner gave the go-ahead and confirmed the names the
 same day.
 
+**Done.** The owner closed the phase on 2026-11-05, with Forge 0.44.0. See
+"Exit gate" for what was checked.
+
 ## Why
 
 A developer who needs infrastructure code (Bicep, OpenTofu or Terraform)
@@ -340,6 +343,19 @@ production. A second repo of a one-person team gets the exception through a
 pull request the platform team merges, and its developer approves their own
 production run. Every step is in the audit log. Changing an environment by
 hand in GitHub is put back.
+
+**Result (2026-11-05).** The owner closed the phase on their own install.
+Checked there: pull requests in an OpenTofu and a Bicep repo passed their
+plan and what-if checks and the required `infrastructure / pr-checks`
+aggregate; a merge applied to staging and then waited in Forge for
+production, where the pusher's own approval was refused and a teammate's
+approval let it apply; a one-person team's exception, once active, let its
+developer approve their own production run and dropped the required
+reviews on its pull requests (0.44.0). Not recorded as checked: creating
+the repo from the dashboard, a workflow that skips the shared one being
+refused sign-in, the
+full walk through the audit log, and a hand change to a GitHub environment
+being put back.
 
 ## Known limits (accepted)
 
