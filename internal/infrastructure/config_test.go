@@ -41,6 +41,7 @@ targets:
               subject: {{ .Subject }}
               parentId: /subscriptions/sub/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id
               resourceGroupName: rg
+              stateContainer: forge-{{ .RepoID }}-{{ .Environment }}
       staging:
         secret: target-azure-staging
         githubSecrets: {AZURE_CLIENT_ID: clientId}
@@ -124,6 +125,32 @@ func TestSubject(t *testing.T) {
 	want = "job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org@155/infra-net@1445:environment:production"
 	if got := c.Subject(Repo{Org: "my-org", Name: "infra-net", OwnerID: 155, RepoID: 1445}, "production"); got != want {
 		t.Errorf("Subject with IDs = %s\nwant %s", got, want)
+	}
+}
+
+func TestAccessValuesIncludePlanSubject(t *testing.T) {
+	c := mustParse(t, strings.Replace(sample,
+		"name: {{ .Repo }}-{{ .Environment }}",
+		"name: {{ .Repo }}-{{ .Environment }}\n            annotations:\n              forge.dev/plan-subject: {{ .PlanSubject }}\n              forge.dev/environment-upper: {{ upper .Environment }}",
+		1,
+	))
+	tg, _ := c.Target("azure")
+	files, err := c.Files(tg, Repo{
+		Org: "my-org", Name: "infra-net", Team: "platform",
+		Environments: []string{"production"}, OwnerID: 155, RepoID: 1445,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(files["infrastructure/infra-net/production.yaml"]),
+		"forge.dev/plan-subject: job_workflow_ref:"+c.Workflow+":repo:my-org@155/infra-net@1445:pull_request"; !strings.Contains(got, want) {
+		t.Fatalf("access template did not receive PlanSubject %q:\n%s", want, got)
+	}
+	if !strings.Contains(string(files["infrastructure/infra-net/production.yaml"]), "forge.dev/environment-upper: PRODUCTION") {
+		t.Fatal("access template upper function did not render the environment")
+	}
+	if !strings.Contains(string(files["infrastructure/infra-net/production.yaml"]), "stateContainer: forge-1445-production") {
+		t.Fatal("access template did not receive RepoID for the isolated state container")
 	}
 }
 
