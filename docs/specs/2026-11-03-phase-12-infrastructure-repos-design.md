@@ -5,8 +5,8 @@ phase 12 of `2026-10-29-deploy-sources-design.md` (the app catalog), which
 moves to phase 14. The owner gave the go-ahead and confirmed the names the
 same day.
 
-**Done.** The owner closed the phase on 2026-11-05, with Forge 0.44.0. See
-"Exit gate" for what was checked.
+**Done.** The exit gate passed on the owner's install on 2026-11-05, and the
+phase closed with Forge 0.44.0. See "Exit gate".
 
 ## Why
 
@@ -344,18 +344,18 @@ pull request the platform team merges, and its developer approves their own
 production run. Every step is in the audit log. Changing an environment by
 hand in GitHub is put back.
 
-**Result (2026-11-05).** The owner closed the phase on their own install.
-Checked there: pull requests in an OpenTofu and a Bicep repo passed their
-plan and what-if checks and the required `infrastructure / pr-checks`
-aggregate; a merge applied to staging and then waited in Forge for
-production, where the pusher's own approval was refused and a teammate's
-approval let it apply; a one-person team's exception, once active, let its
-developer approve their own production run and dropped the required
-reviews on its pull requests (0.44.0). Not recorded as checked: creating
-the repo from the dashboard, a workflow that skips the shared one being
-refused sign-in, the
-full walk through the audit log, and a hand change to a GitHub environment
-being put back.
+**Passed (2026-11-05).** The owner ran the exit gate on their own install
+with a new `opentofu` repo, and its audit log holds every step: the
+`service.create` from the template; production runs requested by the
+repo's workflow (`approval.request`), approved in Forge by a teammate
+(`approval.approve`) and then claimed and applied (`approval.claim`); the
+team-of-one exception requested through a pull request to the deploy repo
+(`approval.exception.request`); and, once it was granted, the developer
+approving their own production runs (`approval.approve` with
+`self_approved`). Pull requests in an OpenTofu and a Bicep repo also passed
+their plan and what-if checks and the required `infrastructure / pr-checks`
+aggregate, and since 0.44.0 an active exception also drops the required
+reviews on the repo's pull requests.
 
 ## Known limits (accepted)
 
