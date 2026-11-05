@@ -39,6 +39,7 @@ type RepositoryOptions struct {
 	DeployOwner      string
 	DeployName       string
 	ReviewAdminTeams []string
+	ReviewWaiver     func(context.Context, string) (bool, error)
 	Log              *slog.Logger
 }
 
@@ -144,7 +145,14 @@ func reconcileRepository(ctx context.Context, o RepositoryOptions, id string) (b
 		}
 		return false, nil
 	}
-	data, err := o.Config.Rules(id, svc.GetInfrastructure() != nil)
+	reviewWaived := false
+	if o.ReviewWaiver != nil {
+		reviewWaived, err = o.ReviewWaiver(ctx, id)
+		if err != nil {
+			return false, fmt.Errorf("check whether %s has a review-waiving exception: %w", id, err)
+		}
+	}
+	data, err := o.Config.Rules(id, svc.GetInfrastructure() != nil, !reviewWaived)
 	if err != nil {
 		return false, err
 	}

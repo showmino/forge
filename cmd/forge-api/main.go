@@ -294,7 +294,7 @@ func run() error {
 			owner, name, _ := strings.Cut(*deployRepo, "/")
 			o.Exceptions = &server.ExceptionOptions{
 				Repo: &github.RepoFiles{Client: gh, Owner: owner, Name: name, Branch: "main"}, Owner: owner, Name: name,
-				GitHub: gh, AdminTeams: reviewAdminTeams,
+				GitHub: gh, AdminTeams: reviewAdminTeams, RepositoryRules: repoConfig,
 			}
 		}
 		approvals = server.NewApprovals(o)
@@ -346,9 +346,14 @@ func run() error {
 			}
 			if repoConfig != nil {
 				deployOwner, deployName, _ := strings.Cut(*deployRepo, "/")
+				var reviewWaiver func(context.Context, string) (bool, error)
+				if approvals != nil {
+					reviewWaiver = approvals.ExceptionGranted
+				}
 				changed, err := server.ReconcileRepositories(ctx, server.RepositoryOptions{
 					Catalog: catalog, Deploys: deps, Config: repoConfig, Audit: st, GitHub: gh, Org: *githubOrg,
-					DeployOwner: deployOwner, DeployName: deployName, ReviewAdminTeams: reviewAdminTeams, Log: log,
+					DeployOwner: deployOwner, DeployName: deployName, ReviewAdminTeams: reviewAdminTeams,
+					ReviewWaiver: reviewWaiver, Log: log,
 				})
 				if err != nil {
 					log.Warn("repository protection reconciled with errors", "changed", changed, "error", err)

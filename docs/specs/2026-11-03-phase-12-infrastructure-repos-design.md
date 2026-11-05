@@ -159,6 +159,12 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
 - Infrastructure rules require `infrastructure / pr-checks` from GitHub
   Actions and an up-to-date branch. That check succeeds only if validation
   and every account's plan/what-if succeed; missing configuration fails.
+- A valid, active team-of-one production exception for an infrastructure
+  service waives approving reviews for that service's pull requests. The
+  pull-request rule and all required checks remain. Granting or revoking the
+  exception changes its review rules in the same deploy-repo pull request;
+  startup reconciliation applies the current exception state to existing
+  services.
 - Each target environment has a `plan` block: `secret`, `githubSecrets`,
   `githubVariables`, `access`. It uses a different identity and Secret from
   deployment. Crossplane copies its settings into repository-level

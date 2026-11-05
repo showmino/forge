@@ -425,6 +425,7 @@ func TestReconcileRepositories(t *testing.T) {
 		Catalog: catalog, Deploys: NewDeploys(DeployOptions{Catalog: catalog, Repo: repo}),
 		Config: repositoryConfig(t), Audit: audit, GitHub: repos, Org: "showmino",
 		DeployOwner: "showmino", DeployName: "forge-deploys",
+		ReviewWaiver: func(_ context.Context, id string) (bool, error) { return id == "infra", nil },
 	}
 	changed, err := ReconcileRepositories(ctx, o)
 	if err != nil || len(changed) != 0 {
@@ -441,8 +442,15 @@ func TestReconcileRepositories(t *testing.T) {
 		t.Fatalf("backfill: %v %v", changed, err)
 	}
 	data, err := repo.Read(ctx, repositories.Path("infra"), "")
-	if err != nil || !strings.Contains(string(data), repositories.InfrastructureCheck) {
-		t.Fatalf("no required infrastructure gate: %s %v", data, err)
+	if err != nil || !strings.Contains(string(data), repositories.InfrastructureCheck) ||
+		!strings.Contains(string(data), "requiredApprovingReviewCount: 0") ||
+		!strings.Contains(string(data), "requireCodeOwnerReview: false") {
+		t.Fatalf("incorrect infrastructure review waiver: %s %v", data, err)
+	}
+	data, err = repo.Read(ctx, repositories.Path("app"), "")
+	if err != nil || !strings.Contains(string(data), "requiredApprovingReviewCount: 1") ||
+		!strings.Contains(string(data), "requireCodeOwnerReview: true") {
+		t.Fatalf("application review rules: %s %v", data, err)
 	}
 	if _, err := repo.Read(ctx, repositories.Path("connected"), ""); !errors.Is(err, github.ErrNotFound) {
 		t.Fatalf("connected repo was adopted: %v", err)

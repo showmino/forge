@@ -16,6 +16,7 @@ import (
 	"github.com/showmino/forge/internal/github"
 	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/manifest"
+	"github.com/showmino/forge/internal/repositories"
 	"github.com/showmino/forge/internal/store"
 )
 
@@ -39,7 +40,8 @@ type ExceptionOptions struct {
 	GitHub      ExceptionGitHub
 	// AdminTeams are the slugs of the teams (of ApprovalOptions.Org) whose
 	// members grant exceptions: the admin groups "<org>:<slug>".
-	AdminTeams []string
+	AdminTeams      []string
+	RepositoryRules *repositories.Config
 }
 
 // exceptionDir is the deploy repo's folder of exceptions. forge-api never
@@ -189,6 +191,34 @@ func (a *Approvals) selfApproval(ctx context.Context, svc string) (bool, error) 
 	return ex != nil && ex.GetGranted(), nil
 }
 
+// ExceptionGranted reports whether the service has an active, reviewed
+// team-of-one exception.
+func (a *Approvals) ExceptionGranted(ctx context.Context, svc string) (bool, error) {
+	if a == nil || a.o.Exceptions == nil {
+		return false, nil
+	}
+	return a.selfApproval(ctx, svc)
+}
+
+func (a *Approvals) repositoryReviewRules(ctx context.Context, svc *forgev1.Service, requireReview bool) ([]github.File, error) {
+	e := a.o.Exceptions
+	if e.RepositoryRules == nil {
+		return nil, nil
+	}
+	id := strings.TrimPrefix(svc.GetName(), servicePrefix)
+	path := repositories.Path(id)
+	if _, err := e.Repo.Read(ctx, path, ""); errors.Is(err, github.ErrNotFound) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	data, err := e.RepositoryRules.Rules(id, svc.GetInfrastructure() != nil, requireReview)
+	if err != nil {
+		return nil, err
+	}
+	return []github.File{{Path: path, Content: data}}, nil
+}
+
 // exceptionService checks the caller may ask for or revoke the exception of
 // name and returns its service, an infrastructure repo with production.
 func (a *Approvals) exceptionService(ctx context.Context, name string) (*forgev1.Service, error) {
@@ -233,6 +263,10 @@ func (a *Approvals) RequestException(ctx context.Context, req *connect.Request[f
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	e := a.o.Exceptions
+	reviewRules, err := a.repositoryReviewRules(ctx, svc, false)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("prepare the repository review waiver: %w", err))
+	}
 	url, err := e.GitHub.ProposeFiles(ctx, e.Owner, e.Name, github.Proposal{
 		Branch:  fmt.Sprintf("forge/exception-%s-%d", sid, f.RequestedAt.Unix()),
 		Fresh:   true,
@@ -241,9 +275,11 @@ func (a *Approvals) RequestException(ctx context.Context, req *connect.Request[f
 		Body: fmt.Sprintf("%s asks that team **%s** may approve its own production runs of **%s**, which Forge otherwise refuses "+
 			"(the person who started a run may not approve it).\n\n> %s\n\nMerge this only if the team has nobody else who could approve. "+
 			"It holds once **squash-merged** with an approval of its last commit by a member of %s other than %s (Forge checks on GitHub); "+
-			"revoke it with `forge approval exception revoke %s`.",
+			"while it holds, pull requests to this service still require a pull request and required checks, but waive approving reviews. "+
+			"Revoke it with `forge approval exception revoke %s`.",
 			f.RequestedBy, svc.GetOwnerTeam(), sid, reason, strings.Join(e.AdminTeams, " or "), f.RequestedBy, sid),
-		Files: []github.File{{Path: exceptionPath(sid), Content: data}},
+		Files:  []github.File{{Path: exceptionPath(sid), Content: data}},
+		Update: reviewRules,
 	})
 	if errors.Is(err, github.ErrFileExists) {
 		return nil, connect.NewError(connect.CodeAlreadyExists, fmt.Errorf("%s has an exception already (%s); see forge approval exception list", svc.GetName(), exceptionPath(sid)))
@@ -271,13 +307,18 @@ func (a *Approvals) RevokeException(ctx context.Context, req *connect.Request[fo
 	}
 	reason := strings.TrimSpace(req.Msg.GetReason())
 	e := a.o.Exceptions
+	reviewRules, err := a.repositoryReviewRules(ctx, svc, true)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("prepare repository review requirements: %w", err))
+	}
 	url, err := e.GitHub.ProposeFiles(ctx, e.Owner, e.Name, github.Proposal{
 		Branch:  fmt.Sprintf("forge/revoke-exception-%s-%d", sid, a.o.Now().Unix()),
 		Fresh:   true,
 		Title:   fmt.Sprintf("Revoke the exception of %s", sid),
 		Message: fmt.Sprintf("revoke the exception of %s, asked by %s\n\n%s", sid, by, reason),
-		Body:    fmt.Sprintf("%s asks to remove the exception of **%s**: once merged, its team may no longer approve its own production runs.\n\n> %s", by, sid, reason),
+		Body:    fmt.Sprintf("%s asks to remove the exception of **%s**: once merged, its team may no longer approve its own production runs and its PR review requirements are restored.\n\n> %s", by, sid, reason),
 		Remove:  []string{exceptionPath(sid)},
+		Update:  reviewRules,
 	})
 	if errors.Is(err, github.ErrNotFound) {
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("%s has no exception", svc.GetName()))

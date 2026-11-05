@@ -13,6 +13,7 @@ import (
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/repositories"
 )
 
 // fakeExceptionGitHub is the deploy repo's pull requests: pulls by commit,
@@ -94,6 +95,13 @@ func newExceptionEnv(t *testing.T) (*approvalEnv, *fakeExceptionGitHub) {
 		o.SelfApproval = nil // the exception decides
 		o.Exceptions = &ExceptionOptions{Repo: gh.repo, Owner: "showmino", Name: "forge-deploys", GitHub: gh, AdminTeams: []string{"admins"}}
 	})
+	rules := repositoryConfig(t)
+	data, err := rules.Rules("infra-net", true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh.repo.Push(repositories.Path("infra-net"), data, "Create repository rules")
+	e.approvals.o.Exceptions.RepositoryRules = rules
 	return e, gh
 }
 
@@ -119,7 +127,10 @@ func TestExceptionRequest(t *testing.T) {
 	}
 	p := gh.proposals[0]
 	if len(p.Files) != 1 || p.Files[0].Path != "exceptions/infra-net.yaml" || !strings.Contains(string(p.Files[0].Content), "reason: I am the only one on the team") ||
-		!strings.Contains(string(p.Files[0].Content), "requestedBy: ana") || !strings.Contains(p.Body, "admins") {
+		!strings.Contains(string(p.Files[0].Content), "requestedBy: ana") || len(p.Update) != 1 ||
+		p.Update[0].Path != repositories.Path("infra-net") ||
+		!strings.Contains(string(p.Update[0].Content), "requiredApprovingReviewCount: 0") ||
+		!strings.Contains(p.Body, "admins") || !strings.Contains(p.Body, "waive approving reviews") {
 		t.Errorf("proposal %+v", p)
 	}
 	// Forge itself never writes there: the request is a pull request only.
@@ -151,7 +162,9 @@ func TestExceptionRequest(t *testing.T) {
 	if err != nil || !strings.Contains(rv.Msg.GetPullRequestUrl(), "/pull/forge/revoke-exception-infra-net-") {
 		t.Fatalf("revoke: %v %v", rv, err)
 	}
-	if last := gh.proposals[len(gh.proposals)-1]; len(last.Remove) != 1 || last.Remove[0] != "exceptions/infra-net.yaml" || len(last.Files) != 0 {
+	if last := gh.proposals[len(gh.proposals)-1]; len(last.Remove) != 1 || last.Remove[0] != "exceptions/infra-net.yaml" ||
+		len(last.Files) != 0 || len(last.Update) != 1 || last.Update[0].Path != repositories.Path("infra-net") ||
+		!strings.Contains(string(last.Update[0].Content), "requiredApprovingReviewCount: 1") {
 		t.Errorf("revoke proposal %+v", last)
 	}
 }
@@ -196,6 +209,10 @@ func TestExceptionGrant(t *testing.T) {
 			exs := e.exceptions(t)
 			if len(exs) != 1 || exs[0].GetService() != "services/infra-net" || exs[0].GetGranted() != tc.granted || !strings.Contains(exs[0].GetProblem(), tc.problem) {
 				t.Fatalf("exceptions %v", exs)
+			}
+			waived, err := e.approvals.ExceptionGranted(context.Background(), "infra-net")
+			if err != nil || waived != tc.granted {
+				t.Fatalf("review waiver: got %t, want %t (error %v)", waived, tc.granted, err)
 			}
 			ap := e.request(t, "ci")
 			got, err := e.approve("ana", ap.GetName())
