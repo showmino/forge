@@ -23,25 +23,25 @@ a credential.
 - `forge create` (and the dashboard's Create page) makes an infrastructure
   repo from an infrastructure template, for a target the platform team set up.
 - The repo gets the GitHub environments the developer chose, `staging`,
-  `production` or both. Each Azure service environment gets its own resource
-  group and deploy and plan identities, scoped to that group.
+  `production` or both. The provider integration configures access for each
+  selected environment using the scope and isolation model chosen by the
+  platform team.
 - A production run waits for an approval in Forge by a member of the team that
   owns the repo, not the person who started the run.
 - A team of one can get an exception: they may approve their own production
   runs. Only the platform team can grant it.
 - The target's values are set as environment secrets and variables, and the
-  cloud side (who may sign in as what) is set up for this repo.
-- It works on every GitHub plan, and Forge stays cloud-neutral: Azure, AWS and
-  GCP differ only in what the platform team writes into a target.
+  provider integration configures the workflow's cloud access for this repo.
+- Forge coordinates GitHub-side settings and approvals; provider integrations
+  and workflows supply cloud-specific access and deployment behavior.
 
 ## Non-goals
 
 - Forge running the infrastructure code. The repo's GitHub Actions do that;
   Forge's own OpenTofu runner (phase 5) is unrelated.
-- Forge making subscriptions or accounts, or managing the target's shared
-  state storage. The platform team selects those; Forge provisions an
-  isolated resource group and identities inside the selected Azure
-  subscription for each service environment.
+- Forge choosing a cloud resource hierarchy or managing a target's shared
+  state storage. The platform team chooses the target integration, which may
+  use existing scope or provision service-specific scope and access.
 - Deploying the repo to the cluster. An infrastructure repo has no Forge
   deploy; it is in the catalog for its owner, its docs and its audit trail.
 - Adopting existing, hand-made repos, or moving a repo to another target.
@@ -62,82 +62,29 @@ a credential.
 
 ## Why the approval is in Forge, not in GitHub
 
-GitHub's required reviewers on an environment (and "prevent self-review") work
-in private repos only on GitHub Enterprise; on Free, Pro and Team they are for
-public repos only. Deployment branches, environment secrets and environment
-variables do work in private repos on Pro and Team. showmino is on Team, and
-Forge makes every repo private. So Forge does the approval itself, which also
-makes it the same on every plan, in the audit log, and the start of issue
-#52's deploy approvals.
+GitHub's environment reviewer features vary by repository visibility and
+GitHub plan. Forge enforces production approval itself, giving infrastructure
+repos the same approval flow and audit record across supported plans.
 
 ## How it works
 
 ### Targets
 
-A target is a set of cloud accounts, one per environment, that infrastructure
-code deploys to. For Azure, the subscription remains the target; Forge creates
-one resource group inside it per infrastructure repo and environment. The
-platform team sets targets up in the chart (value
-`infrastructure.targets`, read by forge-api from a mounted file):
+A target names the destinations available to developers and configures each
+environment's GitHub settings and provider access. The platform team defines
+targets in `infrastructure.targets`. Its provider integration may use an
+existing scope or provision a new one; the deployment boundary can be a
+resource group, subscription, account, project or another provider-specific
+scope. Forge does not require resource groups.
 
-```yaml
-infrastructure:
-  namespace: forge-infrastructure     # the Crossplane objects and the targets' Secrets
-  providerConfig: default-github      # the install's Crossplane GitHub ProviderConfig
-  workflow: my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
-  targets:
-    - name: azure
-      title: Azure
-      teams: []                       # teams that may use it; empty: every team
-      environments:
-        production:                   # an environment the target does not list cannot be chosen
-          secret: target-azure-production   # a Secret in the namespace above
-          githubSecrets:              # environment secret name: key in that Secret
-            AZURE_TENANT_ID: tenantId
-            AZURE_SUBSCRIPTION_ID: subscriptionId
-          githubVariables:            # environment variable name: value (not secret)
-            TF_STATE_RESOURCE_GROUP: rg-state
-            TF_STATE_STORAGE_ACCOUNT: ststate
-          maxRepos: 20
-          access: |                   # Crossplane XR, one per repo and environment
-            apiVersion: azure.forge.dev/v1alpha1
-            kind: AzureInfrastructureEnvironment
-            metadata:
-              name: {{ .Repo }}-{{ .Environment }}
-            spec:
-              crossplane:
-                compositionRef:
-                  name: azure-infrastructure-environment
-              writeConnectionSecretToRef:
-                name: {{ .Repo }}-{{ .Environment }}-azure-ids
-              parameters:
-                location: swedencentral
-                resourceGroupName: rg-{{ .Repo }}-{{ .Environment }}
-                planRoleName: forge-plan-{{ .RepoID }}-{{ .Environment }}
-                deploySubject: {{ .Subject }}
-                planSubject: {{ .PlanSubject }}
-                stateContainerName: forge-{{ .RepoID }}-{{ .Environment }}
-                stateStorageAccountId: <target-state-storage-account-resource-id>
-        staging: {...}                # same shape, its own account and identity
-```
-
-- The Secret holds the environment's secret values. Who makes it is up to the
-  install (at showmino: from 1Password now, later from the landing zone).
-  Values such as a subscription ID go to GitHub as secrets by the owner's
-  choice, even if they are not secret on their own. Variables are plain values
-  in the target: the Crossplane kind for an environment variable has no way to
-  read a Secret.
-- `access` is a Go template with `.Org`, `.Repo`, `.RepoID`, `.Environment`,
-  `.Team`, `.Subject` and `.PlanSubject` (the OIDC subjects below). For AWS it
-  could describe a role's trust; for GCP a workload identity binding. Forge
-  fills it in and writes it.
-- The Azure Composition creates separate deploy and plan identities for each
-  repo/environment, each with one federated credential. It also creates a
-  private blob container per repo/environment, grants the deploy identity
-  Blob Data Contributor and the plan identity Blob Data Reader on that
-  container only, and leaves state behind when the repo is removed.
-  `maxRepos` limits target capacity; it is no longer tied to the Azure
-  per-identity federation limit.
+Each environment's Secret holds values supplied by the install's chosen
+secret manager. Its `access` template creates provider-specific Crossplane
+resources for the repository and environment. The template receives `.Org`,
+`.Repo`, `.RepoID`, `.Environment`, `.Team`, `.Subject` and `.PlanSubject`.
+The provider integration and shared workflow define identity, permissions,
+state storage and deployment behavior. Configure a separate, read-only
+identity for pull-request plans; never give unreviewed PR code deployment
+permissions or state write access.
 
 ### Templates
 
@@ -157,7 +104,9 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
   make a repo, register it, and set up its environments for a target.
 - `deploy.yml` is short: it calls the shared workflow (`infrastructure.workflow`
   above) with the tool and the folder. The shared workflow lives in a repo the
-  platform team owns, and holds the jobs:
+  platform team owns, and holds the jobs. The initial templates and shared
+  workflow target Azure; other cloud providers need their own templates,
+  provider access resources and shared workflow:
   - on every pull request: `bicep build` or `tofu validate`, plus a required
     `what-if` or `tofu plan` for every chosen account, including production
     when that is the repo's only account. These are plans, not preview
@@ -165,7 +114,7 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
   - on a merge to `main`: deploy to `staging` (when the repo has it), then
     ask Forge for production's approval, and deploy to `production` once
     Forge says it is approved for that commit.
-  - Deployment jobs sign in with `azure/login` from the environment's
+  - Azure deployment jobs sign in with `azure/login` from the environment's
     secrets and GitHub's OIDC token. PR plans use separate read-only
     identities, delivered as repository secrets, without naming an environment.
     The `opentofu` template runs `tofu`; one input switches it to `terraform`.
@@ -179,14 +128,15 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
 - One parameter file per tool. What differs between environments is read
   from the GitHub environment (`readEnvironmentVariable()` in
   `main.bicepparam`, `TF_VAR_...` for OpenTofu).
-- OpenTofu state: the `azurerm` backend in the target's storage account,
+- For the initial Azure OpenTofu template, state uses the `azurerm` backend in
+  the target's storage account,
   isolated to a private container per repository and environment, named
   `forge-<repo-id>-<environment>`. The state key is `<repo>.tfstate`, signed
   in with OIDC (`use_oidc`, `use_azuread_auth`). The deploy identity gets
   **Storage Blob Data Contributor** and the plan identity gets **Storage Blob
   Data Reader** on that container only; Owner alone does not give data access.
-- The first templates are for Azure. Templates for other clouds are someone
-  else's to write; nothing in Forge stops them.
+- Other providers use their own state backend and provider-specific access
+  model. Forge does not require the Azure account or resource layout.
 
 ### Pull requests and plan identities (owner's amendment, 2026-11-04)
 
@@ -218,17 +168,10 @@ infrastructure/terraform/   main.tf, variables.tf, providers.tf, terraform.tfvar
   and `.Subject` for the shared workflow's PR subject, ending in
   `:pull_request`, with immutable repository IDs. Deployment's `:environment:`
   trust and production's main-only branch policy remain unchanged.
-- For Azure: a plan identity gets Reader at the service resource group, a
-  custom role with only ARM deployment read, what-if and validation actions,
-  and read-only state access to its own container. Never give PR code resource
-  deployment privileges or state write access. The deploy identity gets
-  Contributor and Azure Deployment Stack Owner on its service resource group,
-  plus state write access to its own container.
-  Terraform PR plans download the state blob read-only and use a local
-  backend override with `-lock=false`; missing blobs start from empty state.
-  Other read failures are fatal. This avoids backend initialization writing
-  or leasing a missing state. Merge-time apply replans and locks.
-  The platform team provisions these identities and roles; Forge stays cloud-neutral.
+- A plan identity must have only the read permissions and state access needed
+  to calculate a plan. The provider integration and workflow must prevent
+  pull-request code from deploying resources or writing deployment state.
+  Merge-time deployment uses deployment access and plans again.
 - Existing targets without `plan` remain readable for migration, but creating
   a repo against one fails with a configuration error. Roll out the plan
   settings and updated shared workflow alongside enforcement, not afterward.
@@ -282,21 +225,19 @@ the target has):
    `infrastructure.namespace`, in an AppProject that allows only the kinds
    above and the kinds the targets' `access` use. Crossplane does the rest,
    and puts back what someone changes by hand.
-6. For Azure, the environment's access object asks a Crossplane Composition
-   to create `rg-<repo>-<environment>`, a deploy identity, a read-only plan
-   identity, their role assignments, and their federated credentials. The
-   composition publishes the generated client IDs to a Kubernetes Secret;
-   the GitHub provider copies them into the deployment environment and the
-   repository's plan secrets. The subscription, tenant, region, state store,
-   and approved role definitions come from platform configuration.
+6. The environment's access template creates provider-specific Crossplane
+   resources for the repository and environment. The provider integration
+   grants the required deploy and read-only plan access, and configures the
+   appropriate target scope, identity trust and state storage. It may use an
+   existing scope or provision one; the cloud resource hierarchy is not fixed
+   by Forge.
 7. The operation finishes when the Crossplane objects are Ready, and says
    which one is not and why.
 
-Deleting the repo's service deletes `infrastructure/<repo>/`, so the
-environments and the cloud sign-in go with it. Azure resource groups and
-state containers are orphaned rather than deleted: removing a Forge repo must
-not delete its infrastructure or state. The delete warns that these resources
-remain in the cloud account.
+Deleting the repo's service deletes `infrastructure/<repo>/`, so its GitHub
+environments and access objects are removed according to their configured
+lifecycle. Cloud resources and state are not implicitly deleted with the repo;
+the platform's provider integration defines their lifecycle.
 
 ### The approval
 
@@ -353,23 +294,12 @@ repo's team approve its own production runs:
 
 ### Crossplane
 
-The settled decision "OpenTofu jobs, not Crossplane" gets a second exception
-(the first is DNS records): GitHub environment settings and the targets'
-`access` are Crossplane objects. Why: they are long-lived settings that
-should be put back when someone changes them by hand, and every cloud has a
-Crossplane provider, so Forge stays cloud-neutral.
-
-The install needs Crossplane, `provider-upjet-github` with a ProviderConfig
-for the org (its own credential, not Forge's App key), and a provider for each
-cloud its targets use. Azure needs the Resources, Managed Identity,
-Authorization and Storage providers plus a Composition that creates one
-resource group and isolated state container per repo/environment and returns
-the generated identity client IDs for GitHub secrets. The Azure provider uses
-a dedicated provisioning identity, separate from the per-service deploy and
-plan identities. It must create resource groups and state containers, scoped
-role definitions and role assignments. The exact Azure permissions are an
-install-level change and must be approved before rollout. The chart does not
-install the providers; its README and forgegate say what is needed.
+GitHub environment settings and the targets' `access` are Crossplane objects.
+They are long-lived settings that should be reconciled if changed outside
+Forge. An installation needs Crossplane, its GitHub provider, and provider
+integrations and compositions for the targets it offers. The cloud resources,
+scope boundaries, identities, roles and lifecycle rules are defined by those
+integrations. The chart does not install Crossplane providers.
 
 ## Permissions
 
@@ -455,6 +385,5 @@ field.
    rejects the new `forge.yaml` field.
 2. The shared workflow and the templates `bicep` and `opentofu`.
 3. The exception, the dashboard, the docs.
-4. On showmino's install: the Azure provider, the production target's Secret,
-   the deploy repo's ruleset, the App's new permissions (each with the owner's
-   OK; details in the operator's runbook, not here).
+4. Configure provider integrations, targets, GitHub permissions and repository
+   protection for each installation.
