@@ -13,6 +13,7 @@ repositories:
 infrastructure:
   enabled: true
   workflow: acme/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main
+  allowSelfApproval: true
   accessKinds:
     - managedidentity.azure.m.upbound.io/FederatedIdentityCredential
     - azure.forge.dev/AzureInfrastructureEnvironment

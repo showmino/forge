@@ -291,7 +291,10 @@ the platform's provider integration defines their lifecycle.
   dashboard (the repo's page, and a list of what waits on you) or with
   `forge approval approve|reject <id>`. Forge refuses an approval by the
   person who started the run or re-ran it, unless the repo has the
-  exception. Membership is the login's groups. Logins are compared, which a
+  exception or the install allows it (`--allow-self-approval`, chart value
+  `infrastructure.allowSelfApproval`, added 2026-11-06 for teams where
+  everyone approves; with repository protection, the pull request into
+  `main` still needs another member's review). Membership is the login's groups. Logins are compared, which a
   GitHub user can rename; storing user IDs is a later hardening.
 - **Deploying:** an approval can take a day; no runner waits for it. The
   production job ends after asking; on approval Forge starts the repo's

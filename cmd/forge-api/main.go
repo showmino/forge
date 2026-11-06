@@ -79,6 +79,7 @@ func run() error {
 		chartsOn           = flag.Bool("charts", env("FORGE_CHARTS", "") == "1" || env("FORGE_CHARTS", "") == "true", "let services run a published Helm chart (forge create --chart); needs --deploys and the forge-charts ApplicationSet")
 		allowedChartRepos  = flag.String("allowed-chart-repos", env("FORGE_ALLOWED_CHART_REPOS", ""), "chart repositories services may run charts from, comma separated, such as oci://ghcr.io/acme/charts (empty: any); the chart rules (policy/charts.rego) refuse others")
 		infraConfig        = flag.String("infrastructure-config", env("FORGE_INFRASTRUCTURE_CONFIG", ""), "file of the targets infrastructure repos deploy to (forge create --target; phase 12); needs --deploys and the GitHub App")
+		allowSelfApproval  = flag.Bool("allow-self-approval", env("FORGE_ALLOW_SELF_APPROVAL", "") == "1" || env("FORGE_ALLOW_SELF_APPROVAL", "") == "true", "let whoever pushed a commit or started its run approve its production run too (any member of the owning team may approve); by default another member must")
 		repositoriesConfig = flag.String("repositories-config", env("FORGE_REPOSITORIES_CONFIG", ""), "file configuring Crossplane main-branch protection for Forge-created repos; needs --deploys and the GitHub App")
 		allowedRegistries  = flag.String("allowed-registries", env("FORGE_ALLOWED_REGISTRIES", ""), "registry hosts a service without a repo may run images from, comma separated (empty: any); the image rules (policy/images.rego) refuse others")
 		imageRegistry      = flag.String("image-registry", env("FORGE_IMAGE_REGISTRY", server.DefaultRegistry), "where the services' CI pushes images (a host and an optional path); deploys and previews run <registry>/<owner>/<service>:<commit>")
@@ -289,7 +290,7 @@ func run() error {
 		if gh, ok := repoHost(app).(server.Dispatcher); ok {
 			dispatch = gh
 		}
-		o := server.ApprovalOptions{Store: st, Catalog: catalog, Infra: infra, Dispatch: dispatch, Org: *githubOrg, Log: log}
+		o := server.ApprovalOptions{Store: st, Catalog: catalog, Infra: infra, Dispatch: dispatch, Org: *githubOrg, AllowSelfApproval: *allowSelfApproval, Log: log}
 		if gh, ok := repoHost(app).(*github.Client); ok && *deployRepo != "" {
 			owner, name, _ := strings.Cut(*deployRepo, "/")
 			o.Exceptions = &server.ExceptionOptions{

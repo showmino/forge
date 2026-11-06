@@ -159,6 +159,9 @@ spec:
             {{- end }}
             {{- if .Values.infrastructure.enabled }}
             - {name: FORGE_INFRASTRUCTURE_CONFIG, value: /etc/forge/infrastructure/config.yaml}
+            {{- if .Values.infrastructure.allowSelfApproval }}
+            - {name: FORGE_ALLOW_SELF_APPROVAL, value: "1"}
+            {{- end }}
             {{- end }}
             {{- if .Values.clusters.enabled }}
             - {name: FORGE_CLUSTERS, value: "1"}

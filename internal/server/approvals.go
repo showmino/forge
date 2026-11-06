@@ -51,8 +51,12 @@ type ApprovalOptions struct {
 	// SelfApproval reports whether the team of the service may approve its
 	// own runs; nil: the exception decides (never without Exceptions).
 	SelfApproval func(ctx context.Context, service string) (bool, error)
-	Now          func() time.Time
-	Log          *slog.Logger
+	// AllowSelfApproval lets every member of the owning team approve,
+	// including whoever pushed the commit or started the run, without an
+	// exception (--allow-self-approval).
+	AllowSelfApproval bool
+	Now               func() time.Time
+	Log               *slog.Logger
 }
 
 // Approvals is the ApprovalService: production runs of infrastructure repos
@@ -296,10 +300,11 @@ func (a *Approvals) ApproveApproval(ctx context.Context, req *connect.Request[fo
 	if err != nil {
 		return nil, err
 	}
-	// Neither who pushed the commit nor who started this attempt of the run.
+	// Neither who pushed the commit nor who started this attempt of the run,
+	// unless this Forge allows it or the service has an exception.
 	if strings.EqualFold(login, ap.RequestedBy) || (ap.TriggeredBy != "" && strings.EqualFold(login, ap.TriggeredBy)) {
-		self := false
-		if a.o.SelfApproval != nil {
+		self := a.o.AllowSelfApproval
+		if !self && a.o.SelfApproval != nil {
 			if self, err = a.o.SelfApproval(ctx, ap.Service); err != nil {
 				return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("check the exceptions of %s%s: %w", servicePrefix, ap.Service, err))
 			}

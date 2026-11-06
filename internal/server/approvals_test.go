@@ -382,6 +382,25 @@ func TestApprovalSelfWithException(t *testing.T) {
 	}
 }
 
+// With AllowSelfApproval, whoever pushed or re-ran may approve without an
+// exception, but it is still only the owning team (or an admin).
+func TestApprovalSelfAllowed(t *testing.T) {
+	t.Parallel()
+	allow := func(o *ApprovalOptions) { o.AllowSelfApproval = true }
+	e := newApprovalEnvWith(t, false, allow)
+	ap := e.request(t, "ci")
+	_, err := e.approve("cy", ap.GetName())
+	wantCode(t, "other team", err, connect.CodePermissionDenied, "")
+	if got, err := e.approve("ana", ap.GetName()); err != nil || got.GetState() != forgev1.Approval_STATE_APPROVED {
+		t.Fatalf("who pushed: %v %v", got, err)
+	}
+	e = newApprovalEnvWith(t, false, allow)
+	ap = e.request(t, "ci-rerun-bo")
+	if got, err := e.approve("bo", ap.GetName()); err != nil || got.GetState() != forgev1.Approval_STATE_APPROVED {
+		t.Fatalf("who re-ran: %v %v", got, err)
+	}
+}
+
 func TestApprovalsNotConfigured(t *testing.T) {
 	t.Parallel()
 	e := newApprovalEnv(t, true)
