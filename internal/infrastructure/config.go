@@ -60,9 +60,28 @@ type Target struct {
 	Name  string `yaml:"name"`
 	Title string `yaml:"title,omitempty"`
 	// Teams may use the target; empty: every team.
-	Teams        []string               `yaml:"teams,omitempty"`
+	Teams []string `yaml:"teams,omitempty"`
+	// Objects says who makes an environment's objects: "forge" (the
+	// default) writes the GitHub environment, its production branch rule,
+	// the secrets, the variables and the plan settings itself, next to the
+	// access template's objects; "template" writes only what the access
+	// template makes, for example one instance of a kro
+	// ResourceGraphDefinition that makes all of them. With "template" the
+	// template is responsible for production's main-only branch rule and
+	// for a separate plan identity.
+	Objects      string                 `yaml:"objects,omitempty"`
 	Environments map[string]Environment `yaml:"environments"`
 }
+
+// The values of Target.Objects.
+const (
+	ObjectsForge    = "forge"
+	ObjectsTemplate = "template"
+)
+
+// TemplateObjects reports whether the target's access templates make every
+// object of an environment (objects: template).
+func (t Target) TemplateObjects() bool { return t.Objects == ObjectsTemplate }
 
 // Environment is one environment of a target: one cloud account.
 type Environment struct {
@@ -184,11 +203,19 @@ func (c *Config) check() error {
 		if len(t.Environments) == 0 {
 			return fmt.Errorf("target %s: name at least one environment (%s)", t.Name, strings.Join(Environments, ", "))
 		}
+		if t.Objects != "" && t.Objects != ObjectsForge && t.Objects != ObjectsTemplate {
+			return fmt.Errorf("target %s: objects %q must be %s or %s", t.Name, t.Objects, ObjectsForge, ObjectsTemplate)
+		}
 		for name, e := range t.Environments {
 			if !slices.Contains(Environments, name) {
 				return fmt.Errorf("target %s: environment %q must be one of %s", t.Name, name, strings.Join(Environments, ", "))
 			}
-			if err := e.check(c.AccessKinds); err != nil {
+			if t.TemplateObjects() {
+				if err := e.checkTemplateObjects(); err != nil {
+					return fmt.Errorf("target %s, %s: %w", t.Name, name, err)
+				}
+			}
+			if err := e.check(c.AccessKinds, t.TemplateObjects()); err != nil {
 				return fmt.Errorf("target %s, %s: %w", t.Name, name, err)
 			}
 			t.Environments[name] = e
@@ -223,8 +250,27 @@ func checkKinds(docs []byte, kinds []string) error {
 	}
 }
 
-func (e *Environment) check(kinds []string) error {
-	if !dnsLabel.MatchString(e.Secret) {
+// checkTemplateObjects refuses the settings Forge would ignore when the
+// access template makes every object (objects: template).
+func (e *Environment) checkTemplateObjects() error {
+	const why = "with objects: template the access template makes them"
+	switch {
+	case strings.TrimSpace(e.Access) == "":
+		return errors.New("access: with objects: template it makes every object of the environment, so it must not be empty")
+	case len(e.GitHubSecrets) > 0:
+		return errors.New("githubSecrets: " + why)
+	case len(e.GitHubVariables) > 0:
+		return errors.New("githubVariables: " + why)
+	case e.Plan != nil:
+		return errors.New("plan: with objects: template the access template makes the plan access")
+	}
+	return nil
+}
+
+// check checks the environment. secretOptional: with objects: template
+// Forge itself reads no Secret, so the template may name its own.
+func (e *Environment) check(kinds []string, secretOptional bool) error {
+	if (!secretOptional || e.Secret != "") && !dnsLabel.MatchString(e.Secret) {
 		return fmt.Errorf("secret %q must be a Secret's name", e.Secret)
 	}
 	for name, key := range e.GitHubSecrets {
@@ -275,7 +321,7 @@ func (e *Environment) check(kinds []string) error {
 			return errors.New("plan.secret must differ from the deployment secret: PRs use a separate identity")
 		}
 		p := e.Plan.environment()
-		if err := p.check(kinds); err != nil {
+		if err := p.check(kinds, false); err != nil {
 			return fmt.Errorf("plan: %w", err)
 		}
 		e.Plan.access = p.access

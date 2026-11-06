@@ -436,7 +436,14 @@ folder. Every chosen target environment needs `plan` with a separate
 deployment settings. Crossplane publishes these as repository settings
 `FORGE_PLAN_<ENV>_*`, plus the JSON array `FORGE_PLAN_ENVIRONMENTS`. The
 plan access template's `.Subject` ends in `:pull_request` and does not name a
-GitHub environment. Every PR runs a plan/what-if for each chosen account,
+GitHub environment. A target with `objects: template` instead lets each
+environment's `access` template make every object (for example one instance
+of a kro ResourceGraphDefinition that makes the GitHub environment, its
+secrets and variables, the plan settings and the cloud access); Forge then
+writes only that, plus `FORGE_ENVIRONMENTS` and `FORGE_PLAN_ENVIRONMENTS`,
+refuses `githubSecrets`, `githubVariables` and `plan` on the target, and
+leaves production's main-only rule and the separate plan identity to the
+template. Every PR runs a plan/what-if for each chosen account,
 including production-only repos, without creating preview environments.
 The Azure plan identity has Reader and ARM what-if/validation permissions,
 not deploy permissions, and Storage Blob Data Reader on the state container.
