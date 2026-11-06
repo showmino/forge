@@ -107,9 +107,9 @@ everything else: the GitHub environment, production's main-only branch rule,
 the secrets and variables, the plan settings and the cloud access. The
 intended use is one instance of a kro ResourceGraphDefinition per
 environment, so a service's deploy-repo folder holds a handful of objects
-instead of dozens. Forge refuses `githubSecrets`, `githubVariables` and `plan`
-on such a target (they would be ignored), does not require `plan` for a
-create, and `secret` is optional. The platform team's ResourceGraphDefinition
+instead of dozens. Forge refuses `secret`, `githubSecrets`, `githubVariables`
+and `plan` on such a target (they would be ignored) and does not require
+`plan` for a create. The platform team's ResourceGraphDefinition
 is then responsible for the main-only rule and the separate plan identity.
 The default, `objects: forge`, is unchanged.
 

@@ -257,6 +257,8 @@ func (e *Environment) checkTemplateObjects() error {
 	switch {
 	case strings.TrimSpace(e.Access) == "":
 		return errors.New("access: with objects: template it makes every object of the environment, so it must not be empty")
+	case e.Secret != "":
+		return errors.New("secret: with objects: template the access template names its own Secrets")
 	case len(e.GitHubSecrets) > 0:
 		return errors.New("githubSecrets: " + why)
 	case len(e.GitHubVariables) > 0:
@@ -267,10 +269,10 @@ func (e *Environment) checkTemplateObjects() error {
 	return nil
 }
 
-// check checks the environment. secretOptional: with objects: template
-// Forge itself reads no Secret, so the template may name its own.
-func (e *Environment) check(kinds []string, secretOptional bool) error {
-	if (!secretOptional || e.Secret != "") && !dnsLabel.MatchString(e.Secret) {
+// check checks the environment. noSecret: with objects: template Forge
+// itself reads no Secret (checkTemplateObjects refuses one).
+func (e *Environment) check(kinds []string, noSecret bool) error {
+	if !noSecret && !dnsLabel.MatchString(e.Secret) {
 		return fmt.Errorf("secret %q must be a Secret's name", e.Secret)
 	}
 	for name, key := range e.GitHubSecrets {

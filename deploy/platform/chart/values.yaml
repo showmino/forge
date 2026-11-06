@@ -298,8 +298,8 @@ infrastructure:
   # objects: template (default forge) makes Forge write only what each
   # environment's access template makes, such as one kro instance that
   # makes the GitHub environment, production's main-only branch rule, the
-  # secrets and variables and the plan access; then githubSecrets,
-  # githubVariables and plan are refused and secret is optional.
+  # secrets and variables and the plan access; then secret, githubSecrets,
+  # githubVariables and plan are refused.
   # Forge's README has an example.
   targets: []
 

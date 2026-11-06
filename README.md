@@ -441,7 +441,8 @@ environment's `access` template make every object (for example one instance
 of a kro ResourceGraphDefinition that makes the GitHub environment, its
 secrets and variables, the plan settings and the cloud access); Forge then
 writes only that, plus `FORGE_ENVIRONMENTS` and `FORGE_PLAN_ENVIRONMENTS`,
-refuses `githubSecrets`, `githubVariables` and `plan` on the target, and
+refuses `secret`, `githubSecrets`, `githubVariables` and `plan` on the
+target, and
 leaves production's main-only rule and the separate plan identity to the
 template. Every PR runs a plan/what-if for each chosen account,
 including production-only repos, without creating preview environments.

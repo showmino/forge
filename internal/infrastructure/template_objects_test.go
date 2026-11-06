@@ -100,6 +100,8 @@ func TestTemplateObjectsRefuses(t *testing.T) {
 			"githubSecrets: with objects: template the access template makes them"},
 		"github variables": {"      production:\n        maxRepos: 5\n", "      production:\n        maxRepos: 5\n        githubVariables: {AZURE_LOCATION: here}\n",
 			"githubVariables: with objects: template the access template makes them"},
+		"secret": {"      production:\n        maxRepos: 5\n", "      production:\n        maxRepos: 5\n        secret: target\n",
+			"secret: with objects: template the access template names its own Secrets"},
 		"plan block": {"      production:\n        maxRepos: 5\n", "      production:\n        maxRepos: 5\n        plan: {secret: p}\n",
 			"plan: with objects: template the access template makes the plan access"},
 	} {
