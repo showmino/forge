@@ -1,0 +1,14 @@
+---
+apiVersion: kro.run/v1alpha1
+kind: CloudEnvironment
+metadata:
+  labels:
+    forge.dev/deploy-env: production
+    forge.dev/service: infra-net
+  name: infra-net-production
+spec:
+  deploySubject: job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org@155/infra-net@1445:environment:production
+  environment: production
+  planSubject: job_workflow_ref:my-org/forge-workflows/.github/workflows/infrastructure.yml@refs/heads/main:repo:my-org@155/infra-net@1445:pull_request
+  repo: infra-net
+  repoID: "1445"

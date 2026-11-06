@@ -98,6 +98,21 @@ in a separate scope where they have no role (for Azure, a management resource
 group per environment), give them roles on the service's scope only, and
 provision that scope empty.
 
+### Objects made by the template (owner's amendment, 2026-11-06)
+
+A target may set `objects: template`. Then Forge writes, per environment,
+only what the `access` template makes, and at repo level only
+`FORGE_ENVIRONMENTS` and `FORGE_PLAN_ENVIRONMENTS`. The template makes
+everything else: the GitHub environment, production's main-only branch rule,
+the secrets and variables, the plan settings and the cloud access. The
+intended use is one instance of a kro ResourceGraphDefinition per
+environment, so a service's deploy-repo folder holds a handful of objects
+instead of dozens. Forge refuses `secret`, `githubSecrets`, `githubVariables`
+and `plan` on such a target (they would be ignored) and does not require
+`plan` for a create. The platform team's ResourceGraphDefinition
+is then responsible for the main-only rule and the separate plan identity.
+The default, `objects: forge`, is unchanged.
+
 ### Templates
 
 Two new templates in the templates repo, both `type: infrastructure`:

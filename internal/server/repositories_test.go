@@ -14,6 +14,7 @@ import (
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/infrastructure"
 	"github.com/showmino/forge/internal/repositories"
 	"github.com/showmino/forge/internal/store"
 )
@@ -498,5 +499,32 @@ func TestInfrastructureRequiresPlanIdentity(t *testing.T) {
 	}
 	if e.repos.createCount() != 0 {
 		t.Fatal("created a repository before validating its plan identity")
+	}
+}
+
+// With objects: template the access template makes the plan access, so a
+// target needs no plan block, and the environment's file holds only the
+// template's objects.
+func TestInfrastructureTemplateObjectsNeedNoPlanBlock(t *testing.T) {
+	e := newInfraEnv(t, false, func(o *Options) {
+		tg := &o.Infrastructure.Targets[0]
+		tg.Objects = infrastructure.ObjectsTemplate
+		env := tg.Environments["production"]
+		env.Plan = nil
+		tg.Environments["production"] = env
+	})
+	msgs, err := e.create(context.Background(), "writer", infraRequest("infra-net", "production"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msgs[len(msgs)-1].GetService() == nil {
+		t.Fatalf("create failed: %v", msgs[len(msgs)-1])
+	}
+	prod, err := e.repo.Read(context.Background(), "infrastructure/infra-net/production.yaml", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(prod), "kind: Environment\n") || strings.Contains(string(prod), "kind: EnvironmentSecret") {
+		t.Fatalf("Forge wrote its own GitHub objects with objects: template:\n%s", prod)
 	}
 }

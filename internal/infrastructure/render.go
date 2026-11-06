@@ -80,7 +80,7 @@ func (c *Config) Files(t Target, r Repo) (map[string][]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("target %s has no %s (it has %s)", t.Name, env, strings.Join(t.EnvironmentNames(), ", "))
 		}
-		data, err := c.objects(e, r, env)
+		data, err := c.objects(e, r, env, t.TemplateObjects())
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", env, err)
 		}
@@ -162,9 +162,13 @@ func (c *Config) repoObject(r Repo, kind, name string, settings map[string]any) 
 }
 
 // objects are one environment's Crossplane objects, as YAML documents.
-func (c *Config) objects(e Environment, r Repo, env string) ([]byte, error) {
+// templateOnly (objects: template): only the access template's objects.
+func (c *Config) objects(e Environment, r Repo, env string, templateOnly bool) ([]byte, error) {
 	base := r.Name + "-" + env
 	labels := map[string]string{"forge.dev/service": r.Name, "forge.dev/deploy-env": env}
+	if templateOnly {
+		return e.renderAccess(c.accessValues(r, env), labels)
+	}
 	ref := map[string]string{"kind": c.ProviderConfig.Kind, "name": c.ProviderConfig.Name}
 	obj := func(apiVersion, kind, name string, forProvider map[string]any) map[string]any {
 		return map[string]any{
@@ -213,17 +217,22 @@ func (c *Config) objects(e Environment, r Repo, env string) ([]byte, error) {
 		out.Write(b)
 	}
 	if e.access != nil {
-		access, err := e.renderAccess(AccessValues{
-			Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env,
-			RepoID:  r.RepoID,
-			Subject: c.Subject(r, env), PlanSubject: c.PlanSubject(r),
-		}, labels)
+		access, err := e.renderAccess(c.accessValues(r, env), labels)
 		if err != nil {
 			return nil, fmt.Errorf("access: %w", err)
 		}
 		out.Write(access)
 	}
 	return out.Bytes(), nil
+}
+
+// accessValues are what an environment's access template gets for r.
+func (c *Config) accessValues(r Repo, env string) AccessValues {
+	return AccessValues{
+		Org: r.Org, Repo: r.Name, Team: r.Team, Environment: env,
+		RepoID:  r.RepoID,
+		Subject: c.Subject(r, env), PlanSubject: c.PlanSubject(r),
+	}
 }
 
 // renderAccess fills in the access template and checks it is Kubernetes

@@ -99,7 +99,8 @@ func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateSer
 		}
 	}
 	for _, env := range ordered {
-		if e, ok := t.Environments[env]; ok && e.Plan == nil {
+		// With objects: template the access template makes the plan access.
+		if e, ok := t.Environments[env]; ok && e.Plan == nil && !t.TemplateObjects() {
 			return nil, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
 				"target %s, %s has no plan identity: the platform team must configure plan access before this repo can run mandatory PR plans", t.Name, env))
 		}
