@@ -284,6 +284,11 @@ infrastructure:
   # The workflow file of each infrastructure repo that Forge starts, with the
   # input approval, once a production run is approved.
   repoWorkflow: deploy.yml
+  # Production runs wait for an approval by the owning team (or an admin).
+  # false: whoever pushed the commit or started the run may not approve it,
+  # another member must (or the service needs a team-of-one exception).
+  # true: every member of the team may approve, them included.
+  allowSelfApproval: false
   # The kinds the targets' access templates make, as <group>/<Kind>, such as
   # managedidentity.azure.m.upbound.io/FederatedIdentityCredential.
   accessKinds: []

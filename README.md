@@ -459,7 +459,9 @@ Its production runs wait in Forge: the shared workflow
 runs `forge approval request` with the job's token (only that workflow may),
 a member of the owning team who did not start the run approves it (`forge
 approval list --state pending`, `forge approval approve <id>`, the action
-`approval.decide`), and Forge starts the repo's `deploy.yml`
+`approval.decide`; with `infrastructure.allowSelfApproval`, forge-api
+`--allow-self-approval`, any member may, the one who pushed or started the run
+included), and Forge starts the repo's `deploy.yml`
 (`infrastructure.repoWorkflow`) with the input `approval`; that run's
 `forge approval claim <id>` prints the commit to deploy, once. A newer
 commit's request supersedes a waiting one. A team of one asks the platform

@@ -739,7 +739,7 @@ spec:
       annotations:
         checksum/repositories: 3140bd297f9effecee4176a035d41f43e8cc698c22525cca125a318bd2c86a46
         # forge-api reads the targets when it starts.
-        checksum/infrastructure: c98552600bfb6dfe55a5026be0a731cfb41468d0ee33b4ec93c9e64950baf8c6
+        checksum/infrastructure: 08dee9693ac5ee8827e4813bcce7fc5adb51c0ce21595efc20d5f6ca86564d42
     spec:
       serviceAccountName: forge-api
       securityContext:
@@ -788,6 +788,7 @@ spec:
             - {name: FORGE_DEPLOY_REPO, value: "acme/forge-deploys"}
             - {name: FORGE_DEPLOY_DOMAIN, value: "apps.acme.example"}
             - {name: FORGE_INFRASTRUCTURE_CONFIG, value: /etc/forge/infrastructure/config.yaml}
+            - {name: FORGE_ALLOW_SELF_APPROVAL, value: "1"}
             - {name: FORGE_SECRET_BACKEND, value: "onepassword"}
           volumeMounts:
             - {name: github-app, mountPath: /etc/forge/github-app, readOnly: true}
