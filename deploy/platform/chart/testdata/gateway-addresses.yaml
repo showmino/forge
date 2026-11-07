@@ -1,0 +1,18 @@
+# Deploys through the chart's Gateway on GKE's Gateway controller: a fixed,
+# reserved address (spec.addresses) and the GKE class.
+github:
+  org: acme
+  appID: "123456"
+host: forge.acme.example
+apps:
+  domain: apps.acme.example
+  pullSecret: ghcr
+  gateway:
+    className: gke-l7-global-external-managed
+    addresses:
+      - {type: NamedAddress, value: forge-apps}
+deploys:
+  enabled: true
+database:
+  existingSecret: forge-database
+  host: forge-db-rw.databases.svc

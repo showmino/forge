@@ -34,7 +34,7 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/chart-ingress.yaml | diff -u deploy/argocd/chart/testdata/chart-ingress.golden -
 
 PLATFORM_CHART := deploy/platform/chart
-PLATFORM_CASES := minimal gateway gateway-no-timeout full ingress-deploys gateway-deploys platform charts infrastructure
+PLATFORM_CASES := minimal gateway gateway-no-timeout full ingress-deploys gateway-deploys gateway-addresses platform charts infrastructure
 
 platform-chart-test: ## Lint deploy/platform/chart and compare its renders with their goldens
 	$(HELM) lint $(PLATFORM_CHART) -f $(PLATFORM_CHART)/testdata/minimal.yaml
