@@ -1,0 +1,20 @@
+# A Gateway whose implementation does not support HTTPRoute timeouts (GKE's
+# Gateway controller): the API's route carries none; the implementation's
+# own policy sets the API's timeout.
+github:
+  org: acme
+  appID: "123456"
+host: forge.acme.example
+api:
+  image:
+    tag: v0.0.0-test
+ingress:
+  enabled: false
+gateway:
+  enabled: true
+  apiTimeout: ""
+  parentRefs:
+    - {name: forge-external, namespace: forge, sectionName: https}
+database:
+  existingSecret: acme-db
+  host: db.acme.example

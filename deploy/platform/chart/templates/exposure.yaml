@@ -82,10 +82,10 @@ spec:
         - path: {type: PathPrefix, value: {{ .path }}}
       backendRefs:
         - {group: "", kind: Service, name: {{ .service }}, port: {{ .port }}, weight: 1}
-      {{- if eq .service "forge-api" }}
+      {{- if and (eq .service "forge-api") $.Values.gateway.apiTimeout }}
       # Operation logs stream; don't cut them at the default route timeout.
       timeouts:
-        request: "0s"
+        request: {{ $.Values.gateway.apiTimeout | quote }}
       {{- end }}
     {{- end }}
 {{- end }}
