@@ -92,6 +92,10 @@ spec:
     annotations:
       {{- toYaml . | nindent 6 }}
   {{- end }}
+  {{- with .Values.apps.gateway.addresses }}
+  addresses:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   listeners:
     {{- if .Values.previews.enabled }}
     - name: http

@@ -199,6 +199,10 @@ apps:
     # Annotations for the Service your Gateway implementation creates, for
     # example a cloud's fixed public IP.
     annotations: {}
+    # The Gateway's spec.addresses, for an implementation that takes its
+    # address there, for example GKE's reserved IP:
+    # [{type: NamedAddress, value: <the address's name>}].
+    addresses: []
   ingress:
     className: ""
     annotations: {}
