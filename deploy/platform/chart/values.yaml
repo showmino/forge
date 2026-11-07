@@ -62,6 +62,13 @@ gateway:
   # (apps.routing gateway, with previews or deploys on), which then gets a
   # listener of its own for each of Forge's hosts; parentRefs is not needed.
   appsGateway: false
+  # The request timeout of the API's route (HTTPRoute timeouts.request).
+  # "0s" turns it off, so the streamed operation logs are not cut. Empty
+  # leaves the field out, for an implementation that rejects it (GKE's
+  # Gateway controller); then set the API's timeout with that
+  # implementation's own policy (GKE: a GCPBackendPolicy on the Service
+  # forge-api with timeoutSec).
+  apiTimeout: "0s"
 
 api:
   image:
