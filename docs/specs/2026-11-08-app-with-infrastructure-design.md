@@ -100,27 +100,23 @@ Unchanged, checked:
   infrastructure folder (`service_teardown.go`). A test covers the combined
   case.
 
-### The shared workflow (forge-templates)
+### The shared workflow (forge-templates): unchanged
 
-`deploy.yml` runs the shared workflow on every push to `main`. In a combined
-repo, every merge that changes only the app would apply staging's
-infrastructure again and ask the team to approve a production run that
-changes nothing.
+`deploy.yml` runs the shared workflow on every push to `main`, so a merge
+that changes only the app applies staging's infrastructure again (a plan
+that changes nothing) and asks the team to approve production.
 
-Change: on a push, the `staging` and `request` jobs run only when the push
-changed `infrastructure/` or `.github/workflows/deploy.yml` (a diff of
-`before..sha`; a push without a `before` counts as changed). Pull request
-checks run as today, on every pull request, because the required check must
-report.
+The design first skipped those jobs on a push that did not change
+`infrastructure/`. The independent review of the change found why that is
+wrong: Forge asks for, approves and claims an approval only for the newest
+commit of `main` (`approvals.go`). After an infrastructure push, an app-only
+push would make the pending approval unclaimable and ask for none of its
+own, so production could not be approved until someone made another
+infrastructure commit. The skip was dropped before it merged.
 
-Effects:
-
-- This applies to every infrastructure repo, not only combined ones: a merge
-  that changes only the README no longer asks for a production approval.
-- A failed production apply is retried by a commit that changes
-  `infrastructure/`, not by any commit.
-- Production's cloud access trusts this workflow, so the change gets one
-  independent review before it merges (the rule in `AGENTS.md`).
+Later, if asked for: Forge accepts an approval of an older commit when the
+commits after it change nothing under `infrastructure/` or the workflow
+(GitHub's compare), and the workflow then skips as first designed.
 
 ### The template (forge-templates)
 
@@ -169,8 +165,7 @@ visible flag changes.
 1. forge: the changes above, test first (harness: create a combined repo,
    deploy it to staging, preview it, delete it). One independent review: it
    changes what can be deployed.
-2. forge-templates: the shared workflow change (independent review) and the
-   template. Its lint CI builds forge from `main`, so step 1 merges first.
+2. forge-templates: the template (independent review). Its lint CI builds forge from `main`, so step 1 merges first.
 3. forge-web and forgegate, alongside.
 4. A forge release. Rolling it out, and creating a real repo to try the
    template, wait for the owner's OK.
@@ -181,11 +176,13 @@ A writer creates a repo from the dashboard, once with OpenTofu and once with
 Bicep. The app runs in staging and is promoted to production. A pull request
 that changes `infrastructure/` is planned; its merge applies staging and waits
 for the team's approval of production. A merge that changes only the app
-deploys it and asks for no approval. Deleting the service removes both.
+deploys it (and, as in every infrastructure repo, asks for an approval
+whose run changes nothing). Deleting the service removes both.
 
 ## Decided with the go-ahead (2026-11-08)
 
 1. **Name** of the template: `nextjs-infra`.
 2. **Default tool**: OpenTofu.
 3. **Infrastructure jobs are skipped on pushes that do not change it**, for
-   every infrastructure repo.
+   every infrastructure repo. Dropped while building: see "The shared
+   workflow" above.
