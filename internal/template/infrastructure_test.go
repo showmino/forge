@@ -56,6 +56,19 @@ func TestInfrastructureTemplateWithRun(t *testing.T) {
 	}
 }
 
+// Options without run would offer the create form choices every create
+// then refuses.
+func TestLintInfrastructureOptionsNeedRun(t *testing.T) {
+	t.Parallel()
+	_, findings := Lint(repo(map[string]string{
+		"opentofu/template.yaml":       infraYAML + "options: [replicas]\n",
+		"opentofu/skeleton/forge.yaml": infraManifest,
+	}), "opentofu")
+	if !strings.Contains(messages(findings), "offers run options, but its forge.yaml has no run") {
+		t.Errorf("findings %q", messages(findings))
+	}
+}
+
 // Lint renders every value of an enum parameter, not only the default: a
 // template that picks its files by an enum has each choice checked.
 func TestLintRendersEveryEnumValue(t *testing.T) {

@@ -29,8 +29,9 @@ func (m *Manifest) IsInfrastructure() bool { return m.Infrastructure != nil }
 func (m *Manifest) Runs() bool { return m.Run != nil }
 
 // ErrDeploysItself is the refusal of a Forge deploy or preview of an
-// infrastructure repo whose forge.yaml has no run.
-var ErrDeploysItself = errors.New("this is an infrastructure repo without run in its forge.yaml: its GitHub Actions deploy it, and Forge approves production; it has no Forge deploys or previews")
+// infrastructure repo that has no app for Forge to run: it was made from a
+// template without one, or its forge.yaml at the commit has no run.
+var ErrDeploysItself = errors.New("this is an infrastructure repo with no app for Forge to run (made from a template without one, or no run in its forge.yaml at this commit): its GitHub Actions deploy its code, and Forge approves production")
 
 func (m *Manifest) checkInfrastructure() error {
 	i := m.Infrastructure

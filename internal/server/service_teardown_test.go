@@ -498,25 +498,47 @@ func TestDeleteServiceWithAppAndInfrastructure(t *testing.T) {
 	}
 }
 
-// A repo with infrastructure deploys only what its forge.yaml runs: without
-// run at the commit (or without a forge.yaml), there is nothing for Forge
-// to deploy.
+// A repo with infrastructure deploys only an app: one made with an app,
+// at a commit whose forge.yaml has run.
 func TestDeployAppWithInfrastructureNeedsRun(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for name, content := range map[string][]byte{
-		"no run":        []byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\ninfrastructure:\n  tool: opentofu\n"),
-		"no forge.yaml": nil,
+	withRun := []byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\nrun:\n  port: 9090\ninfrastructure:\n  tool: opentofu\n")
+	for name, tc := range map[string]struct {
+		content []byte
+		runs    bool
+	}{
+		"no run":        {[]byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\ninfrastructure:\n  tool: opentofu\n"), true},
+		"no forge.yaml": {nil, true},
+		// Made without an app: a run added later is not deployed. Whether
+		// a repo runs is decided at create.
+		"made without an app": {withRun, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			f := newTeardownFixture(t, nil)
 			f.makeCombined(t)
 			gh := f.deploys.o.GitHub.(*envtest.GitHub)
-			if content == nil {
+			// The combined repo resolves: a deploy and a preview start from here.
+			if src, err := resolveSource(ctx, f.catalog, gh, "showmino", "", "services/payments", ""); err != nil || src.port != 9090 {
+				t.Fatalf("combined: %+v %v", src, err)
+			}
+			if !tc.runs {
+				if err := f.catalog.store.Write(ctx, func(tx store.Tx) error {
+					svc, rev, err := tx.Get(ctx, "services/payments")
+					if err != nil {
+						return err
+					}
+					svc.Infrastructure.Runs = false
+					return tx.Put(ctx, svc, rev+1)
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.content == nil {
 				delete(gh.Files, envSHA+":forge.yaml")
 			} else {
-				gh.Files[envSHA+":forge.yaml"] = content
+				gh.Files[envSHA+":forge.yaml"] = tc.content
 			}
 			_, err := resolveSource(ctx, f.catalog, gh, "showmino", "", "services/payments", "")
 			if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, manifest.ErrDeploysItself) {
