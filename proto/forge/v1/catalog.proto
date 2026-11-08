@@ -93,6 +93,9 @@ message InfrastructureRepo {
   string target = 2;
   // Its GitHub environments, in deploy order: staging, production or both.
   repeated string environments = 3;
+  // Whether its forge.yaml also has run: the repo holds an app that Forge
+  // deploys like any service's, next to the infrastructure code.
+  bool runs = 4;
 }
 
 // ServiceAddress overrides forge.yaml's run.host and run.domain.

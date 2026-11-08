@@ -411,7 +411,7 @@ Enable protection only after installing the GitHub provider's namespaced
 `forge create <name> --template opentofu --target <target> [--environments
 production] --team <team>` makes an infrastructure repo from a template of
 `type: infrastructure` (its `forge.yaml` has `infrastructure.tool`, and no
-`run` or `chart`): a repo of Bicep or OpenTofu code that its own GitHub
+`chart` or `resources`): a repo of Bicep or OpenTofu code that its own GitHub
 Actions deploy to a target, a set of cloud accounts (one per environment)
 the platform team sets up in the chart's `infrastructure.targets`
 (forge-api `--infrastructure-config`). forge-api checks the target rules
@@ -430,8 +430,14 @@ so no job names an environment the repo does not have. The
 under the same name is not trusted; `target.yaml` keeps the IDs. When
 forge-api starts it writes every infrastructure repo's folder again from the
 current targets (only what changed), so a changed target reaches the repos
-made before. Forge never deploys such a repo; deleting it removes the
-folder. Every chosen target environment needs `plan` with a separate
+made before. Forge never deploys the infrastructure code; deleting the repo
+removes the folder. If the template's `forge.yaml` also has `run` (the
+`nextjs-infra` template), the repo holds an app as well, which Forge deploys
+like any service's: CI to staging, previews, promote and rollback, the
+template's run options at create. The service's `infrastructure.runs` says
+so. Forge deploys only a commit whose `forge.yaml` has `run`, and deleting
+the service takes down its deploys and then the folder
+(`docs/specs/2026-11-08-app-with-infrastructure-design.md`). Every chosen target environment needs `plan` with a separate
 `secret`, `githubSecrets`, `githubVariables` and `access`, shaped like the
 deployment settings. Crossplane publishes these as repository settings
 `FORGE_PLAN_<ENV>_*`, plus the JSON array `FORGE_PLAN_ENVIRONMENTS`. The

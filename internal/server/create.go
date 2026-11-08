@@ -332,9 +332,6 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if t.IsFile() {
 		return c.propose(ctx, req, t, version, skeleton, w)
 	}
-	if t.IsInfrastructure() && req.GetRunOptions() != nil {
-		return nil, invalid("run options are for a service: an infrastructure repo deploys itself and has no run")
-	}
 	if err := c.checkFree(ctx, id); err != nil {
 		return nil, err
 	}
@@ -370,6 +367,11 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s: %w", tname, version, err))
 	}
 	if ro := req.GetRunOptions(); ro != nil {
+		// An infrastructure repo runs nothing on Forge unless its template
+		// has an app: then its forge.yaml has run, which the options change.
+		if t.IsInfrastructure() && !rendersRun(files) {
+			return nil, invalid(fmt.Sprintf("run options are for an app, and %s has no run in its forge.yaml: the repo's GitHub Actions deploy its code", tname))
+		}
 		if files, err = applyRunOptions(files, t, ro, c.domains); err != nil {
 			return nil, err
 		}
@@ -546,6 +548,16 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	final := &forgev1.CreateServiceResponse{Event: &forgev1.CreateServiceResponse_Service{Service: resp.Msg.GetService()}}
 	w.send(final)
 	return final, nil
+}
+
+// rendersRun reports whether the rendered forge.yaml has run.
+func rendersRun(files []template.File) bool {
+	i := slices.IndexFunc(files, func(f template.File) bool { return f.Path == manifest.FileName })
+	if i < 0 {
+		return false
+	}
+	m, err := manifest.Parse(files[i].Data)
+	return err == nil && m.Runs()
 }
 
 func setCodeowners(files []template.File, data []byte) []template.File {

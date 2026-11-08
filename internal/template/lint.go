@@ -3,6 +3,7 @@ package template
 import (
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
 	"strconv"
 )
@@ -119,25 +120,53 @@ func Lint(fsys fs.FS, dir string) ([]File, []Finding) {
 		return nil, out
 	}
 	v.Params = params
+	files, found := t.lintRender(skel, v)
+	add(found)
+	if len(found) > 0 {
+		return nil, out
+	}
+	// Every other value of an enum too: a template may pick its files by one.
+	for _, p := range t.Parameters {
+		if p.Type != TypeEnum {
+			continue
+		}
+		for _, value := range p.Values {
+			if value == params[p.Name] {
+				continue
+			}
+			v.Params = maps.Clone(params)
+			v.Params[p.Name] = value
+			_, found := t.lintRender(skel, v)
+			for i := range found {
+				found[i].Message = fmt.Sprintf("with %s=%s: %s", p.Name, value, found[i].Message)
+			}
+			add(found)
+		}
+	}
+	if len(out) > 0 {
+		return nil, out
+	}
+	return files, nil
+}
+
+// lintRender renders skel with v and checks what came out: a file
+// template's paths, or a repo's forge.yaml.
+func (t *Template) lintRender(skel fs.FS, v Values) ([]File, []Finding) {
 	files, err := t.Render(skel, v)
 	if err != nil {
-		add([]Finding{{File: SkeletonDir, Message: err.Error()}})
-		return nil, out
+		return nil, []Finding{{File: SkeletonDir, Message: err.Error()}}
 	}
 	if t.IsFile() {
 		if len(files) == 0 {
-			add([]Finding{{File: SkeletonDir, Message: "renders no files"}})
-			return nil, out
+			return nil, []Finding{{File: SkeletonDir, Message: "renders no files"}}
 		}
 		if err := CheckFilePaths(files); err != nil {
-			add([]Finding{{File: SkeletonDir, Message: err.Error()}})
-			return nil, out
+			return nil, []Finding{{File: SkeletonDir, Message: err.Error()}}
 		}
 		return files, nil
 	}
 	if err := t.CheckManifest(files, v.Service.Name, v.Service.Team); err != nil {
-		add([]Finding{{File: path.Join(SkeletonDir, "forge.yaml"), Message: err.Error()}})
-		return nil, out
+		return nil, []Finding{{File: path.Join(SkeletonDir, "forge.yaml"), Message: err.Error()}}
 	}
 	return files, nil
 }

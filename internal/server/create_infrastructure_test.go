@@ -20,8 +20,8 @@ import (
 	"github.com/showmino/forge/policy"
 )
 
-// infraRelease has the infrastructure template "tofu" and the service
-// template "svc".
+// infraRelease has the infrastructure template "tofu", the infrastructure
+// template with an app "web", and the service template "svc".
 var infraRelease = staticSource{
 	versions: []string{"v1.0.0"},
 	trees: map[string]fs.FS{"v1.0.0": fstest.MapFS{
@@ -29,8 +29,12 @@ var infraRelease = staticSource{
 		"tofu/skeleton/forge.yaml": {Data: []byte("apiVersion: forge.dev/v1\nservice:\n  name: {{ .Service.Name }}\n  team: {{ .Service.Team }}\n" +
 			"infrastructure:\n  tool: opentofu\n")},
 		"tofu/skeleton/infrastructure/terraform/main.tf": {Data: []byte("terraform {}\n")},
-		"svc/template.yaml":       {Data: []byte(templateYAML("svc", "go", ""))},
-		"svc/skeleton/forge.yaml": {Data: []byte("apiVersion: forge.dev/v1\nservice:\n  name: {{ .Service.Name }}\n  team: {{ .Service.Team }}\n")},
+		"web/template.yaml": {Data: []byte(templateYAML("web", "nextjs", "type: infrastructure\noptions: [replicas]\n"))},
+		"web/skeleton/forge.yaml": {Data: []byte("apiVersion: forge.dev/v1\nservice:\n  name: {{ .Service.Name }}\n  team: {{ .Service.Team }}\n" +
+			"run:\n  port: 3000\ninfrastructure:\n  tool: bicep\n")},
+		"web/skeleton/infrastructure/bicep/main.bicep": {Data: []byte("param location string\n")},
+		"svc/template.yaml":                            {Data: []byte(templateYAML("svc", "go", ""))},
+		"svc/skeleton/forge.yaml":                      {Data: []byte("apiVersion: forge.dev/v1\nservice:\n  name: {{ .Service.Name }}\n  team: {{ .Service.Team }}\n")},
 	}},
 }
 
@@ -191,6 +195,47 @@ func TestCreateInfrastructure(t *testing.T) {
 	}
 }
 
+// A template with an app next to the code: the repo is set up as an
+// infrastructure repo, its forge.yaml keeps run with the run options asked
+// for, and the catalog says it runs.
+func TestCreateInfrastructureWithApp(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	req := infraRequest("shop", "staging")
+	req.Template = "templates/web"
+	req.RunOptions = &forgev1.RunOptions{Replicas: 2}
+	msgs, err := e.create(ctx, "writer", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := msgs[len(msgs)-1].GetService()
+	if i := svc.GetInfrastructure(); i.GetTool() != "bicep" || i.GetTarget() != "azure" || !i.GetRuns() {
+		t.Fatalf("last message %v", msgs[len(msgs)-1])
+	}
+	var pushed string
+	for _, f := range e.repos.repos["shop"] {
+		if f.Path == "forge.yaml" {
+			pushed = string(f.Content)
+		}
+	}
+	for _, want := range []string{"port: 3000", "replicas: 2", "tool: bicep"} {
+		if !strings.Contains(pushed, want) {
+			t.Errorf("forge.yaml has no %q:\n%s", want, pushed)
+		}
+	}
+	if rec, err := e.deploys.readInfrastructure(ctx, "shop"); err != nil || rec == nil {
+		t.Errorf("record %+v %v", rec, err)
+	}
+
+	// A template without the app still has no run, and the option is refused.
+	_, err = e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "net", Template: "templates/tofu", OwnerTeam: "platform", Target: "azure",
+		RunOptions: &forgev1.RunOptions{Replicas: 2}})
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), "tofu has no run in its forge.yaml") {
+		t.Errorf("run options for tofu: %v", err)
+	}
+}
+
 func TestCreateInfrastructureEveryEnvironment(t *testing.T) {
 	t.Parallel()
 	e := newInfraEnv(t, false)
@@ -226,7 +271,7 @@ func TestCreateInfrastructureRefuses(t *testing.T) {
 		{"target on a service template", e, with(func(r *forgev1.CreateServiceRequest) { r.Template = "templates/svc" }), connect.CodeInvalidArgument, "svc is not an infrastructure template"},
 		{"target with an image", e, with(func(r *forgev1.CreateServiceRequest) { r.Template, r.Image = "", "nginx:1.27" }), connect.CodeInvalidArgument, "target and environments are for an infrastructure template"},
 		{"not configured", newInfraEnv(t, true), infraRequest("infra-net"), connect.CodeFailedPrecondition, "no --infrastructure-config"},
-		{"run options", e, with(func(r *forgev1.CreateServiceRequest) { r.RunOptions = &forgev1.RunOptions{} }), connect.CodeInvalidArgument, "run options are for a service"},
+		{"run options", e, with(func(r *forgev1.CreateServiceRequest) { r.RunOptions = &forgev1.RunOptions{} }), connect.CodeInvalidArgument, "tofu has no run in its forge.yaml"},
 		{"team not a slug", e, with(func(r *forgev1.CreateServiceRequest) { r.OwnerTeam = "Platform Team" }), connect.CodeInvalidArgument, "must be a team's slug"},
 	} {
 		_, err := tt.env.create(ctx, "writer", tt.req)

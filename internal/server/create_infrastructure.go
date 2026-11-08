@@ -59,9 +59,6 @@ func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateSer
 	if err := c.infraReady(); err != nil {
 		return nil, nil, err
 	}
-	if req.GetRunOptions() != nil {
-		return nil, nil, invalid("run options are for a service: an infrastructure repo deploys itself and has no run")
-	}
 	team := req.GetOwnerTeam()
 	if !manifest.ValidID(team) {
 		return nil, nil, invalid(fmt.Sprintf("owner_team %q must be a team's slug", team))
@@ -291,5 +288,5 @@ func (c *Catalog) infrastructureCounts(ctx context.Context, target string) (map[
 
 // infrastructureOf is the catalog's record of an infrastructure repo.
 func infrastructureOf(m *manifest.Manifest, p *infraPlan) *forgev1.InfrastructureRepo {
-	return &forgev1.InfrastructureRepo{Tool: m.Infrastructure.Tool, Target: p.target.Name, Environments: p.envs}
+	return &forgev1.InfrastructureRepo{Tool: m.Infrastructure.Tool, Target: p.target.Name, Environments: p.envs, Runs: m.Runs()}
 }

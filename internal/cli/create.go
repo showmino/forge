@@ -54,7 +54,9 @@ a set of cloud accounts the platform team set up. Forge gives the repo the
 GitHub environments of --environments (staging, production; default every
 one the target has), each with its account's secrets, and lets the shared
 workflow sign in there. Production runs wait for an approval in Forge by
-the owning team. Forge never deploys such a repo itself.
+the owning team. Forge never deploys that code itself. An infrastructure
+template whose forge.yaml also has run (nextjs-infra) adds an app to the
+repo: Forge deploys the app like any service's, and run options apply to it.
 
 With --image instead of --template, the service runs an image someone else
 built (nginx:1.27, ghcr.io/acme/tool:2.3) and gets no repo: its forge.yaml,
@@ -83,6 +85,7 @@ and new values with --values there.`,
     --secret stripe=vaults/Apps/items/shop-stripe:STRIPE_KEY=credential --job 'cleanup=0 3 * * *:node cleanup.js'
   forge create payments --template go-grpc --team billing --dry-run
   forge create infra-network --template opentofu --target azure --environments production --team platform
+  forge create shop --template nextjs-infra --set iac=bicep --target azure --team web --replicas 2
   forge create web --image nginxinc/nginx-unprivileged:1.27 --health / --team web
   forge create podinfo --chart podinfo --chart-repo oci://ghcr.io/stefanprodan/charts --chart-version 6.7.1 \
     --expose podinfo:9898 --values podinfo.yaml --team web`,

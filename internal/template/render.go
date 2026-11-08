@@ -284,6 +284,8 @@ func (t *Template) CheckManifest(files []File, service, team string) error {
 		return errors.New("an infrastructure template's forge.yaml needs infrastructure.tool")
 	case !t.IsInfrastructure() && m.IsInfrastructure():
 		return errors.New("forge.yaml has infrastructure, but the template is not type: infrastructure")
+	case t.IsInfrastructure() && len(t.Options) > 0 && !m.Runs():
+		return errors.New("the template offers run options, but its forge.yaml has no run: add run for the app, or drop options")
 	}
 	return nil
 }

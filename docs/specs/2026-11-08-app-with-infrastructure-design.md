@@ -87,7 +87,7 @@ second way).
 | `internal/server/source.go` | every deploy and preview of a service with `infrastructure` refused | refused only when the `forge.yaml` it reads has no `run`; `ErrDeploysItself` says so |
 | `InfrastructureRepo` (proto) | tool, target, environments | adds `bool runs = 4`, output only, set at create from `forge.yaml`, so clients know to show deploys too |
 | `forge service get` | an infrastructure row | an infrastructure row and the service's run rows |
-| `forge template lint` | renders each template once, with defaults | a hidden `--param name=value` (repeatable), so CI can render the other tool too |
+| `forge template lint` | renders each template once, with defaults | also renders every other value of each enum parameter, so the other tool is checked too (chosen over a hidden `--param` flag while building: no CI change, nothing to learn) |
 
 Unchanged, checked:
 
@@ -143,8 +143,8 @@ nextjs-infra/
   does this).
 - The app files are copies of `nextjs`'s. The templates' lint CI checks they
   are identical, so the two cannot drift.
-- Lint CI renders the template twice, once per tool, and builds and tests the
-  app.
+- Lint renders the template once per tool (every enum value), and CI builds
+  and tests the app.
 - A new template is a minor version of `forge-templates`. It is tagged only
   after the forge-api that accepts it is live (an older API refuses `options`
   on an infrastructure template).
@@ -162,7 +162,7 @@ nextjs-infra/
 
 The infrastructure repos page gets a section on a web app with its
 infrastructure; the templates page lists the new template. No command or
-visible flag changes (`--param` on lint is hidden).
+visible flag changes.
 
 ## Order of work
 

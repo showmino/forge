@@ -243,11 +243,9 @@ func (t *Template) Validate() []Finding {
 			add(0, "target is only for a file template")
 		}
 	case TypeInfrastructure:
+		// options are allowed: a repo with an app next to its code has run.
 		if t.Target != "" {
 			add(0, "target is only for a file template")
-		}
-		if len(t.Options) > 0 {
-			add(0, "options are only for a service template: an infrastructure repo has no run")
 		}
 	case TypeFile:
 		if t.Target == "" {
