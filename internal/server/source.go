@@ -64,8 +64,12 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 	if err != nil {
 		return s, err // NotFound "services/<id> not found", or Unavailable
 	}
-	if svc.GetInfrastructure() != nil {
-		return s, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s: %w", servicePrefix, sid, manifest.ErrDeploysItself))
+	// An infrastructure repo deploys its code itself; Forge deploys only the
+	// app next to it, and only at a commit whose forge.yaml has run.
+	infra := svc.GetInfrastructure() != nil
+	deploysItself := connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s: %w", servicePrefix, sid, manifest.ErrDeploysItself))
+	if infra && !svc.GetInfrastructure().GetRuns() {
+		return s, deploysItself
 	}
 	if svc.GetRepoUrl() == "" {
 		return s, connect.NewError(connect.CodeFailedPrecondition,
@@ -85,6 +89,8 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 	s.port, s.health = manifest.DefaultRunPort, manifest.DefaultRunHealth
 	data, err := gh.FileAt(ctx, s.owner, s.repo, manifest.FileName, s.commit)
 	switch {
+	case errors.Is(err, github.ErrNotFound) && infra:
+		return s, deploysItself
 	case errors.Is(err, github.ErrNotFound): // no forge.yaml: defaults
 	case err != nil:
 		return s, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read forge.yaml at %s: %w", shortSHA(s.commit), err))
@@ -92,6 +98,9 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 		mf, err := manifest.Parse(data)
 		if err != nil {
 			return s, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("forge.yaml at %s is invalid: %w", shortSHA(s.commit), err))
+		}
+		if infra && !mf.Runs() {
+			return s, deploysItself
 		}
 		if mf.RunImage() != "" {
 			return s, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(

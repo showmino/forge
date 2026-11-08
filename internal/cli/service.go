@@ -221,8 +221,12 @@ func newServiceGetCmd(f *Factory) *cobra.Command {
 				{"updated", s.GetUpdateTime().AsTime().Local().Format("2006-01-02 15:04")},
 			}
 			if i := s.GetInfrastructure(); i != nil {
+				how := i.GetTool() + ", deploys itself from GitHub Actions"
+				if i.GetRuns() {
+					how += "; its app runs on Forge"
+				}
 				rows = append(rows,
-					[]string{"infrastructure", i.GetTool() + ", deploys itself from GitHub Actions"},
+					[]string{"infrastructure", how},
 					[]string{"target", i.GetTarget()},
 					[]string{"environments", strings.Join(i.GetEnvironments(), ", ")})
 				// The exception, when this API has them; a table only.

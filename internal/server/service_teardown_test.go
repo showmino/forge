@@ -13,6 +13,9 @@ import (
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/envtest"
+	"github.com/showmino/forge/internal/infrastructure"
+	"github.com/showmino/forge/internal/manifest"
+	"github.com/showmino/forge/internal/store"
 )
 
 // teardownFixture is the deploy fixture with payments running in staging and
@@ -443,5 +446,82 @@ func TestDeleteServiceLeavesANamespaceThatIsNoLongerForges(t *testing.T) {
 	}
 	if has, _ := f.catalog.has(ctx, "services/payments"); has {
 		t.Error("still in the catalog")
+	}
+}
+
+// makeCombined makes payments an infrastructure repo with an app: the
+// catalog says so, forge.yaml has run and infrastructure, and the deploy
+// repo has its infrastructure folder.
+func (f *teardownFixture) makeCombined(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	err := f.catalog.store.Write(ctx, func(tx store.Tx) error {
+		svc, rev, err := tx.Get(ctx, "services/payments")
+		if err != nil {
+			return err
+		}
+		svc.Infrastructure = &forgev1.InfrastructureRepo{Tool: "opentofu", Target: "azure", Environments: []string{"staging", "production"}, Runs: true}
+		return tx.Put(ctx, svc, rev+1)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gh := f.deploys.o.GitHub.(*envtest.GitHub)
+	gh.Files[envSHA+":forge.yaml"] = append(gh.Files[envSHA+":forge.yaml"], "infrastructure:\n  tool: opentofu\n"...)
+	f.repo.Push(infrastructure.RecordPath("payments"), []byte("target: azure\nteam: billing\nenvironments: [staging, production]\n"), "set up payments")
+}
+
+// A repo with an app and its infrastructure code: the app deploys like any
+// service's, and a delete takes down both the deploys and the folder.
+func TestDeleteServiceWithAppAndInfrastructure(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newTeardownFixture(t, nil)
+	f.makeCombined(t)
+	f.deployBoth(t)
+	op, err := f.delete(writerCtx(), &forgev1.DeleteServiceRequest{Name: "services/payments"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := wait(t, f.ops, op.GetName())
+	if done.GetError() != nil {
+		t.Fatalf("delete: %v", done.GetError())
+	}
+	if got := f.left(t); got != "" {
+		t.Errorf("after the delete: %s", got)
+	}
+	if rec, err := f.deploys.readInfrastructure(ctx, "payments"); err != nil || rec != nil {
+		t.Errorf("infrastructure folder after the delete: %+v %v", rec, err)
+	}
+	if got := eventSteps(done); !strings.HasSuffix(got, "infrastructure,catalog") {
+		t.Errorf("steps: %s", got)
+	}
+}
+
+// A repo with infrastructure deploys only what its forge.yaml runs: without
+// run at the commit (or without a forge.yaml), there is nothing for Forge
+// to deploy.
+func TestDeployAppWithInfrastructureNeedsRun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for name, content := range map[string][]byte{
+		"no run":        []byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\ninfrastructure:\n  tool: opentofu\n"),
+		"no forge.yaml": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newTeardownFixture(t, nil)
+			f.makeCombined(t)
+			gh := f.deploys.o.GitHub.(*envtest.GitHub)
+			if content == nil {
+				delete(gh.Files, envSHA+":forge.yaml")
+			} else {
+				gh.Files[envSHA+":forge.yaml"] = content
+			}
+			_, err := resolveSource(ctx, f.catalog, gh, "showmino", "", "services/payments", "")
+			if connect.CodeOf(err) != connect.CodeFailedPrecondition || !errors.Is(err, manifest.ErrDeploysItself) {
+				t.Errorf("deploy: %v", err)
+			}
+		})
 	}
 }

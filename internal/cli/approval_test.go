@@ -188,3 +188,23 @@ func TestTemplateTargetsNone(t *testing.T) {
 		t.Errorf("json: %s", r)
 	}
 }
+
+// service get says an infrastructure repo with an app runs that app on Forge.
+func TestServiceGetInfrastructureWithApp(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	st := store.NewMemory()
+	ctx := context.Background()
+	if err := st.Write(ctx, func(tx store.Tx) error {
+		return tx.Put(ctx, &forgev1.Service{Name: "services/shop", OwnerTeam: "web", RepoUrl: "https://github.com/showmino/shop",
+			Infrastructure: &forgev1.InfrastructureRepo{Tool: "bicep", Target: "azure", Environments: []string{"staging"}, Runs: true}}, 1)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h.catalog = server.NewCatalogWithStore(st, nil)
+	h.startAPI(h.authn)
+	r := h.ok("service", "get", "shop")
+	if !strings.Contains(r.out, "bicep, deploys itself from GitHub Actions; its app runs on Forge") {
+		t.Errorf("service get:\n%s", r.out)
+	}
+}

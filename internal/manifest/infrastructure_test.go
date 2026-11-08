@@ -31,11 +31,26 @@ func TestInfrastructureManifest(t *testing.T) {
 	}
 }
 
+// An infrastructure repo may also run an app on Forge: its forge.yaml has
+// both run and infrastructure.
+func TestInfrastructureManifestWithRun(t *testing.T) {
+	t.Parallel()
+	m, err := Parse([]byte(infraManifest + "run: {port: 3000, health: /api/healthz}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.IsInfrastructure() || !m.Runs() || m.RunPort() != 3000 {
+		t.Errorf("infrastructure %v, runs %v, port %d", m.IsInfrastructure(), m.Runs(), m.RunPort())
+	}
+	if plain, _ := Parse([]byte(infraManifest)); plain.Runs() {
+		t.Error("an infrastructure repo without run runs")
+	}
+}
+
 func TestInfrastructureManifestRefuses(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct{ add, want string }{
 		"unknown tool": {"", "infrastructure.tool"},
-		"with run":     {"run: {port: 8080}\n", "no run"},
 		"with chart":   {"chart: {repo: oci://ghcr.io/x, name: x, version: 1.0.0, expose: {service: x, port: 80}}\n", "no chart"},
 		"with db":      {"resources: [{name: db, type: postgres}]\n", "no resources"},
 		"unknown key":  {"infrastructure2: {}\n", "infrastructure2"},
