@@ -1,6 +1,7 @@
 # A web app and its infrastructure in one repo
 
-Status: proposed, waiting for the owner's go-ahead. It extends phase 12
+Status: approved by the owner on 2026-11-08, with the recommended answers to
+the open questions below. It extends phase 12
 (`2026-11-03-phase-12-infrastructure-repos-design.md`); it is not a new phase.
 
 ## Why
@@ -25,7 +26,7 @@ Forge deploys or previews (`internal/server/source.go`).
 
 ## Goals
 
-- A new template in `forge-templates` (working name `nextjs-infra`) makes one
+- A new template in `forge-templates`, `nextjs-infra`, makes one
   repo: the Next.js app at the root, the infrastructure code in
   `infrastructure/`.
 - The app gets what every service gets: deploys to staging from CI, previews,
@@ -182,11 +183,9 @@ that changes `infrastructure/` is planned; its merge applies staging and waits
 for the team's approval of production. A merge that changes only the app
 deploys it and asks for no approval. Deleting the service removes both.
 
-## Open questions for the owner
+## Decided with the go-ahead (2026-11-08)
 
-1. **Name** of the template: `nextjs-infra` (recommended), `webapp`, or
-   another.
-2. **Default tool**: OpenTofu (recommended) or Bicep.
-3. **Skip infrastructure jobs on pushes that do not change it**, for every
-   infrastructure repo (recommended), or only for combined repos (a workflow
-   input, so plain infrastructure repos keep today's behaviour).
+1. **Name** of the template: `nextjs-infra`.
+2. **Default tool**: OpenTofu.
+3. **Infrastructure jobs are skipped on pushes that do not change it**, for
+   every infrastructure repo.
