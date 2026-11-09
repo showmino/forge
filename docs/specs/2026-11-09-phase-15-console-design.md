@@ -1,6 +1,6 @@
 # Phase 15: the console
 
-Status: proposed, waiting for the owner's go-ahead.
+Status: approved by the owner on 2026-11-09, with the decisions at the end.
 
 ## Why
 
@@ -168,16 +168,15 @@ restart through the deploy repo's annotation, so Argo CD does it).
 count for that environment. Both use the team's role, are operations, and
 are audited. The service page gets an Actions tab with both.
 
-## Decisions for the owner
+## Decided by the owner (2026-11-09)
 
-1. **Tracing check:** a `forge.yaml` field the templates set (recommended),
-   or Forge looks for OpenTelemetry in the repo's dependencies.
-2. **Rules:** modes for today's rules only (recommended), or also the mock's
-   new rules (weekend freeze, 30 minutes healthy in staging before a
-   promote, preview names).
-3. **Self-service ratio:** writes by people outside the admin groups
-   (recommended), or something else.
-4. **Order after A:** B and C, then D, E, F, G (recommended).
+1. **Tracing check:** a `forge.yaml` field (`service.tracing`) that the
+   templates set, not a scan of the repo's dependencies.
+2. **Rules:** modes for today's rules only. The mock's new rules (weekend
+   freeze, 30 minutes healthy in staging before a promote, preview names)
+   come later, one by one.
+3. **Self-service ratio:** writes by people outside the admin groups.
+4. **Order after A:** B and C, then D, E, F, G.
 
 ## Exit check
 
