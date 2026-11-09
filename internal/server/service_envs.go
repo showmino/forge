@@ -15,15 +15,36 @@ import (
 // (docs/specs/2026-11-09-service-environments-design.md).
 
 // kindRemove is the operation that takes one environment's deploy down.
-const kindRemove = "remove"
+const kindRemove = "delete_deployment"
 
 // serviceEnvs returns the environments s has, in deploy order. A service
-// made before the choice existed has none recorded: it has both.
+// made before the choice existed has none recorded: an infrastructure repo
+// has its GitHub environments, every other service both.
 func serviceEnvs(s *forgev1.Service) []string {
-	if len(s.GetEnvironments()) == 0 {
-		return slices.Clone(deployEnvs)
+	if len(s.GetEnvironments()) > 0 {
+		return slices.Clone(s.GetEnvironments())
 	}
-	return slices.Clone(s.GetEnvironments())
+	if i := s.GetInfrastructure(); i != nil && len(i.GetEnvironments()) > 0 {
+		if envs, err := normalEnvs(i.GetEnvironments()); err == nil {
+			return envs
+		}
+	}
+	return slices.Clone(deployEnvs)
+}
+
+// claimIn is claim, and then checks, with the lock held, that the service
+// still has env: an environments change holds the service's locks while it
+// checks and writes, so a deploy either sees the new environments or keeps
+// the change waiting. d.mu must be held.
+func (d *Deploys) claimIn(ctx context.Context, svc, env string) error {
+	if err := d.claim(ctx, svc, env); err != nil {
+		return err
+	}
+	if err := d.requireEnv(ctx, svc, env); err != nil {
+		delete(d.running, svc+"/"+env)
+		return err
+	}
+	return nil
 }
 
 // normalEnvs checks a requested list of environments and returns it in

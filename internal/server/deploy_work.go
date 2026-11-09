@@ -162,7 +162,7 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 			}
 		}
 	}
-	if err := d.claim(ctx, src.serviceID, env); err != nil {
+	if err := d.claimIn(ctx, src.serviceID, env); err != nil {
 		return nil, err
 	}
 	op := d.o.Operations.Start(ctx, opDeploy, deployNamePrefix+target, actor, func(ctx context.Context, emit func(string, string)) error {

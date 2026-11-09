@@ -589,6 +589,9 @@ func (c *creator) propose(ctx context.Context, req *forgev1.CreateServiceRequest
 	if !strings.EqualFold(owner, c.org) {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s@%s targets %s, outside the %s organization", t.Name, version, t.Target, c.org))
 	}
+	if len(req.GetEnvironments()) > 0 {
+		return nil, invalid("environments are for a service: a file template makes no service")
+	}
 	// The team goes into the file as it is: only a GitHub team slug.
 	if !manifest.ValidID(req.GetOwnerTeam()) {
 		return nil, invalid(fmt.Sprintf("owner_team %q must be a GitHub team slug (a-z, 0-9, '-')", req.GetOwnerTeam()))
@@ -601,7 +604,7 @@ func (c *creator) propose(ctx context.Context, req *forgev1.CreateServiceRequest
 
 	started("render")
 	v := template.Values{
-		Service:  template.ServiceValues{Name: id, Team: req.GetOwnerTeam(), Owners: req.GetOwners()},
+		Service:  template.ServiceValues{Name: id, Team: req.GetOwnerTeam(), Owners: req.GetOwners(), Staging: true, Production: true},
 		Repo:     template.RepoValues{Owner: owner, Name: repo, URL: repoURL},
 		Template: template.TemplateValues{Name: t.Name, Version: version},
 	}

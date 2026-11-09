@@ -167,13 +167,13 @@ and new values with --values there.`,
 					return err
 				}
 				return f.createFromImage(ctx, c, format, &forgev1.CreateServiceRequest{
-					ServiceId: id, Chart: src, OwnerTeam: team, Owners: owners,
+					ServiceId: id, Chart: src, OwnerTeam: team, Owners: owners, Environments: environments,
 					RequestId: client.NewRequestID(), ValidateOnly: dryRun, RunOptions: runOptions,
 				}, deploy)
 			}
 			if image != "" {
 				return f.createFromImage(ctx, c, format, &forgev1.CreateServiceRequest{
-					ServiceId: id, Image: image, OwnerTeam: team, Owners: owners,
+					ServiceId: id, Image: image, OwnerTeam: team, Owners: owners, Environments: environments,
 					RequestId: client.NewRequestID(), ValidateOnly: dryRun, RunOptions: runOptions,
 				}, deploy)
 			}

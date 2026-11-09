@@ -199,6 +199,17 @@ func TestCreateFromImage(t *testing.T) {
 		t.Errorf("--deploy=false: %v", r)
 	}
 	h.fails(3, "deploy", "status", "idle", "--env", "staging")
+
+	// With production only, the create deploys there: a person runs it.
+	r = h.ok("create", "tool", "--image", "nginx:1.27", "--team", "billing", "--environments", "production")
+	if !strings.Contains(r.out, "production") {
+		t.Errorf("create with production only: %v", r)
+	}
+	if r := h.ok("service", "get", "tool"); !strings.Contains(r.out, "environments   production\n") {
+		t.Errorf("service get:\n%s", r.out)
+	}
+	h.ok("deploy", "status", "tool", "--env", "production")
+	h.fails(3, "deploy", "status", "tool", "--env", "staging")
 }
 
 // A service's environments: production only is deployed by a person and

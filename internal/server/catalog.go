@@ -376,6 +376,15 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		if envs, err = normalEnvs(in.GetEnvironments()); err != nil {
 			return nil, err
 		}
+		// Nothing may be deployed while the change is checked and written:
+		// a deploy to an environment being dropped would land after it.
+		if c.teardown != nil && c.teardown.hasDeploys() {
+			release, err := c.teardown.deploys.lockServiceFor(strings.TrimPrefix(name, servicePrefix), "an environments change")
+			if err != nil {
+				return nil, err
+			}
+			defer release()
+		}
 		cur, err := c.get(ctx, name)
 		if err != nil {
 			return nil, err

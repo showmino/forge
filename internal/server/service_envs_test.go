@@ -4,11 +4,13 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
+	"github.com/showmino/forge/internal/store"
 )
 
 // setEnvs changes payments' environments as its team would.
@@ -90,7 +92,7 @@ func TestChangeServiceEnvironments(t *testing.T) {
 		"services/payments still runs in staging: take it down first with 'forge deploy remove payments --env staging'")
 
 	// Nothing runs in an environment never deployed to.
-	if _, err := f.client.DeleteDeployment(context.Background(), as("reader", &forgev1.DeleteDeploymentRequest{Name: "deployments/payments/staging"})); connect.CodeOf(err) != connect.CodeNotFound && connect.CodeOf(err) != connect.CodePermissionDenied {
+	if _, err := f.client.DeleteDeployment(context.Background(), as("reader", &forgev1.DeleteDeploymentRequest{Name: "deployments/payments/staging"})); connect.CodeOf(err) != connect.CodePermissionDenied {
 		t.Errorf("a reader's remove: %v", err)
 	}
 	dry, err := f.client.DeleteDeployment(context.Background(), as("writer", &forgev1.DeleteDeploymentRequest{Name: "deployments/payments/staging", ValidateOnly: true}))
@@ -162,4 +164,44 @@ func TestImageServiceWithStagingOnly(t *testing.T) {
 	refused(t, "production", err, connect.CodeFailedPrecondition, "services/web has staging only, not production")
 	_, err = f.client.PromoteDeploy(context.Background(), as("writer", &forgev1.PromoteDeployRequest{Service: "services/web"}))
 	refused(t, "promote", err, connect.CodeFailedPrecondition, "add production with 'forge service update web --environments staging,production' to promote")
+}
+
+// An environments change waits for a deploy that is running: otherwise the
+// deploy could land in an environment the change has just dropped.
+func TestEnvironmentsChangeWaitsForADeploy(t *testing.T) {
+	t.Parallel()
+	f := newTeardownFixture(t, nil)
+	f.argo.SetLag(time.Hour) // the deploy stays running
+	resp, err := f.start(t, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused(t, "change while a deploy runs", f.setEnvs("production"), connect.CodeFailedPrecondition, "is already running for deployments/payments/staging")
+	f.argo.SetLag(0)
+	wait(t, f.ops, resp.GetOperation().GetName())
+}
+
+// An infrastructure repo made before the choice existed has the
+// environments of its GitHub environments, not both.
+func TestOlderInfrastructureRepoEnvironments(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newTeardownFixture(t, nil)
+	f.makeCombined(t)
+	if err := f.catalog.store.Write(ctx, func(tx store.Tx) error {
+		svc, rev, err := tx.Get(ctx, "services/payments")
+		if err != nil {
+			return err
+		}
+		svc.Environments = nil
+		svc.Infrastructure.Environments = []string{"staging"}
+		return tx.Put(ctx, svc, rev+1)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.start(t, "production")
+	refused(t, "production", err, connect.CodeFailedPrecondition, "has staging only, not production")
+	if err := f.setEnvs("staging"); err != nil {
+		t.Errorf("its own environments: %v", err)
+	}
 }
