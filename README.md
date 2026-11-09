@@ -513,8 +513,22 @@ serves them with `--previews` (see the k3s section).
 
 `forge deploy start <service> --env staging|production` commits the service's
 version to the deploy repo, which Argo CD then rolls out; `forge deploy status`,
-`history`, `rollback` and `promote` follow and change it. forge-api serves them
-with `--deploys`.
+`history`, `rollback` and `promote` follow and change it, and `forge deploy
+remove <service> --env <env>` takes one environment down (`DeleteDeployment`).
+forge-api serves them with `--deploys`.
+
+A service has staging, production or both (`Service.environments`; empty, as
+for every service made before the choice, is both). `forge create
+--environments` picks them for any kind of service, and the owning team
+changes them with `forge service update --environments`; an environment that
+still runs something must be removed first, and an infrastructure repo keeps
+the ones it was made with. Deploys and rollbacks go only to the service's
+environments, and a promote needs both. A service with production only is
+deployed by a person (`forge deploy start --env production`, which cuts the
+final version): its CI deploys nothing. Templates see `.Service.Staging` and
+`.Service.Production`, so a skeleton leaves out the CI job that deploys to
+staging; `forge service connect` does the same with the workflow it writes
+(`docs/specs/2026-11-09-service-environments-design.md`).
 
 A promotion goes ahead only when staging is ready: Argo CD reports it Synced
 and Healthy, at its latest deploy. Otherwise `forge deploy promote` (and its

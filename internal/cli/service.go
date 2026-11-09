@@ -216,6 +216,7 @@ func newServiceGetCmd(f *Factory) *cobra.Command {
 				{"owners", strings.Join(s.GetOwners(), ", ")},
 				{"lifecycle", lifecycleString(s.GetLifecycle())},
 				{"repo", s.GetRepoUrl()},
+				{"environments", serviceEnvsText(s)},
 				{"dependencies", strings.Join(s.GetDependencies(), ", ")},
 				{"labels", formatLabels(s.GetLabels())},
 				{"updated", s.GetUpdateTime().AsTime().Local().Format("2006-01-02 15:04")},
@@ -333,6 +334,15 @@ func (sf *serviceFlags) bind(cmd *cobra.Command) {
 	_ = cmd.RegisterFlagCompletionFunc("lifecycle", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return []string{"experimental", "production", "deprecated"}, cobra.ShellCompDirectiveNoFileComp
 	})
+}
+
+// serviceEnvsText is the deploy environments s has; a service made before
+// they could be chosen has both.
+func serviceEnvsText(s *forgev1.Service) string {
+	if len(s.GetEnvironments()) == 0 {
+		return "staging, production"
+	}
+	return strings.Join(s.GetEnvironments(), ", ")
 }
 
 func depNames(deps []string) []string {
@@ -454,13 +464,19 @@ func (f *Factory) printMutation(s *forgev1.Service, verb string, dryRun bool) er
 func newServiceUpdateCmd(f *Factory) *cobra.Command {
 	var sf serviceFlags
 	var dryRun bool
-	var addOwners, removeOwners []string
+	var addOwners, removeOwners, environments []string
 	cmd := &cobra.Command{
 		Use:   "update [name]",
 		Short: "Change fields of a service",
-		Long:  "Change fields of a service. Only the flags you pass are changed.",
+		Long: `Change fields of a service. Only the flags you pass are changed.
+
+--environments sets the deploy environments the service has: staging,
+production or both. An environment that still runs something must be taken
+down first ('forge deploy remove'). An infrastructure repo keeps the
+environments it was made with.`,
 		Example: `  forge service update payments --lifecycle deprecated
-  forge service update payments --add-owner li@example.com --remove-owner ana@example.com`,
+  forge service update payments --add-owner li@example.com --remove-owner ana@example.com
+  forge service update payments --environments staging,production`,
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: f.completeServices,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -495,6 +511,7 @@ func newServiceUpdateCmd(f *Factory) *cobra.Command {
 				{"repo", "repo_url", func() error { svc.RepoUrl = sf.repo; return nil }},
 				{"depends-on", "dependencies", func() error { svc.Dependencies = depNames(sf.deps); return nil }},
 				{"label", "labels", func() error { svc.Labels = sf.labels; return nil }},
+				{"environments", "environments", func() error { svc.Environments = environments; return nil }},
 			}
 			for _, s := range steps {
 				if err := set(s.flag, s.path, s.apply); err != nil {
@@ -547,6 +564,7 @@ func newServiceUpdateCmd(f *Factory) *cobra.Command {
 	sf.bind(cmd)
 	cmd.Flags().StringSliceVar(&addOwners, "add-owner", nil, "add an owner (repeatable)")
 	cmd.Flags().StringSliceVar(&removeOwners, "remove-owner", nil, "remove an owner (repeatable)")
+	cmd.Flags().StringSliceVar(&environments, "environments", nil, "the deploy environments it has: staging, production or both")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate on the server without changing anything")
 	return cmd
 }

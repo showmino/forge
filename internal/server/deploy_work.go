@@ -77,6 +77,11 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	if err != nil {
 		return nil, err
 	}
+	if sid, ok := strings.CutPrefix(m.GetService(), servicePrefix); ok && sid != "" {
+		if err := d.requireEnv(ctx, sid, m.GetEnv()); err != nil {
+			return nil, err
+		}
+	}
 	// A CI token belongs to a repo, and its ref is a commit of it: it never
 	// deploys a service without one.
 	if w := workloadOf(ctx); w != nil {

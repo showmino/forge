@@ -48,6 +48,9 @@ type Input struct {
 	// Runner builds the image; DeployRunner runs the deploy job, and must
 	// reach the Forge API.
 	Runner, DeployRunner string
+	// NoStaging is set for a service with production only: the workflow
+	// builds the image and deploys nothing (CI deploys only to staging).
+	NoStaging bool
 	// Paths are every file in the repo's default branch, relative to its root.
 	Paths []string
 	// Read reads one of them.
@@ -134,6 +137,7 @@ func Plan(in Input) (*Result, error) {
 		Host:   strings.SplitN(registry, "/", 2)[0],
 		GHCR:   ghcr,
 		Runner: or(in.Runner, "ubuntu-latest"), DeployRunner: or(in.DeployRunner, or(in.Runner, "ubuntu-latest")),
+		Staging: !in.NoStaging,
 	}
 	wf, err := render("forge.yml", v)
 	if err != nil {
@@ -152,6 +156,8 @@ type workflowValues struct {
 	Image, Host          string
 	GHCR                 bool
 	Runner, DeployRunner string
+	// Staging keeps the job that deploys main to staging.
+	Staging bool
 }
 
 // docker is what a proposed Dockerfile needs.

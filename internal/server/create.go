@@ -138,8 +138,11 @@ func validateCreate(req *forgev1.CreateServiceRequest) error {
 	case !manifest.ValidID(strings.TrimPrefix(req.GetTemplate(), templatePrefix)):
 		return invalid(fmt.Sprintf("template %q must look like templates/{template}", req.GetTemplate()))
 	}
-	if (req.GetTarget() != "" || len(req.GetEnvironments()) > 0) && req.GetTemplate() == "" {
-		return invalid("target and environments are for an infrastructure template")
+	if req.GetTarget() != "" && req.GetTemplate() == "" {
+		return invalid("target is for an infrastructure template")
+	}
+	if _, err := normalEnvs(req.GetEnvironments()); err != nil {
+		return err
 	}
 	if strings.TrimSpace(req.GetOwnerTeam()) == "" {
 		return invalid("owner_team is required")
@@ -326,8 +329,8 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	if !t.IsInfrastructure() && (req.GetTarget() != "" || len(req.GetEnvironments()) > 0) {
-		return nil, invalid(fmt.Sprintf("%s is not an infrastructure template: target and environments do not apply", tname))
+	if !t.IsInfrastructure() && req.GetTarget() != "" {
+		return nil, invalid(fmt.Sprintf("%s is not an infrastructure template: target does not apply", tname))
 	}
 	if t.IsFile() {
 		return c.propose(ctx, req, t, version, skeleton, w)
@@ -338,8 +341,10 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	done("fetch", tname+"@"+version)
 
 	started("render")
+	envs := c.createEnvs(req, t.IsInfrastructure())
 	v := template.Values{
-		Service:  template.ServiceValues{Name: id, Team: req.GetOwnerTeam(), Owners: req.GetOwners()},
+		Service: template.ServiceValues{Name: id, Team: req.GetOwnerTeam(), Owners: req.GetOwners(),
+			Staging: slices.Contains(envs, "staging"), Production: slices.Contains(envs, "production")},
 		Repo:     template.RepoValues{Owner: c.org, Name: id, URL: repoURL},
 		Template: template.TemplateValues{Name: tname, Version: version},
 	}
@@ -386,6 +391,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 	// field) is found now, before anything is created.
 	svc := serviceFromManifest(m)
 	svc.RepoUrl = repoURL
+	svc.Environments = envs
 	var infra *infraPlan
 	if t.IsInfrastructure() {
 		var release func()
@@ -394,6 +400,7 @@ func (c *creator) scaffold(ctx context.Context, req *forgev1.CreateServiceReques
 		}
 		defer release()
 		svc.Infrastructure = infrastructureOf(m, infra)
+		svc.Environments, _ = normalEnvs(infra.envs)
 	}
 	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true}), false); err != nil {
 		return nil, err
@@ -672,6 +679,23 @@ func shortSHA(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// createEnvs is the environments a new service gets: the ones asked for, in
+// deploy order, or both. An infrastructure template defaults to the ones
+// its target has (planInfrastructure checks the target).
+func (c *creator) createEnvs(req *forgev1.CreateServiceRequest, infra bool) []string {
+	asked := req.GetEnvironments()
+	if infra && len(asked) == 0 && c.infra != nil {
+		if t, ok := c.infra.Target(req.GetTarget()); ok {
+			asked = t.EnvironmentNames()
+		}
+	}
+	envs, err := normalEnvs(asked)
+	if err != nil { // validateCreate refused it; an infrastructure target's own names
+		return slices.Clone(deployEnvs)
+	}
+	return envs
 }
 
 // serviceFromManifest is the catalog entry a rendered forge.yaml describes.

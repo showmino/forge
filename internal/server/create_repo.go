@@ -151,7 +151,8 @@ func (c *creator) fromRepo(ctx context.Context, req *forgev1.CreateServiceReques
 	}
 	ro := req.GetRunOptions()
 	plan, err := forgeconnect.Plan(forgeconnect.Input{
-		Service: id, Team: req.GetOwnerTeam(), Owners: req.GetOwners(),
+		NoStaging: !slices.Contains(c.createEnvs(req, false), "staging"),
+		Service:   id, Team: req.GetOwnerTeam(), Owners: req.GetOwners(),
 		Owner: owner, RepoURL: repoURL,
 		Port: int(ro.GetPort()), Health: ro.GetHealth(),
 		Registry: registry, Runner: c.ciRunner, DeployRunner: c.ciDeployRunner,
@@ -187,6 +188,7 @@ func (c *creator) fromRepo(ctx context.Context, req *forgev1.CreateServiceReques
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	svc := serviceFromManifest(m)
+	svc.Environments = c.createEnvs(req, false)
 	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true}), false); err != nil {
 		return nil, err
 	}

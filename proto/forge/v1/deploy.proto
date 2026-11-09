@@ -35,6 +35,11 @@ service DeployService {
   // PromoteDeploy copies what runs in one environment to the next.
   rpc PromoteDeploy(PromoteDeployRequest) returns (PromoteDeployResponse) {}
 
+  // DeleteDeployment takes down what runs in one environment: its values in
+  // the GitOps repo, its Argo CD application and its namespace. The service
+  // stays in the catalog, with its other environment and its previews.
+  rpc DeleteDeployment(DeleteDeploymentRequest) returns (DeleteDeploymentResponse) {}
+
   // SetAddress changes where a service is reached, overriding forge.yaml's
   // run.host and run.domain. It applies at the next deploy of each
   // environment.
@@ -210,6 +215,19 @@ message PromoteDeployRequest {
 message PromoteDeployResponse {
   Operation operation = 1;
   // What will run in the target environment.
+  Deployment deployment = 2;
+}
+
+message DeleteDeploymentRequest {
+  // "deployments/{service}/{env}".
+  string name = 1;
+  bool validate_only = 2;
+}
+
+message DeleteDeploymentResponse {
+  // Unset with validate_only.
+  Operation operation = 1;
+  // What runs there now, which the delete takes down.
   Deployment deployment = 2;
 }
 

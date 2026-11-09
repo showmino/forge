@@ -224,3 +224,40 @@ func TestPlanNotesTheDockerfilesUser(t *testing.T) {
 		t.Errorf("proposed Dockerfile: %q", out.UserNote)
 	}
 }
+
+// A service with production only gets a workflow that builds its image and
+// deploys nothing: CI deploys only to staging, and production is a person's.
+func TestPlanProductionOnly(t *testing.T) {
+	t.Parallel()
+	in := repo{"Dockerfile": ""}.input()
+	in.NoStaging = true
+	out, err := Plan(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := files(t, out)[".github/workflows/forge.yml"]
+	var wf struct {
+		Jobs map[string]any `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(w), &wf); err != nil {
+		t.Fatalf("forge.yml is not YAML: %v\n%s", err, w)
+	}
+	if _, ok := wf.Jobs["image"]; !ok || len(wf.Jobs) != 1 {
+		t.Errorf("jobs %v, want only image:\n%s", wf.Jobs, w)
+	}
+	if strings.Contains(w, "deploy start --env") || !strings.HasPrefix(w, "# Added by Forge") || !strings.Contains(w, "production only") {
+		t.Errorf("forge.yml:\n%s", w)
+	}
+	// With staging, the deploy job is there.
+	w = files(t, must(Plan(repo{"Dockerfile": ""}.input())))[".github/workflows/forge.yml"]
+	if !strings.HasPrefix(w, "# Added by Forge") || !strings.Contains(w, "deploy start --env staging") {
+		t.Errorf("forge.yml with staging:\n%s", w)
+	}
+}
+
+func must(out *Result, err error) *Result {
+	if err != nil {
+		panic(err)
+	}
+	return out
+}

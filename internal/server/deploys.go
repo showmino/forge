@@ -682,6 +682,9 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if err := authorize(ctx, ActDeployRollback, servicePrefix+svc); err != nil {
 		return nil, err
 	}
+	if err := d.requireEnv(ctx, svc, env); err != nil {
+		return nil, err
+	}
 	recs, err := d.history(ctx, svc, env, 50)
 	if err != nil {
 		return nil, err
@@ -777,6 +780,9 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 		return nil, invalidArg("service %q must be services/<name>", req.Msg.GetService())
 	}
 	if err := authorize(ctx, ActDeployPromote, servicePrefix+svc); err != nil {
+		return nil, err
+	}
+	if err := d.requireBoth(ctx, svc); err != nil {
 		return nil, err
 	}
 	src, srcCommit, err := d.current(ctx, svc, from)
