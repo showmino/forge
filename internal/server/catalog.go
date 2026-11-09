@@ -341,7 +341,7 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 }
 
 // updatable lists the field mask paths UpdateService accepts.
-var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels"}
+var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels", "environments"}
 
 func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev1.UpdateServiceRequest]) (*connect.Response[forgev1.UpdateServiceResponse], error) {
 	if _, ok := PrincipalFrom(ctx); !ok {
@@ -368,6 +368,37 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		}
 	}
 
+	// A new set of environments is checked before the write: an
+	// environment that still runs something must be taken down first, and
+	// asking the deploy repo and the cluster cannot happen inside it.
+	var envs, checkedEnvs []string
+	if slices.Contains(paths, "environments") {
+		if envs, err = normalEnvs(in.GetEnvironments()); err != nil {
+			return nil, err
+		}
+		// Nothing may be deployed while the change is checked and written:
+		// a deploy to an environment being dropped would land after it.
+		if c.teardown != nil && c.teardown.hasDeploys() {
+			release, err := c.teardown.deploys.lockServiceFor(strings.TrimPrefix(name, servicePrefix), "an environments change")
+			if err != nil {
+				return nil, err
+			}
+			defer release()
+		}
+		cur, err := c.get(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if cur.GetInfrastructure() != nil && !slices.Equal(envs, serviceEnvs(cur)) {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf(
+				"%s is an infrastructure repo: its environments are its GitHub environments and cloud access, set when it was made", name))
+		}
+		if err := c.checkDroppedEnvs(ctx, cur, envs); err != nil {
+			return nil, err
+		}
+		checkedEnvs = serviceEnvs(cur)
+	}
+
 	var out *forgev1.Service
 	var undoGrant, undoRevoke undo
 	err = c.store.Write(ctx, func(tx store.Tx) error {
@@ -377,6 +408,9 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		}
 		if err != nil {
 			return err
+		}
+		if checkedEnvs != nil && !slices.Equal(checkedEnvs, serviceEnvs(cur)) {
+			return connect.NewError(connect.CodeAborted, fmt.Errorf("the environments of %s changed while this update was checked; try again", name))
 		}
 		if cur.GetInfrastructure() != nil && slices.Contains(paths, "owner_team") && in.GetOwnerTeam() != cur.GetOwnerTeam() {
 			// Its target's rules, and its cloud access, were checked and
@@ -419,6 +453,8 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 				next.Dependencies = slices.Clone(in.GetDependencies())
 			case "labels":
 				next.Labels = in.GetLabels()
+			case "environments":
+				next.Environments = envs
 			}
 		}
 		if err := validateService(next); err != nil {
@@ -515,6 +551,15 @@ func validateService(s *forgev1.Service) error {
 	}
 	if s.GetRepoUrl() != "" && !strings.Contains(s.GetRepoUrl(), "://") && !strings.HasPrefix(s.GetRepoUrl(), "git@") {
 		return invalid(fmt.Sprintf("repo_url %q must be a URL", s.GetRepoUrl()))
+	}
+	if len(s.GetEnvironments()) > 0 {
+		envs, err := normalEnvs(s.GetEnvironments())
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(envs, s.GetEnvironments()) {
+			return invalid(fmt.Sprintf("environments %q must be staging, production or both, in that order, each once", s.GetEnvironments()))
+		}
 	}
 	return nil
 }

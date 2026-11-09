@@ -12,7 +12,7 @@ import (
 // contains a dash on purpose: templates must cope with one.
 func SampleValues(t *Template) Values {
 	return Values{
-		Service:  ServiceValues{Name: "sample-service", Team: "sample-team", Owners: []string{"owner@example.com"}},
+		Service:  ServiceValues{Name: "sample-service", Team: "sample-team", Owners: []string{"owner@example.com"}, Staging: true, Production: true},
 		Repo:     RepoValues{Owner: "sample-org", Name: "sample-service", URL: "https://github.com/sample-org/sample-service"},
 		Template: TemplateValues{Name: t.Name, Version: "v0.0.0"},
 	}

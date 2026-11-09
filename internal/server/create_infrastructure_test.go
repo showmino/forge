@@ -34,6 +34,7 @@ var infraRelease = staticSource{
 			"run:\n  port: 3000\ninfrastructure:\n  tool: bicep\n")},
 		"web/skeleton/infrastructure/bicep/main.bicep": {Data: []byte("param location string\n")},
 		"svc/template.yaml":                            {Data: []byte(templateYAML("svc", "go", ""))},
+		"svc/skeleton/ci.yml":                          {Data: []byte("build: image\n{{ if .Service.Staging }}deploy: staging\n{{ end }}")},
 		"svc/skeleton/forge.yaml":                      {Data: []byte("apiVersion: forge.dev/v1\nservice:\n  name: {{ .Service.Name }}\n  team: {{ .Service.Team }}\n")},
 	}},
 }
@@ -236,6 +237,55 @@ func TestCreateInfrastructureWithApp(t *testing.T) {
 	}
 }
 
+// A service of any template may have production only: the catalog keeps
+// it, and the skeleton renders without what needs staging.
+func TestCreateServiceEnvironments(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e := newInfraEnv(t, false)
+	msgs, err := e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "tool", Template: "templates/svc", OwnerTeam: "platform", Environments: []string{"production"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(msgs[len(msgs)-1].GetService().GetEnvironments(), ","); got != "production" {
+		t.Errorf("environments %q", got)
+	}
+	for _, f := range e.repos.repos["tool"] {
+		if f.Path == "ci.yml" && string(f.Content) != "build: image\n" {
+			t.Errorf("ci.yml:\n%s", f.Content)
+		}
+	}
+	// Both, by default, in deploy order.
+	msgs, err = e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "tool2", Template: "templates/svc", OwnerTeam: "platform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(msgs[len(msgs)-1].GetService().GetEnvironments(), ","); got != "staging,production" {
+		t.Errorf("default environments %q", got)
+	}
+	for _, f := range e.repos.repos["tool2"] {
+		if f.Path == "ci.yml" && !strings.Contains(string(f.Content), "deploy: staging") {
+			t.Errorf("ci.yml with staging:\n%s", f.Content)
+		}
+	}
+	// An infrastructure repo's are its target's, or the ones asked for.
+	msgs, err = e.create(ctx, "writer", infraRequest("infra-dns", "staging"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(msgs[len(msgs)-1].GetService().GetEnvironments(), ","); got != "staging" {
+		t.Errorf("infrastructure environments %q", got)
+	}
+	_, err = e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "tool3", Template: "templates/svc", OwnerTeam: "platform", Environments: []string{"qa"}})
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), `environment "qa" must be staging or production`) {
+		t.Errorf("qa: %v", err)
+	}
+	_, err = e.create(ctx, "writer", &forgev1.CreateServiceRequest{ServiceId: "tool3", Template: "templates/svc", OwnerTeam: "platform", Target: "azure"})
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || !strings.Contains(err.Error(), "target does not apply") {
+		t.Errorf("target on a service: %v", err)
+	}
+}
+
 func TestCreateInfrastructureEveryEnvironment(t *testing.T) {
 	t.Parallel()
 	e := newInfraEnv(t, false)
@@ -267,9 +317,9 @@ func TestCreateInfrastructureRefuses(t *testing.T) {
 		{"no target", e, with(func(r *forgev1.CreateServiceRequest) { r.Target = "" }), connect.CodeInvalidArgument, "needs a target: one of azure, web-only"},
 		{"unknown target", e, with(func(r *forgev1.CreateServiceRequest) { r.Target = "aws" }), connect.CodeInvalidArgument, `no target "aws"`},
 		{"team not allowed", e, with(func(r *forgev1.CreateServiceRequest) { r.Target = "web-only" }), connect.CodeFailedPrecondition, "target web-only is for the teams web, not platform"},
-		{"environment not offered", e, with(func(r *forgev1.CreateServiceRequest) { r.Environments = []string{"qa"} }), connect.CodeFailedPrecondition, "target azure has no qa"},
-		{"target on a service template", e, with(func(r *forgev1.CreateServiceRequest) { r.Template = "templates/svc" }), connect.CodeInvalidArgument, "svc is not an infrastructure template"},
-		{"target with an image", e, with(func(r *forgev1.CreateServiceRequest) { r.Template, r.Image = "", "nginx:1.27" }), connect.CodeInvalidArgument, "target and environments are for an infrastructure template"},
+		{"environment not offered", e, with(func(r *forgev1.CreateServiceRequest) { r.Environments = []string{"qa"} }), connect.CodeInvalidArgument, `environment "qa" must be staging or production`},
+		{"target on a service template", e, with(func(r *forgev1.CreateServiceRequest) { r.Template = "templates/svc" }), connect.CodeInvalidArgument, "svc is not an infrastructure template: target does not apply"},
+		{"target with an image", e, with(func(r *forgev1.CreateServiceRequest) { r.Template, r.Image = "", "nginx:1.27" }), connect.CodeInvalidArgument, "target is for an infrastructure template"},
 		{"not configured", newInfraEnv(t, true), infraRequest("infra-net"), connect.CodeFailedPrecondition, "no --infrastructure-config"},
 		{"run options", e, with(func(r *forgev1.CreateServiceRequest) { r.RunOptions = &forgev1.RunOptions{} }), connect.CodeInvalidArgument, "tofu has no run in its forge.yaml"},
 		{"team not a slug", e, with(func(r *forgev1.CreateServiceRequest) { r.OwnerTeam = "Platform Team" }), connect.CodeInvalidArgument, "must be a team's slug"},

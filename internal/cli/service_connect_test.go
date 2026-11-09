@@ -42,6 +42,7 @@ func TestServiceConnect(t *testing.T) {
 	h := newHarness(t)
 	h.repos = &readRepos{memRepos: &memRepos{repos: map[string]int{}}, files: map[string]map[string]string{
 		"tool":  {"go.mod": "module x\ngo 1.25\n", "main.go": ""},
+		"tool3": {"go.mod": "module x\ngo 1.25\n", "main.go": ""},
 		"blank": {"README.md": ""},
 	}}
 	h.startAPI(h.authn)
@@ -72,6 +73,14 @@ func TestServiceConnect(t *testing.T) {
 	}
 	if !strings.Contains(h.ok("service", "get", "tool", "-o", "json").out, `"repoUrl": "https://github.com/showmino/tool"`) {
 		t.Error("the service is not in the catalog")
+	}
+	// With production only, its workflow deploys nothing: a person does.
+	r = h.ok("service", "connect", "github.com/showmino/tool3", "--team", "web", "--environments", "production")
+	if !strings.Contains(r.out, "deploy it with 'forge deploy start tool3 --env production'") {
+		t.Errorf("production only: %q", r.out)
+	}
+	if !strings.Contains(h.ok("service", "get", "tool3", "-o", "json").out, `"environments": [`) {
+		t.Error("the environments are not in the catalog")
 	}
 	if r := h.fails(6, "service", "connect", "github.com/showmino/blank", "--team", "web"); !strings.Contains(r.err, "add a Dockerfile") {
 		t.Errorf("a repo with nothing to build: %v", r)

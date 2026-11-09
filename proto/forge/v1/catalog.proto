@@ -82,6 +82,11 @@ message Service {
   // What Forge set up for an infrastructure repo (phase 12). Output only:
   // CreateService sets it, and nothing changes it.
   InfrastructureRepo infrastructure = 13;
+  // The deploy environments the service has, in deploy order: "staging",
+  // "production" or both. Empty means both (every service made before the
+  // choice existed). Set at create; the owning team changes it with
+  // UpdateService. Deploys, promotes and rollbacks go only to these.
+  repeated string environments = 14;
 }
 
 // InfrastructureRepo is a repo of infrastructure code that its own GitHub

@@ -43,6 +43,7 @@ func (c *creator) fromImage(ctx context.Context, req *forgev1.CreateServiceReque
 		return nil, err
 	}
 	svc := serviceFromManifest(m)
+	svc.Environments = c.createEnvs(req, false)
 	if _, err := c.catalog.register(ctx, connect.NewRequest(&forgev1.RegisterServiceRequest{ServiceId: id, Service: svc, ValidateOnly: true}), false); err != nil {
 		return nil, err
 	}

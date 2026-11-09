@@ -1,6 +1,13 @@
+{%- if .Staging -%}
 # Added by Forge (forge service connect). It builds this repo's image and, on
 # main, deploys it to staging through Forge; production is a promotion. Change
 # what you need: Forge only waits for the image named below.
+{%- else -%}
+# Added by Forge (forge service connect). It builds this repo's image; it
+# deploys nothing: the service has production only, which a person deploys
+# with 'forge deploy start'. Change what you need: Forge only waits for the
+# image named below.
+{%- end %}
 name: forge
 on:
   push:
@@ -41,6 +48,7 @@ jobs:
           docker build -t "$image" .
           docker push "$image"
 
+{%- if .Staging %}
   # Deploys main to staging. It logs in with this job's GitHub OIDC token: the
   # token only lets it deploy this service to staging, at this commit. The
   # runner must reach the Forge API, at the organization variable FORGE_API_URL.
@@ -75,3 +83,4 @@ jobs:
           "$RUNNER_TEMP/forge" version
       - name: Deploy to staging
         run: '"$RUNNER_TEMP/forge" deploy start --env staging'
+{%- end %}

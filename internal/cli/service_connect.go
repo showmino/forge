@@ -19,6 +19,7 @@ func newServiceConnectCmd(f *Factory) *cobra.Command {
 	var owners []string
 	var port int
 	var dryRun bool
+	var environments []string
 	cmd := &cobra.Command{
 		Use:   "connect <repo> --team <team>",
 		Short: "Connect an existing repo: Forge builds and deploys it",
@@ -26,7 +27,9 @@ func newServiceConnectCmd(f *Factory) *cobra.Command {
 Forge. Forge registers the service and opens a pull request in the repo that
 adds forge.yaml and Forge's workflow, which builds the image and deploys main
 to staging. Merging the pull request is the first deploy; production is a
-promotion ('forge deploy promote <name>').
+promotion ('forge deploy promote <name>'). With --environments production the
+workflow only builds the image, and a person deploys it ('forge deploy start
+<name> --env production').
 
 The repo needs a Dockerfile at its root. Without one, Forge proposes one for
 Go (go.mod), Node (package.json) or Python (requirements.txt or
@@ -67,7 +70,7 @@ that has a forge.yaml already is registered with 'forge service register'.
 				return err
 			}
 			req := &forgev1.CreateServiceRequest{
-				ServiceId: name, RepoUrl: repo, OwnerTeam: team, Owners: owners,
+				ServiceId: name, RepoUrl: repo, OwnerTeam: team, Owners: owners, Environments: environments,
 				RequestId: client.NewRequestID(), ValidateOnly: dryRun,
 			}
 			if port != 0 || health != "" {
@@ -107,7 +110,11 @@ that has a forge.yaml already is registered with 'forge service register'.
 				if format != output.Table {
 					return output.Print(f.IO.Out, format, output.View{Names: []string{ch.GetPullRequestUrl()}, Data: ch})
 				}
-				msg := fmt.Sprintf("%s connected\n%s\nMerge it: its workflow builds the image and deploys main to staging.\n", ch.GetService().GetName(), ch.GetPullRequestUrl())
+				then := "its workflow builds the image and deploys main to staging."
+				if envs := ch.GetService().GetEnvironments(); len(envs) > 0 && envs[0] != "staging" {
+					then = fmt.Sprintf("its workflow builds the image; deploy it with 'forge deploy start %s --env production'.", name)
+				}
+				msg := fmt.Sprintf("%s connected\n%s\nMerge it: %s\n", ch.GetService().GetName(), ch.GetPullRequestUrl(), then)
 				if ch.GetDockerfile() != "" {
 					msg += fmt.Sprintf("The repo had no Dockerfile: the pull request proposes one for %s; check it first.\n", ch.GetDockerfile())
 				}
@@ -134,5 +141,6 @@ that has a forge.yaml already is registered with 'forge service register'.
 	fl.IntVar(&port, "port", 0, "the port the app listens on (default 8080)")
 	fl.StringVar(&health, "health", "", "the path its readiness is probed at (default /healthz)")
 	fl.BoolVar(&dryRun, "dry-run", false, "check the repo and list the files; change nothing")
+	fl.StringSliceVar(&environments, "environments", nil, "its deploy environments: staging, production or both (default both)")
 	return cmd
 }

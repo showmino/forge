@@ -81,7 +81,7 @@ func newDeployCmd(f *Factory) *cobra.Command {
 commit to Forge's GitOps repo that Argo CD applies; forge watches until Argo
 CD reports the new version Synced and Healthy. Inside a service repo the
 service name defaults to forge.yaml's.`
-	cmd.AddCommand(newDeployStartCmd(f), newDeployStatusCmd(f), newDeployHistoryCmd(f), newDeployRollbackCmd(f), newDeployPromoteCmd(f))
+	cmd.AddCommand(newDeployStartCmd(f), newDeployStatusCmd(f), newDeployHistoryCmd(f), newDeployRollbackCmd(f), newDeployPromoteCmd(f), newDeployRemoveCmd(f))
 	return cmd
 }
 
@@ -402,6 +402,87 @@ deployment name unless --yes.`,
 	fl.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
 	fl.BoolVar(&dryRun, "dry-run", false, "check without rolling back")
 	fl.BoolVar(&wait, "wait", true, "watch the rollback until it ends")
+	return cmd
+}
+
+func newDeployRemoveCmd(f *Factory) *cobra.Command {
+	var env string
+	var yes, dryRun, wait bool
+	cmd := &cobra.Command{
+		Use:   "remove [service] --env staging|production",
+		Short: "Take down what a service runs in one environment",
+		Long: `Take down one environment of a service: its version leaves the GitOps
+repo, then Argo CD removes its workloads and Forge its namespace. The service
+stays in the catalog, with its other environment and its previews. Deploy
+again to bring the environment back.
+
+Do this before dropping an environment from a service ('forge service update
+--environments'). Asks for the deployment name unless --yes.`,
+		Example: `  forge deploy remove payments --env staging
+  forge deploy remove payments --env staging --dry-run`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if env == "" {
+				return exitcode.Usagef("--env is required (staging or production)")
+			}
+			svc, err := f.deployService(args)
+			if err != nil {
+				return err
+			}
+			format, err := f.Format()
+			if err != nil {
+				return err
+			}
+			name := deployName(svc, env)
+			if !dryRun {
+				if err := f.confirmDestructive("take down", name, yes); err != nil {
+					return err
+				}
+			}
+			ctx, cancel := f.withTimeout(cmd.Context())
+			defer cancel()
+			c, err := f.StreamClient(ctx)
+			if err != nil {
+				return err
+			}
+			resp, err := c.Deploys.DeleteDeployment(ctx, connect.NewRequest(&forgev1.DeleteDeploymentRequest{Name: name, ValidateOnly: dryRun}))
+			if err != nil {
+				return err
+			}
+			if dryRun {
+				if format != output.Table {
+					return f.printDeployment(format, resp.Msg.GetDeployment())
+				}
+				what := "what runs there"
+				if d := resp.Msg.GetDeployment(); d != nil && d.GetImage() != "" {
+					what = d.GetImage()
+				}
+				_, err := fmt.Fprintf(f.IO.Out, "Would take down %s (%s)\n", name, what)
+				return err
+			}
+			op := resp.Msg.GetOperation()
+			if !wait {
+				return f.printStarted(format, op)
+			}
+			done, err := f.watchOperation(ctx, c, op.GetName())
+			if err != nil {
+				return err
+			}
+			if err := opFailure(done); err != nil {
+				return exitcode.From(err).WithHint(fmt.Sprintf("run 'forge deploy remove %s --env %s' again", svc, env))
+			}
+			if format != output.Table {
+				return f.printOperation(format, done)
+			}
+			f.infof("%s taken down.", name)
+			return nil
+		},
+	}
+	fl := cmd.Flags()
+	fl.StringVar(&env, "env", "", "staging or production")
+	fl.BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
+	fl.BoolVar(&dryRun, "dry-run", false, "check without taking anything down")
+	fl.BoolVar(&wait, "wait", true, "watch it until it ends")
 	return cmd
 }
 

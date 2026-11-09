@@ -199,4 +199,61 @@ func TestCreateFromImage(t *testing.T) {
 		t.Errorf("--deploy=false: %v", r)
 	}
 	h.fails(3, "deploy", "status", "idle", "--env", "staging")
+
+	// With production only, the create deploys there: a person runs it.
+	r = h.ok("create", "tool", "--image", "nginx:1.27", "--team", "billing", "--environments", "production")
+	if !strings.Contains(r.out, "production") {
+		t.Errorf("create with production only: %v", r)
+	}
+	if r := h.ok("service", "get", "tool"); !strings.Contains(r.out, "environments   production\n") {
+		t.Errorf("service get:\n%s", r.out)
+	}
+	h.ok("deploy", "status", "tool", "--env", "production")
+	h.fails(3, "deploy", "status", "tool", "--env", "staging")
+}
+
+// A service's environments: production only is deployed by a person and
+// cannot be promoted; deploy remove takes an environment down so it can be
+// dropped.
+func TestServiceEnvironments(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	repo := h.serveDeploys(map[string]string{})
+	h.ok("service", "register", "payments", "--team", "billing", "--repo", "https://github.com/showmino/payments")
+	if r := h.ok("service", "get", "payments"); !strings.Contains(r.out, "environments   staging, production") {
+		t.Errorf("service get:\n%s", r.out)
+	}
+	h.ok("deploy", "start", "payments", "--env", "staging")
+
+	// Staging still runs: dropping it is refused, with the way out.
+	r := h.fails(6, "service", "update", "payments", "--environments", "production")
+	if !strings.Contains(r.err, "take it down first with 'forge deploy remove payments --env staging'") {
+		t.Errorf("drop staging:\n%s", r.err)
+	}
+	h.fails(2, "deploy", "remove", "payments")                     // --env required
+	h.fails(2, "deploy", "remove", "payments", "--env", "staging") // no --yes, no terminal
+	if r := h.ok("deploy", "remove", "payments", "--env", "staging", "--dry-run"); r.out != "Would take down deployments/payments/staging (ghcr.io/showmino/payments:1a2b3c4)\n" {
+		t.Errorf("remove dry run: %q", r.out)
+	}
+	r = h.ok("deploy", "remove", "payments", "--env", "staging", "--yes")
+	if !strings.Contains(r.err, "removed payments from staging") || !strings.Contains(r.err, "deployments/payments/staging taken down.") {
+		t.Errorf("remove:\n%s", r.err)
+	}
+	if _, err := repo.Read(context.Background(), "services/payments/staging/values.yaml", ""); err == nil {
+		t.Error("staging is still in the deploy repo")
+	}
+
+	h.ok("service", "update", "payments", "--environments", "production")
+	if r := h.ok("service", "get", "payments"); !strings.Contains(r.out, "environments   production\n") {
+		t.Errorf("service get:\n%s", r.out)
+	}
+	r = h.fails(6, "deploy", "start", "payments", "--env", "staging")
+	if !strings.Contains(r.err, "has production only, not staging") {
+		t.Errorf("deploy to staging:\n%s", r.err)
+	}
+	h.ok("deploy", "start", "payments", "--env", "production")
+	r = h.fails(6, "deploy", "promote", "payments", "--yes")
+	if !strings.Contains(r.err, "nothing to promote: deploy to it with 'forge deploy start payments --env production'") {
+		t.Errorf("promote:\n%s", r.err)
+	}
 }

@@ -51,6 +51,9 @@ const (
 	// DeployServicePromoteDeployProcedure is the fully-qualified name of the DeployService's
 	// PromoteDeploy RPC.
 	DeployServicePromoteDeployProcedure = "/forge.v1.DeployService/PromoteDeploy"
+	// DeployServiceDeleteDeploymentProcedure is the fully-qualified name of the DeployService's
+	// DeleteDeployment RPC.
+	DeployServiceDeleteDeploymentProcedure = "/forge.v1.DeployService/DeleteDeployment"
 	// DeployServiceSetAddressProcedure is the fully-qualified name of the DeployService's SetAddress
 	// RPC.
 	DeployServiceSetAddressProcedure = "/forge.v1.DeployService/SetAddress"
@@ -73,6 +76,10 @@ type DeployServiceClient interface {
 	RollbackDeploy(context.Context, *connect.Request[v1.RollbackDeployRequest]) (*connect.Response[v1.RollbackDeployResponse], error)
 	// PromoteDeploy copies what runs in one environment to the next.
 	PromoteDeploy(context.Context, *connect.Request[v1.PromoteDeployRequest]) (*connect.Response[v1.PromoteDeployResponse], error)
+	// DeleteDeployment takes down what runs in one environment: its values in
+	// the GitOps repo, its Argo CD application and its namespace. The service
+	// stays in the catalog, with its other environment and its previews.
+	DeleteDeployment(context.Context, *connect.Request[v1.DeleteDeploymentRequest]) (*connect.Response[v1.DeleteDeploymentResponse], error)
 	// SetAddress changes where a service is reached, overriding forge.yaml's
 	// run.host and run.domain. It applies at the next deploy of each
 	// environment.
@@ -132,6 +139,12 @@ func NewDeployServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(deployServiceMethods.ByName("PromoteDeploy")),
 			connect.WithClientOptions(opts...),
 		),
+		deleteDeployment: connect.NewClient[v1.DeleteDeploymentRequest, v1.DeleteDeploymentResponse](
+			httpClient,
+			baseURL+DeployServiceDeleteDeploymentProcedure,
+			connect.WithSchema(deployServiceMethods.ByName("DeleteDeployment")),
+			connect.WithClientOptions(opts...),
+		),
 		setAddress: connect.NewClient[v1.SetAddressRequest, v1.SetAddressResponse](
 			httpClient,
 			baseURL+DeployServiceSetAddressProcedure,
@@ -156,6 +169,7 @@ type deployServiceClient struct {
 	listDeployHistory *connect.Client[v1.ListDeployHistoryRequest, v1.ListDeployHistoryResponse]
 	rollbackDeploy    *connect.Client[v1.RollbackDeployRequest, v1.RollbackDeployResponse]
 	promoteDeploy     *connect.Client[v1.PromoteDeployRequest, v1.PromoteDeployResponse]
+	deleteDeployment  *connect.Client[v1.DeleteDeploymentRequest, v1.DeleteDeploymentResponse]
 	setAddress        *connect.Client[v1.SetAddressRequest, v1.SetAddressResponse]
 	listDomains       *connect.Client[v1.ListDomainsRequest, v1.ListDomainsResponse]
 }
@@ -190,6 +204,11 @@ func (c *deployServiceClient) PromoteDeploy(ctx context.Context, req *connect.Re
 	return c.promoteDeploy.CallUnary(ctx, req)
 }
 
+// DeleteDeployment calls forge.v1.DeployService.DeleteDeployment.
+func (c *deployServiceClient) DeleteDeployment(ctx context.Context, req *connect.Request[v1.DeleteDeploymentRequest]) (*connect.Response[v1.DeleteDeploymentResponse], error) {
+	return c.deleteDeployment.CallUnary(ctx, req)
+}
+
 // SetAddress calls forge.v1.DeployService.SetAddress.
 func (c *deployServiceClient) SetAddress(ctx context.Context, req *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error) {
 	return c.setAddress.CallUnary(ctx, req)
@@ -214,6 +233,10 @@ type DeployServiceHandler interface {
 	RollbackDeploy(context.Context, *connect.Request[v1.RollbackDeployRequest]) (*connect.Response[v1.RollbackDeployResponse], error)
 	// PromoteDeploy copies what runs in one environment to the next.
 	PromoteDeploy(context.Context, *connect.Request[v1.PromoteDeployRequest]) (*connect.Response[v1.PromoteDeployResponse], error)
+	// DeleteDeployment takes down what runs in one environment: its values in
+	// the GitOps repo, its Argo CD application and its namespace. The service
+	// stays in the catalog, with its other environment and its previews.
+	DeleteDeployment(context.Context, *connect.Request[v1.DeleteDeploymentRequest]) (*connect.Response[v1.DeleteDeploymentResponse], error)
 	// SetAddress changes where a service is reached, overriding forge.yaml's
 	// run.host and run.domain. It applies at the next deploy of each
 	// environment.
@@ -269,6 +292,12 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(deployServiceMethods.ByName("PromoteDeploy")),
 		connect.WithHandlerOptions(opts...),
 	)
+	deployServiceDeleteDeploymentHandler := connect.NewUnaryHandler(
+		DeployServiceDeleteDeploymentProcedure,
+		svc.DeleteDeployment,
+		connect.WithSchema(deployServiceMethods.ByName("DeleteDeployment")),
+		connect.WithHandlerOptions(opts...),
+	)
 	deployServiceSetAddressHandler := connect.NewUnaryHandler(
 		DeployServiceSetAddressProcedure,
 		svc.SetAddress,
@@ -296,6 +325,8 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 			deployServiceRollbackDeployHandler.ServeHTTP(w, r)
 		case DeployServicePromoteDeployProcedure:
 			deployServicePromoteDeployHandler.ServeHTTP(w, r)
+		case DeployServiceDeleteDeploymentProcedure:
+			deployServiceDeleteDeploymentHandler.ServeHTTP(w, r)
 		case DeployServiceSetAddressProcedure:
 			deployServiceSetAddressHandler.ServeHTTP(w, r)
 		case DeployServiceListDomainsProcedure:
@@ -331,6 +362,10 @@ func (UnimplementedDeployServiceHandler) RollbackDeploy(context.Context, *connec
 
 func (UnimplementedDeployServiceHandler) PromoteDeploy(context.Context, *connect.Request[v1.PromoteDeployRequest]) (*connect.Response[v1.PromoteDeployResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.PromoteDeploy is not implemented"))
+}
+
+func (UnimplementedDeployServiceHandler) DeleteDeployment(context.Context, *connect.Request[v1.DeleteDeploymentRequest]) (*connect.Response[v1.DeleteDeploymentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.DeleteDeployment is not implemented"))
 }
 
 func (UnimplementedDeployServiceHandler) SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error) {

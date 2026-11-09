@@ -26,6 +26,11 @@ type ServiceValues struct {
 	Name   string
 	Team   string
 	Owners []string
+	// Staging and Production say which deploy environments it has: a
+	// skeleton leaves out what does not apply, such as the CI job that
+	// deploys to staging.
+	Staging    bool
+	Production bool
 }
 
 // RepoValues describe the repo being created.

@@ -47,13 +47,15 @@ func (d *Deploys) SetAddress(ctx context.Context, req *connect.Request[forgev1.S
 	if host == HostRoot && domain == manifest.DomainNone {
 		return nil, invalidArg("the root of a domain needs a public domain, not %q", manifest.DomainNone)
 	}
-	if _, err := d.o.Catalog.get(ctx, servicePrefix+svc); err != nil {
+	entry, err := d.o.Catalog.get(ctx, servicePrefix+svc)
+	if err != nil {
 		return nil, err
 	}
 
 	var planned []*forgev1.PlannedAddress
 	var inUse []string
-	for _, env := range deployEnvs {
+	// Only the environments it has: one it lacks gets no address.
+	for _, env := range serviceEnvs(entry) {
 		cur := d.currentValues(ctx, svc, env)
 		// run.staging.public stays as the last deploy here had it.
 		internal := cur != nil && cur.Forge.StagingInternal

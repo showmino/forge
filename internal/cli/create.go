@@ -48,12 +48,18 @@ A file template (type file in 'forge template get') makes no repo: it opens
 a pull request that adds its files to the template's target repo, and
 prints the pull request's URL. <name> names the branch and the files.
 
+--environments picks the deploy environments of the service: staging,
+production or both (the default). A service with production only is never
+deployed by its CI: deploy it with 'forge deploy start <name> --env
+production'. One with staging only is never promoted. Change it later with
+'forge service update --environments'.
+
 An infrastructure template (type infrastructure: Bicep, OpenTofu) makes a
 repo of infrastructure code that its own GitHub Actions deploy to --target,
 a set of cloud accounts the platform team set up. Forge gives the repo the
-GitHub environments of --environments (staging, production; default every
-one the target has), each with its account's secrets, and lets the shared
-workflow sign in there. Production runs wait for an approval in Forge by
+GitHub environments of --environments (default every one the target has),
+each with its account's secrets, and lets the shared workflow sign in
+there. Production runs wait for an approval in Forge by
 the owning team. Forge never deploys that code itself. An infrastructure
 template whose forge.yaml also has run (nextjs-infra) adds an app to the
 repo: Forge deploys the app like any service's, and run options apply to it.
@@ -65,7 +71,7 @@ than latest, and come from a registry the platform allows. --port and
 --health say where it listens and what is probed; every run option may be
 set. The image must run as a non-root user given by number (its USER): a
 root image is refused. The root filesystem is read-only except /tmp:
---writable names more folders the image writes, each an empty folder. forge then deploys it to staging and watches the deploy (--deploy=false
+--writable names more folders the image writes, each an empty folder. forge then deploys it to staging (production for one with production only) and watches the deploy (--deploy=false
 does not); with -o json or yaml it prints the deployment. Deploy a new tag
 with 'forge deploy start <name> --env staging --ref <tag>'.
 
@@ -114,8 +120,8 @@ and new values with --values there.`,
 				return exitcode.Usagef("--set is for a template's parameters; an image has none")
 			case tmpl != "" && (port != 0 || health != "" || len(writable) > 0):
 				return exitcode.Usagef("--port, --health and --writable are for --image; a template sets its own")
-			case tmpl == "" && (target != "" || len(environments) > 0):
-				return exitcode.Usagef("--target and --environments are for an infrastructure template")
+			case tmpl == "" && target != "":
+				return exitcode.Usagef("--target is for an infrastructure template")
 			}
 			raw, err := parseSets(sets)
 			if err != nil {
@@ -161,13 +167,13 @@ and new values with --values there.`,
 					return err
 				}
 				return f.createFromImage(ctx, c, format, &forgev1.CreateServiceRequest{
-					ServiceId: id, Chart: src, OwnerTeam: team, Owners: owners,
+					ServiceId: id, Chart: src, OwnerTeam: team, Owners: owners, Environments: environments,
 					RequestId: client.NewRequestID(), ValidateOnly: dryRun, RunOptions: runOptions,
 				}, deploy)
 			}
 			if image != "" {
 				return f.createFromImage(ctx, c, format, &forgev1.CreateServiceRequest{
-					ServiceId: id, Image: image, OwnerTeam: team, Owners: owners,
+					ServiceId: id, Image: image, OwnerTeam: team, Owners: owners, Environments: environments,
 					RequestId: client.NewRequestID(), ValidateOnly: dryRun, RunOptions: runOptions,
 				}, deploy)
 			}
@@ -234,13 +240,13 @@ and new values with --values there.`,
 	fl.StringSliceVar(&owners, "owner", nil, "owner email or handle (repeatable)")
 	fl.StringArrayVar(&sets, "set", nil, "template parameter as name=value (repeatable)")
 	fl.StringVar(&target, "target", "", "with an infrastructure template: the target it deploys to, a set of cloud accounts")
-	fl.StringSliceVar(&environments, "environments", nil, "with an infrastructure template: its environments, staging and/or production (default: every one the target has)")
+	fl.StringSliceVar(&environments, "environments", nil, "its deploy environments: staging, production or both (default both; an infrastructure template's default is every one its target has)")
 	fl.BoolVar(&dryRun, "dry-run", false, "render and check without creating anything; print the files")
 	fl.StringVar(&image, "image", "", "an image to run instead of a template, such as nginx:1.27; the service gets no repo")
 	fl.IntVar(&port, "port", 0, "with --image: the port it listens on (default 8080)")
 	fl.StringVar(&health, "health", "", "with --image: the path its readiness is probed at (default /healthz)")
 	fl.StringSliceVar(&writable, "writable", nil, "with --image: folders it writes besides /tmp, such as /var/cache/nginx (repeatable)")
-	fl.BoolVar(&deploy, "deploy", true, "with --image or --chart: deploy it to staging and watch the deploy")
+	fl.BoolVar(&deploy, "deploy", true, "with --image or --chart: deploy it to its first environment (staging, or production for one with production only) and watch the deploy")
 	fl.StringVar(&chart, "chart", "", "a published Helm chart to run instead of a template, by name; the service gets no repo")
 	fl.StringVar(&chartRepo, "chart-repo", "", "with --chart: its repository, oci://<registry>/<path> or https://<host>/<path>")
 	fl.StringVar(&chartVersion, "chart-version", "", "with --chart: one exact version, such as 6.7.1")
@@ -460,13 +466,19 @@ func (f *Factory) createFromImage(ctx context.Context, c *client.Client, format 
 			return err
 		}
 	}
+	// The first environment it has: staging, or production for a service
+	// with production only.
+	env := "staging"
+	if envs := final.GetService().GetEnvironments(); len(envs) > 0 {
+		env = envs[0]
+	}
 	resp, err := c.Deploys.StartDeploy(ctx, connect.NewRequest(&forgev1.StartDeployRequest{
-		Service: "services/" + id, Env: "staging", RequestId: client.NewRequestID(),
+		Service: "services/" + id, Env: env, RequestId: client.NewRequestID(),
 	}))
 	if err != nil {
-		return exitcode.From(err).WithHint(fmt.Sprintf("services/%s is created; deploy it with 'forge deploy start %s --env staging'", id, id))
+		return exitcode.From(err).WithHint(fmt.Sprintf("services/%s is created; deploy it with 'forge deploy start %s --env %s'", id, id, env))
 	}
-	return f.finishDeploy(ctx, sc, format, resp.Msg.GetOperation(), id, "staging", true)
+	return f.finishDeploy(ctx, sc, format, resp.Msg.GetOperation(), id, env, true)
 }
 
 // chartSource is the --chart flags as a create's chart.

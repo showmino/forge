@@ -313,9 +313,9 @@ Admins may do everything. The actions:
 
   service.create, service.create.any_team, service.register, service.update,
   service.update.team, service.delete, service.address, deploy.start,
-  deploy.promote, deploy.rollback, environment.create, environment.extend,
-  environment.destroy, operation.cancel, resource.plan, resource.apply,
-  resource.apply.production, cluster.read, approval.decide,
+  deploy.promote, deploy.rollback, deploy.remove, environment.create,
+  environment.extend, environment.destroy, operation.cancel, resource.plan,
+  resource.apply, resource.apply.production, cluster.read, approval.decide,
   approval.exception`,
 		Example: `  forge auth can deploy.promote payments
   forge auth can service.create --team billing
