@@ -120,6 +120,33 @@ it knows a person has left (`GetServerInfo` says `sessions: true`). Without
 it, and against an older API, `CreateSession` answers `Unimplemented` and the
 CLI keeps the ID and refresh tokens, as before.
 
+### Personal tokens
+
+For CI and scripts, a person makes a token of their own (`fgp_...`) and the
+script sends it as `FORGE_TOKEN`:
+
+```sh
+forge token create ci-deploys --scope deploy --expires 30d   # printed once
+forge token list
+forge token revoke ci-deploys
+```
+
+A token is a session of kind `token` (`AuthService.CreateToken`,
+`ListTokens`, `DeleteToken`): only its hash is kept, it acts as its person
+with their current role (memberships are rechecked hourly; leaving the
+organization ends it), and it expires after 1 to 365 days, or never. Its
+scopes limit it further, per call, in the auth interceptor
+(`tokenMayCall` in `internal/server/tokens.go`): `read` (always) allows every
+read, `deploy` adds deploy, promote, rollback, previews and cancelling an
+operation (a deploy-only token cancels only deploys and previews, and sends
+no new chart values), `settings` every other change. A token never makes or
+ends a session or a token: only a Forge session made from a login makes one,
+never an ID token or a CI job. And no token approves or rejects a production
+run, asks for or revokes an exception, sets a rule's mode or a team's on-call:
+those stay a person's own decisions.
+Each audit event of a call made with one names it (detail `token`). One person
+has at most 20.
+
 ## On k3s
 
 > This section is for a throwaway single-node k3s of your own. **The

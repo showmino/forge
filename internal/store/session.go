@@ -12,7 +12,8 @@ type Session struct {
 	ID string
 	// TokenHash is the hex SHA-256 of the session's token.
 	TokenHash string
-	// Kind is "cli" or "web".
+	// Kind is "cli" or "web" for a login, "token" for a personal token
+	// (phase 15), whose Label is its name.
 	Kind string
 	// Label is where the client said the session was made.
 	Label string
@@ -20,6 +21,9 @@ type Session struct {
 	Subject, Email, Login string
 	// Groups are the person's groups as of CheckedAt.
 	Groups []string
+	// Scopes limit what a token may do ("read", "deploy", "settings"); nil
+	// for a login, which may do all its person may.
+	Scopes []string
 
 	CreatedAt, LastUsedAt, ExpiresAt, CheckedAt time.Time
 }

@@ -192,6 +192,9 @@ func (r *auditRecord) finish(h interface{ Get(string) string }, err error) *forg
 		if isAdmin(r.person) {
 			r.ev.Details["role"] = "admin"
 		}
+		if r.person.Client == ClientToken {
+			r.ev.Details["token"] = r.person.TokenName
+		}
 	}
 	if h != nil {
 		r.ev.Client = &forgev1.AuditClient{Version: auditText(h.Get(client.HeaderClientVersion), auditFieldMax), RequestId: auditText(h.Get(client.HeaderRequestID), auditFieldMax)}
@@ -462,6 +465,21 @@ var auditActions = map[string]auditAction{
 		r := m.(*forgev1.UpdateRuleRequest)
 		return "", r.GetRule().GetName(), details("mode", r.GetRule().GetMode(), "validate_only", flag(r.GetValidateOnly()))
 	}},
+	forgev1connect.AuthServiceCreateTokenProcedure: {"token.create", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.CreateTokenRequest)
+		name := r.GetDisplayName()
+		if !validTokenName(name) {
+			name = "(not a token name)" // whatever was typed there stays out of the log
+		}
+		return "", "", details("name", name, "expire_days", strconv.Itoa(int(r.GetExpireDays())), "validate_only", flag(r.GetValidateOnly()))
+	}},
+	forgev1connect.AuthServiceDeleteTokenProcedure: {"token.delete", func(m any) (string, string, map[string]string) {
+		// Only a well-formed name: a pasted secret must not reach the log.
+		if name := m.(*forgev1.DeleteTokenRequest).GetName(); tokenID.MatchString(name) {
+			return "", name, nil
+		}
+		return "", "", nil
+	}},
 	forgev1connect.TeamServiceUpdateTeamProcedure: {"team.update", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.UpdateTeamRequest)
 		return "", r.GetTeam().GetName(), details("oncall", r.GetTeam().GetOncall(), "validate_only", flag(r.GetValidateOnly()))
@@ -522,6 +540,7 @@ var auditReads = []string{
 	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure,
 	forgev1connect.PolicyServiceListRulesProcedure,
 	forgev1connect.AuditServiceGetAdoptionProcedure,
+	forgev1connect.AuthServiceListTokensProcedure,
 	forgev1connect.DocsServiceListDocSetsProcedure,
 	forgev1connect.DocsServiceGetDocSetProcedure,
 	forgev1connect.DocsServiceGetDocPageProcedure,
