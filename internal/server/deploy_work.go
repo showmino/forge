@@ -93,6 +93,10 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	}
 	var chartValues map[string]any
 	if cv := m.GetChartValues(); cv != "" {
+		// New values become the service's forge.yaml: a settings change.
+		if token, ok := deployOnlyToken(ctx); ok {
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("token %s may deploy, not change a chart's values: that needs the settings scope", token))
+		}
 		if chartValues, err = parseChartValues("chart_values", cv); err != nil {
 			return nil, err
 		}

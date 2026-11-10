@@ -159,20 +159,115 @@ func TestPersonalTokenScopesAndEnd(t *testing.T) {
 	}
 }
 
-// A session's token does not pass as a personal token, nor the other way.
+// A stored session's kind must match its token's prefix: a row of kind
+// token reached with an fgs_ secret (or the other way round) is refused.
 func TestTokenKindsDoNotMix(t *testing.T) {
 	t.Parallel()
 	f := newSessionFixture(t)
+	now := f.now()
+	for _, c := range []struct{ secret, kind string }{{"fgs_looks-like-a-session", ClientToken}, {"fgp_looks-like-a-token", ClientCLI}} {
+		ses := store.Session{ID: "ses_" + c.kind, TokenHash: hashToken(c.secret), Kind: c.kind, Subject: "sub-ana", Login: "ana", Scopes: []string{ScopeRead, ScopeSettings},
+			CreatedAt: now, LastUsedAt: now, CheckedAt: now, ExpiresAt: now.Add(time.Hour)}
+		if err := f.store.CreateSession(context.Background(), ses); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.status(c.secret); connect.CodeOf(err) != connect.CodeUnauthenticated {
+			t.Errorf("a %s row reached with %s: %v", c.kind, c.secret[:4], err)
+		}
+	}
+}
+
+// Only a Forge session made from a login makes a token: an ID token,
+// however fresh, does not.
+func TestTokensComeFromSessions(t *testing.T) {
+	t.Parallel()
+	f := newSessionFixture(t)
+	for _, idToken := range []string{"cli-login", "old-login", "once-login", "other-login", "web-login"} {
+		if _, err := f.token(idToken, "stolen", 0, "settings"); connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Errorf("a token from the ID token %s: %v", idToken, err)
+		}
+	}
+	web, _ := f.login("web-login", "browser")
+	if _, err := f.token(web, "from-the-dashboard", 7); err != nil {
+		t.Errorf("from a dashboard session: %v", err)
+	}
+}
+
+// No token approves a production run, grants an exception, sets a rule's
+// mode or a team's on-call: those are a person's own decisions.
+func TestTokensMakeNoHumanDecisions(t *testing.T) {
+	t.Parallel()
+	all := []string{ScopeRead, ScopeDeploy, ScopeSettings}
+	for _, proc := range []string{
+		forgev1connect.ApprovalServiceApproveApprovalProcedure, forgev1connect.ApprovalServiceRejectApprovalProcedure,
+		forgev1connect.ApprovalServiceRequestExceptionProcedure, forgev1connect.ApprovalServiceRevokeExceptionProcedure,
+		forgev1connect.PolicyServiceUpdateRuleProcedure, forgev1connect.TeamServiceUpdateTeamProcedure,
+	} {
+		if tokenMayCall(all, proc) {
+			t.Errorf("a settings token may call %s", proc)
+		}
+	}
+	// A read token reaches no write, a streaming one included.
+	if tokenMayCall([]string{ScopeRead}, forgev1connect.ServiceCatalogServiceCreateServiceProcedure) {
+		t.Error("a read token creates a service")
+	}
+}
+
+// A token that may deploy but not change settings: it cancels deploys and
+// previews, not other work; it deploys without new chart values.
+func TestDeployOnlyToken(t *testing.T) {
+	t.Parallel()
+	deployOnly := context.WithValue(context.Background(), principalKey{}, &Principal{Subject: "ana", Client: ClientToken, TokenName: "ci", Scopes: []string{ScopeRead, ScopeDeploy}})
+	settings := context.WithValue(context.Background(), principalKey{}, &Principal{Subject: "ana", Client: ClientToken, TokenName: "admin", Scopes: []string{ScopeRead, ScopeSettings}})
+	login := context.WithValue(context.Background(), principalKey{}, &Principal{Subject: "ana", Client: ClientCLI})
+	if name, ok := deployOnlyToken(deployOnly); !ok || name != "ci" {
+		t.Errorf("deploy only: %q %v", name, ok)
+	}
+	if _, ok := deployOnlyToken(settings); ok {
+		t.Error("a settings token is deploy only")
+	}
+	if _, ok := deployOnlyToken(login); ok {
+		t.Error("a login is deploy only")
+	}
+
+	ops := NewOperations(nil)
+	block := make(chan struct{})
+	t.Cleanup(func() { close(block) })
+	wait := func(ctx context.Context, _ func(string, string)) error { <-block; return nil }
+	apply := ops.Start(context.Background(), "apply_resource_plan", "resourcePlans/x", "ana", wait)
+	deploy := ops.Start(context.Background(), kindDeploy, "deployments/payments/staging", "ana", wait)
+	svc := &operationService{ops: ops}
+	cancel := func(ctx context.Context, op *forgev1.Operation) error {
+		_, err := svc.CancelOperation(ctx, connect.NewRequest(&forgev1.CancelOperationRequest{Name: op.GetName()}))
+		return err
+	}
+	if err := cancel(deployOnly, apply); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("a deploy token cancels an apply: %v", err)
+	}
+	if err := cancel(deployOnly, deploy); err != nil {
+		t.Errorf("a deploy token cancels its deploy: %v", err)
+	}
+}
+
+// A secret pasted where a token's name goes reaches neither the answer nor
+// the audit log.
+func TestPastedSecretStaysOut(t *testing.T) {
+	t.Parallel()
+	f := newSessionFixture(t)
 	login, _ := f.login("cli-login", "laptop")
-	tok, err := f.token(login, "ci", 1)
-	if err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"fgp_supersecretvalue", "tokens/fgp_supersecretvalue"} {
+		_, err := f.auth.DeleteToken(context.Background(), as(login, &forgev1.DeleteTokenRequest{Name: name}))
+		if connect.CodeOf(err) != connect.CodeInvalidArgument || strings.Contains(err.Error(), "supersecret") {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
-	swapped := "fgs_" + strings.TrimPrefix(tok.GetSecret(), "fgp_")
-	if _, err := f.status(swapped); connect.CodeOf(err) != connect.CodeUnauthenticated {
-		t.Errorf("a personal token with a session's prefix: %v", err)
+	if _, err := f.token(login, "fgp_supersecretvalue", 1); connect.CodeOf(err) != connect.CodeInvalidArgument || strings.Contains(err.Error(), "supersecret") {
+		t.Errorf("as a name: %v", err)
 	}
-	if _, err := f.status("fgp_" + strings.TrimPrefix(login, "fgs_")); connect.CodeOf(err) != connect.CodeUnauthenticated {
-		t.Errorf("a session with a token's prefix: %v", err)
+	evs, _ := f.store.ListAuditEvents(context.Background(), store.AuditQuery{Limit: 100})
+	for _, e := range evs {
+		if strings.Contains(e.String(), "supersecret") {
+			t.Errorf("in the audit log: %v", e)
+		}
 	}
 }

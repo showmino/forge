@@ -259,7 +259,7 @@ func (a *authService) GetStatus(ctx context.Context, _ *connect.Request[forgev1.
 		Admin:       isAdmin(p),
 		Teams:       teamsOf(p, a.o.Authorizer.Org),
 	}
-	if p.Session != "" && a.o.Sessions != nil {
+	if p.Session != "" && p.Client != ClientToken && a.o.Sessions != nil {
 		if all, err := a.o.Sessions.o.Store.ListSessions(ctx, p.Subject); err == nil {
 			for _, ses := range all {
 				if ses.ID == p.Session {

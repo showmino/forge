@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/showmino/forge/internal/exitcode"
 	"github.com/showmino/forge/internal/github"
@@ -147,13 +148,19 @@ func TestAuditAdoption(t *testing.T) {
 	}
 }
 
-// Make a personal token, use it as FORGE_TOKEN within its scope, list it and
-// revoke it.
+// Make a personal token from a login's session, use it as FORGE_TOKEN within
+// its scope, list it and revoke it.
 func TestToken(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	idToken := fakeIDToken("ana", time.Now().Add(time.Hour))
+	h.issuer = deviceIDP(t, idToken).URL
 	h.sessions = server.NewSessions(server.SessionOptions{Store: store.NewMemory()})
-	h.startAPI(h.authn)
+	h.startAPI(server.StaticAuthenticator{idToken: {
+		Subject: "ana", Email: "ana@example.com", Groups: []string{"platform"}, Client: server.ClientCLI, IssuedAt: time.Now(),
+	}})
+	delete(h.env, "FORGE_TOKEN")
+	h.ok("auth", "login")
 
 	r := h.ok("token", "create", "ci-read", "--expires", "7d")
 	secret := strings.TrimSpace(r.out)
@@ -169,7 +176,7 @@ func TestToken(t *testing.T) {
 		t.Errorf("a read token registers: %q", r.err)
 	}
 	h.fails(int(exitcode.PermissionDenied), "token", "create", "another")
-	h.env["FORGE_TOKEN"] = writerToken
+	delete(h.env, "FORGE_TOKEN")
 
 	h.fails(int(exitcode.Usage), "token", "create", "x", "--expires", "500d")
 	if r := h.ok("token", "revoke", "ci-read"); r.out != "ci-read revoked\n" {

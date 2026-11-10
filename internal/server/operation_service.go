@@ -98,6 +98,13 @@ func (s *operationService) CancelOperation(ctx context.Context, req *connect.Req
 			return nil, err
 		}
 	}
+	// A token that may deploy but not change settings cancels only deploys
+	// and previews, not a resource apply or a teardown.
+	if token, ok := deployOnlyToken(ctx); ok {
+		if op, found := s.ops.Get(name); found && !deployScopeKinds[op.GetKind()] {
+			return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("token %s may cancel deploys and previews, not a %s operation", token, op.GetKind()))
+		}
+	}
 	op, ok := s.ops.Cancel(name)
 	if !ok {
 		return nil, opNotFound(name)

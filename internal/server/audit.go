@@ -467,10 +467,18 @@ var auditActions = map[string]auditAction{
 	}},
 	forgev1connect.AuthServiceCreateTokenProcedure: {"token.create", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.CreateTokenRequest)
-		return "", "", details("name", r.GetDisplayName(), "expire_days", strconv.Itoa(int(r.GetExpireDays())), "validate_only", flag(r.GetValidateOnly()))
+		name := r.GetDisplayName()
+		if !validTokenName(name) {
+			name = "(not a token name)" // whatever was typed there stays out of the log
+		}
+		return "", "", details("name", name, "expire_days", strconv.Itoa(int(r.GetExpireDays())), "validate_only", flag(r.GetValidateOnly()))
 	}},
 	forgev1connect.AuthServiceDeleteTokenProcedure: {"token.delete", func(m any) (string, string, map[string]string) {
-		return "", m.(*forgev1.DeleteTokenRequest).GetName(), nil
+		// Only a well-formed name: a pasted secret must not reach the log.
+		if name := m.(*forgev1.DeleteTokenRequest).GetName(); tokenID.MatchString(name) {
+			return "", name, nil
+		}
+		return "", "", nil
 	}},
 	forgev1connect.TeamServiceUpdateTeamProcedure: {"team.update", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.UpdateTeamRequest)

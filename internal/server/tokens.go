@@ -70,6 +70,28 @@ var credentialProcedures = []string{
 	forgev1connect.AuthServiceDeleteTokenProcedure,
 }
 
+// humanProcedures are decisions a person makes themselves: approving or
+// refusing a production run, the exceptions to that, the rules' modes and
+// who is on call. A script holding a token would remove the human gate they
+// exist for, so no token may, whatever its scopes.
+var humanProcedures = []string{
+	forgev1connect.ApprovalServiceApproveApprovalProcedure,
+	forgev1connect.ApprovalServiceRejectApprovalProcedure,
+	forgev1connect.ApprovalServiceRequestExceptionProcedure,
+	forgev1connect.ApprovalServiceRevokeExceptionProcedure,
+	forgev1connect.PolicyServiceUpdateRuleProcedure,
+	forgev1connect.TeamServiceUpdateTeamProcedure,
+}
+
+// tokenID is a token's name as Forge makes it: tokens/tok_ and 16 hex digits.
+var tokenID = regexp.MustCompile(`^tokens/tok_[0-9a-f]{16}$`)
+
+// validTokenName reports whether name may name a token: a short word, never
+// one that looks like a secret (fgp_..., fgs_...).
+func validTokenName(name string) bool {
+	return tokenLabel.MatchString(name) && !strings.HasPrefix(name, tokenPrefix) && !strings.HasPrefix(name, sessionTokenPrefix)
+}
+
 // IsPersonalToken reports whether token is a personal token.
 func IsPersonalToken(token string) bool { return strings.HasPrefix(token, tokenPrefix) }
 
@@ -78,7 +100,7 @@ func IsPersonalToken(token string) bool { return strings.HasPrefix(token, tokenP
 // write is refused.
 func tokenMayCall(scopes []string, procedure string) bool {
 	switch {
-	case slices.Contains(credentialProcedures, procedure):
+	case slices.Contains(credentialProcedures, procedure), slices.Contains(humanProcedures, procedure):
 		return false
 	case slices.Contains(auditReads, procedure):
 		return true
@@ -146,9 +168,15 @@ func (a *authService) CreateToken(ctx context.Context, req *connect.Request[forg
 	if err != nil {
 		return nil, err
 	}
+	// Only a Forge session made from a fresh login (the CLI's or the
+	// dashboard's) makes a token: a copied ID token, of any age, must not
+	// become a credential that outlives it.
+	if p.Session == "" || (p.Client != ClientCLI && p.Client != ClientWeb) {
+		return nil, connect.NewError(connect.CodePermissionDenied, errors.New("a token is made from a Forge session: log in with 'forge auth login' or the dashboard"))
+	}
 	m := req.Msg
-	if !tokenLabel.MatchString(m.GetDisplayName()) {
-		return nil, invalidArg("display_name %q must be a short name for what it is for: lowercase letters, digits, '.', '_' and '-'", m.GetDisplayName())
+	if !validTokenName(m.GetDisplayName()) {
+		return nil, invalidArg("display_name must be a short name for what it is for: lowercase letters, digits, '.', '_' and '-', at most 63")
 	}
 	scopes, err := tokenScopes(m.GetScopes())
 	if err != nil {
@@ -172,6 +200,16 @@ func (a *authService) CreateToken(ctx context.Context, req *connect.Request[forg
 	if s.o.Members != nil && p.Login == "" {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("the login does not say which GitHub user it is, so the token's memberships could not be kept current"))
 	}
+	// The groups come from the creating session, as last checked: the token
+	// keeps that check's time, not a new one.
+	checked := now
+	if all, err := s.o.Store.ListSessions(ctx, p.Subject); err == nil {
+		for _, ses := range all {
+			if ses.ID == p.Session {
+				checked = ses.CheckedAt
+			}
+		}
+	}
 	id, secret, err := newPersonalToken()
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, errors.New("no random bytes for a token"))
@@ -179,7 +217,7 @@ func (a *authService) CreateToken(ctx context.Context, req *connect.Request[forg
 	t := store.Session{
 		ID: id, TokenHash: hashToken(secret), Kind: ClientToken, Label: m.GetDisplayName(), Scopes: scopes,
 		Subject: p.Subject, Email: p.Email, Login: p.Login, Groups: slices.Clone(p.Groups),
-		CreatedAt: now, LastUsedAt: now, CheckedAt: now, ExpiresAt: tokenNever,
+		CreatedAt: now, LastUsedAt: now, CheckedAt: checked, ExpiresAt: tokenNever,
 	}
 	if d := m.GetExpireDays(); d > 0 {
 		t.ExpiresAt = now.Add(time.Duration(d) * 24 * time.Hour)
@@ -237,10 +275,12 @@ func (a *authService) DeleteToken(ctx context.Context, req *connect.Request[forg
 	if err != nil {
 		return nil, err
 	}
-	id, ok := strings.CutPrefix(req.Msg.GetName(), tokenName)
-	if !ok || !strings.HasPrefix(id, "tok_") {
-		return nil, invalidArg("token %q must be tokens/tok_<id>", req.Msg.GetName())
+	// The name is not echoed: whatever was pasted here (a token's secret,
+	// say) stays out of answers and logs.
+	if !tokenID.MatchString(req.Msg.GetName()) {
+		return nil, invalidArg("a token's name looks like tokens/tok_<16 hex digits>; 'forge token list' shows them")
 	}
+	id := strings.TrimPrefix(req.Msg.GetName(), tokenName)
 	noteAuditTarget(ctx, tokenName+id)
 	err = a.o.Sessions.o.Store.DeleteSession(ctx, p.Subject, id)
 	if errors.Is(err, store.ErrNotFound) {
@@ -252,3 +292,17 @@ func (a *authService) DeleteToken(ctx context.Context, req *connect.Request[forg
 	}
 	return connect.NewResponse(&forgev1.DeleteTokenResponse{}), nil
 }
+
+// deployOnlyToken reports whether the call was made with a token that may
+// deploy but not change settings: the handlers that do more than deploy
+// with a deploy call (cancelling any operation, new chart values) refuse it.
+func deployOnlyToken(ctx context.Context) (string, bool) {
+	p, ok := PrincipalFrom(ctx)
+	if !ok || p.Client != ClientToken || slices.Contains(p.Scopes, ScopeSettings) {
+		return "", false
+	}
+	return p.TokenName, true
+}
+
+// deployScopeKinds are the operations a deploy-only token may cancel.
+var deployScopeKinds = map[string]bool{kindDeploy: true, kindPromote: true, kindRollback: true, kindCreateEnv: true, kindDestroyEnv: true}

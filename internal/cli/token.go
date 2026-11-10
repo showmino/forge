@@ -40,7 +40,7 @@ keeps only its hash, so store it where it is used (a CI secret).
 --expires is a number of days (7d, 30d, at most 365d) or never.`,
 		Example: `  forge token create ci-deploys --scope deploy --expires 30d
   forge token create nightly-report --expires 7d
-  FORGE_TOKEN=$(forge token create ci --scope deploy -q) && gh secret set FORGE_TOKEN --body "$FORGE_TOKEN"`,
+  forge token create ci --scope deploy | gh secret set FORGE_TOKEN   # on stdin, never on a command line`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			days, err := expiryDays(expires)
