@@ -138,8 +138,12 @@ organization ends it), and it expires after 1 to 365 days, or never. Its
 scopes limit it further, per call, in the auth interceptor
 (`tokenMayCall` in `internal/server/tokens.go`): `read` (always) allows every
 read, `deploy` adds deploy, promote, rollback, previews and cancelling an
-operation, `settings` every other change. A token never makes or ends a
-session or a token, so only a login does; a CI job's token cannot either.
+operation (a deploy-only token cancels only deploys and previews, and sends
+no new chart values), `settings` every other change. A token never makes or
+ends a session or a token: only a Forge session made from a login makes one,
+never an ID token or a CI job. And no token approves or rejects a production
+run, asks for or revokes an exception, sets a rule's mode or a team's on-call:
+those stay a person's own decisions.
 Each audit event of a call made with one names it (detail `token`). One person
 has at most 20.
 
