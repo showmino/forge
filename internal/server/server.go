@@ -157,7 +157,7 @@ func New(o Options) (http.Handler, error) {
 	if oidc, ok := o.Repos.(OIDCSubjects); ok {
 		create.oidc = oidc
 	}
-	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
+	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create, checks: newChecker(o.Catalog, o.Audit, o.TeamSettings, o.Docs, o.GitHubOrg, o.Logger)}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger, infra: o.Infrastructure}, opts))
 	mux.Handle(forgev1connect.NewTeamServiceHandler(&teamService{src: o.Teams, settings: o.TeamSettings, org: o.GitHubOrg, log: o.Logger, now: time.Now}, opts))

@@ -105,19 +105,32 @@ and Ownership.
 
 ## C. Golden-path checks
 
-Forge works out five checks for each service and returns them on
-`GetService` and `ListServices`, cached for a few minutes:
+Forge works out five checks for each service. `ListServiceChecks` (readers;
+one service or all) returns them, with how many of those that apply pass:
 
 | Check | Passes when |
 | --- | --- |
-| CI pipeline | CI deployed the service to staging in the last 30 days, or its repo has a workflow that pushes its image |
+| CI pipeline | CI deployed the service to staging in the last 30 days (the audit log), or its repo has a workflow in `.github/workflows` |
 | SLO defined | `service.slo` is set (B) |
-| Tracing | `service.tracing: true` in `forge.yaml`, which the templates set |
-| Runbook | the repo has `docs/runbook.md` (TechDocs already reads `docs/`) |
+| Tracing | `service.tracing: true` in `forge.yaml`, or `forge service update --tracing` |
+| Runbook | the repo has `docs/runbook.md` |
 | On-call | the owning team has an on-call rotation (B) |
 
+CI and Runbook do not apply to a service without a repo (an image or a
+chart): they count neither way. The catalog, the audit log and the teams'
+settings are read on every call, so a change shows at once; what the repo
+holds is read from GitHub and kept for five minutes.
+
 The service page shows them as the golden-path card, and Catalog can filter
-on "off the golden path".
+on "off the golden path". `forge service checks [name] [--missing]` shows
+them in the CLI.
+
+Built (2026-11-10), two changes to the plan above: the checks are their own
+call, not fields of `GetService` and `ListServices` (a stored service would
+otherwise carry facts that go stale, and listing the catalog would wait on
+GitHub). And the templates do not set `service.tracing` yet: none of them
+sends traces today, and the check must not say otherwise. A template that
+adds OpenTelemetry sets it in its forge.yaml.
 
 ## D. Rules with modes
 

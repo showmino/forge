@@ -261,6 +261,14 @@ critical, 2 high, 3 medium) and `slo` (its availability target, such as
 team changes them with `forge service update payments --tier 1 --slo 99.95%`
 (`--tier 0` and `--slo ""` clear them). `forge service get` shows them.
 
+`forge service checks [name] [--missing]` shows how far each service is on
+the golden path (`ListServiceChecks`): a CI pipeline (a deploy from CI in the
+last 30 days, or a workflow in `.github/workflows`), an SLO target, tracing
+(`service.tracing` in forge.yaml, or `forge service update --tracing`), a
+runbook (`docs/runbook.md`) and an on-call rotation for its team. A service
+without a repo skips CI and the runbook. What is read from the repo is at most
+five minutes old; the rest is read on every call.
+
 The owner team also gets the role `maintain` on the service's repo, when
 forge-api has a GitHub App: `forge create` gives it right after making the
 repo (step `grant_team`; if that fails the repo is deleted again),

@@ -500,6 +500,7 @@ var auditReads = []string{
 	forgev1connect.TemplateServiceListTemplatesProcedure,
 	forgev1connect.TemplateServiceGetTemplateProcedure,
 	forgev1connect.TeamServiceListTeamsProcedure,
+	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure,
 	forgev1connect.DocsServiceListDocSetsProcedure,
 	forgev1connect.DocsServiceGetDocSetProcedure,
 	forgev1connect.DocsServiceGetDocPageProcedure,

@@ -19,6 +19,14 @@ service ServiceCatalogService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
+  // ListServiceChecks says how far each service is on the golden path: CI,
+  // an SLO, tracing, a runbook and an on-call rotation. Worked out by Forge
+  // from the catalog, the audit log, the team's settings and the repo, and
+  // kept for a few minutes.
+  rpc ListServiceChecks(ListServiceChecksRequest) returns (ListServiceChecksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
   // RegisterService adds a service to the catalog.
   rpc RegisterService(RegisterServiceRequest) returns (RegisterServiceResponse) {
     option idempotency_level = IDEMPOTENT;
@@ -94,6 +102,9 @@ message Service {
   // not set. From forge.yaml's service.slo at create; the owning team
   // changes it.
   string slo = 16;
+  // The service sends traces with OpenTelemetry. From forge.yaml's
+  // service.tracing at create; the owning team changes it.
+  bool tracing = 17;
 }
 
 // InfrastructureRepo is a repo of infrastructure code that its own GitHub
@@ -365,4 +376,38 @@ message ProposedChange {
   // For a connected repo whose registry is not ghcr.io: the workflow logs in
   // with the repo secrets FORGE_REGISTRY_USERNAME and FORGE_REGISTRY_PASSWORD.
   bool needs_registry_secrets = 7;
+}
+
+message ListServiceChecksRequest {
+  // Only this service, "services/{service}"; empty for every service.
+  string service = 1;
+}
+
+message ListServiceChecksResponse {
+  repeated ServiceChecks services = 1;
+}
+
+// ServiceChecks are one service's golden-path checks.
+message ServiceChecks {
+  // "services/{service}".
+  string service = 1;
+  repeated GoldenCheck checks = 2;
+  // How many of the checks that apply pass, and how many apply.
+  int32 passed = 3;
+  int32 applies = 4;
+}
+
+// GoldenCheck is one check of the golden path.
+message GoldenCheck {
+  // "ci", "slo", "tracing", "runbook" or "oncall".
+  string name = 1;
+  // For people: "CI pipeline".
+  string title = 2;
+  bool passed = 3;
+  // False for a check that does not apply, such as a runbook in the repo of
+  // a service that has none. It counts neither way.
+  bool applies = 4;
+  // Why it passes or what to do: "no deploy from CI in 30 days and no
+  // workflow in .github/workflows".
+  string detail = 5;
 }
