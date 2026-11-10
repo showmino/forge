@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package forge.v1;
 
+import "google/protobuf/field_mask.proto";
+
 // TeamService lists the teams a service can belong to: the teams of the
 // GitHub organization Forge creates repos in. Resource names follow AIP
 // style: "teams/{team}".
@@ -10,6 +12,9 @@ service TeamService {
   rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+  // UpdateTeam changes what Forge keeps about a team: its on-call rotation.
+  // Admins only. The team itself (its name, its members) is GitHub's.
+  rpc UpdateTeam(UpdateTeamRequest) returns (UpdateTeamResponse);
 }
 
 // Team is a team of the GitHub organization.
@@ -21,10 +26,28 @@ message Team {
   // The name as people wrote it, for example "Platform Engineering".
   string display_name = 2;
   string description = 3;
+  // The name of the team's on-call rotation, for example
+  // "billing-primary"; "" when it has none. Set with UpdateTeam.
+  string oncall = 4;
+  // How many members the team has on GitHub; 0 when GitHub could not say.
+  int32 member_count = 5;
 }
 
 message ListTeamsRequest {}
 
 message ListTeamsResponse {
   repeated Team teams = 1;
+}
+
+message UpdateTeamRequest {
+  // team.name selects the team ("teams/{team}").
+  Team team = 1;
+  // Only "oncall" can be updated.
+  google.protobuf.FieldMask update_mask = 2;
+  string request_id = 3;
+  bool validate_only = 4;
+}
+
+message UpdateTeamResponse {
+  Team team = 1;
 }

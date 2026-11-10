@@ -32,6 +32,9 @@ type Memory struct {
 	aprMu     sync.Mutex
 	approvals map[string]Approval // by ID
 	aprOrder  []string            // IDs, oldest first
+
+	teamMu sync.Mutex
+	teams  map[string]TeamSetting // by team slug
 }
 
 type memEntry struct {

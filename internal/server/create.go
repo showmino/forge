@@ -709,6 +709,8 @@ func serviceFromManifest(m *manifest.Manifest) *forgev1.Service {
 		Owners:      m.Service.Owners,
 		RepoUrl:     m.Service.Repo,
 		Labels:      m.Service.Labels,
+		Tier:        int32(m.Service.Tier), //nolint:gosec // Validate keeps it 0-3
+		Slo:         m.Service.SLO,
 	}
 	switch m.Service.Lifecycle {
 	case "experimental":

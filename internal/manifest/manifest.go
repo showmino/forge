@@ -253,7 +253,19 @@ type Service struct {
 	Repo         string            `yaml:"repo,omitempty"`
 	Dependencies []string          `yaml:"dependencies,omitempty"`
 	Labels       map[string]string `yaml:"labels,omitempty"`
+	// Tier is how critical the service is: 1 critical, 2 high, 3 medium;
+	// 0 (unset) is not set.
+	Tier int `yaml:"tier,omitempty"`
+	// SLO is the availability target, for example "99.9%".
+	SLO string `yaml:"slo,omitempty"`
 }
+
+// sloText is an availability target: a percentage up to 100, with at most
+// four decimals.
+var sloText = regexp.MustCompile(`^(100|[0-9]{1,2}(\.[0-9]{1,4})?)%$`)
+
+// ValidSLO reports whether s is an availability target such as "99.9%".
+func ValidSLO(s string) bool { return sloText.MatchString(s) }
 
 var dnsLabel = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
@@ -281,6 +293,12 @@ func (m *Manifest) Validate() error {
 	case "", "experimental", "production", "deprecated":
 	default:
 		return fmt.Errorf("service.lifecycle %q must be experimental, production or deprecated", m.Service.Lifecycle)
+	}
+	if m.Service.Tier < 0 || m.Service.Tier > 3 {
+		return fmt.Errorf("service.tier %d must be 1 (critical), 2 (high) or 3 (medium)", m.Service.Tier)
+	}
+	if m.Service.SLO != "" && !ValidSLO(m.Service.SLO) {
+		return fmt.Errorf("service.slo %q must be a percentage such as \"99.9%%\"", m.Service.SLO)
 	}
 	if r := m.Run; r != nil {
 		if r.Image != "" {

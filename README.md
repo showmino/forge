@@ -249,7 +249,17 @@ again.
 
 A service belongs to a team of the GitHub organization. `forge team list` (and
 the dashboard's Create form) read the teams from GitHub as the App, which needs
-the organization permission "Members: read" for it.
+the organization permission "Members: read" for it; the list shows how many
+members each team has. Forge keeps one thing of its own about a team: the name
+of its on-call rotation, which an admin sets with `forge team update billing
+--oncall billing-primary` (`--oncall ""` removes it; stored in the table
+`team_settings`).
+
+A service also says how critical it is and what it promises: `tier` (1
+critical, 2 high, 3 medium) and `slo` (its availability target, such as
+`99.9%`). Both come from forge.yaml's `service` at create or register, and its
+team changes them with `forge service update payments --tier 1 --slo 99.95%`
+(`--tier 0` and `--slo ""` clear them). `forge service get` shows them.
 
 The owner team also gets the role `maintain` on the service's repo, when
 forge-api has a GitHub App: `forge create` gives it right after making the
@@ -269,7 +279,8 @@ promote and roll it back, manage its previews and plan and apply its
 resources outside production, and create services for their own teams. Only
 an admin may delete a service, change its address, register an existing
 repo or point a service at another repo, create a service for another team,
-move a service to another team or apply resources in production. A refusal names the action and the team it
+move a service to another team, apply resources in production or set a
+team's on-call rotation. A refusal names the action and the team it
 needs. `forge auth can deploy.promote payments` prints yes or no (exit 0 or
 5), `forge auth status` shows your role and `forge service get` what you may
 do on that service.

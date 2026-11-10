@@ -79,6 +79,27 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// service.tier and service.slo: how critical a service is, and its
+// availability target (phase 15).
+func TestTierAndSLO(t *testing.T) {
+	t.Parallel()
+	base := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"
+	m, err := Parse([]byte(base + "  tier: 1\n  slo: \"99.95%\"\n"))
+	if err != nil || m.Service.Tier != 1 || m.Service.SLO != "99.95%" {
+		t.Fatalf("set: %+v %v", m.Service, err)
+	}
+	for _, bad := range []string{"  tier: 4\n", "  tier: -1\n", "  slo: 99.9\n", "  slo: \"101%\"\n", "  slo: \"high\"\n", "  slo: \"99.99999%\"\n"} {
+		if _, err := Parse([]byte(base + bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	for slo, ok := range map[string]bool{"99.9%": true, "100%": true, "95%": true, "99.999%": true, "0%": true, "100.0%": false, "99,9%": false, "%": false} {
+		if ValidSLO(slo) != ok {
+			t.Errorf("ValidSLO(%q) = %v", slo, !ok)
+		}
+	}
+}
+
 func TestRun(t *testing.T) {
 	t.Parallel()
 	base := "apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n"

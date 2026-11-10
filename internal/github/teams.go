@@ -51,6 +51,17 @@ func (c *Client) ListTeams(ctx context.Context, org string) ([]Team, error) {
 	return teams, nil
 }
 
+// TeamMemberCount returns how many members the team slug of org has.
+func (c *Client) TeamMemberCount(ctx context.Context, org, slug string) (int, error) {
+	var out struct {
+		MembersCount int `json:"members_count"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, fmt.Sprintf("/orgs/%s/teams/%s", url.PathEscape(org), url.PathEscape(slug)), nil, &out); err != nil {
+		return 0, err
+	}
+	return out.MembersCount, nil
+}
+
 // membership asks one of GitHub's membership endpoints about a person: true
 // for an active member, false for none (404) or an invitation not yet taken.
 func (c *Client) membership(ctx context.Context, path string) (bool, error) {
