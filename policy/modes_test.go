@@ -119,6 +119,21 @@ func TestRuleModes(t *testing.T) {
 		t.Errorf("promotion: deny %q warn %q", res.Deny, res.Warn)
 	}
 
+	// Staging out of sync and behind its latest deploy: whatever the mode of
+	// healthy-staging, the deploy that was checked is still required.
+	behind := Promotion{Service: "payments", From: "staging", To: "production", Source: Source{Sync: "OutOfSync", Health: "Healthy", AtRevision: false, DeployCommit: "9f8e7d6"}}
+	for _, m := range []string{"enforce", "warn", "off"} {
+		eng := *e
+		eng.Modes = modes{"promotion.healthy-staging": m}
+		res, err := eng.EvaluatePromotion(ctx, behind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.ContainsFunc(res.Deny, func(d string) bool { return strings.Contains(d, "does not run its latest deploy") }) {
+			t.Errorf("healthy-staging %s: deny %q warn %q, want the checked deploy refused", m, res.Deny, res.Warn)
+		}
+	}
+
 	// The staging warning can be made a refusal.
 	eng = *e
 	eng.Modes = modes{"resources.staging-single": "enforce"}
@@ -133,7 +148,8 @@ func TestRuleModes(t *testing.T) {
 	}
 }
 
-// When the modes cannot be read, every rule has its default: the stricter one.
+// When the modes cannot be read, every switchable rule is enforced, even one
+// whose default is warn.
 func TestRuleModesFailClosed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -147,5 +163,25 @@ func TestRuleModesFailClosed(t *testing.T) {
 	res, err := e.EvaluateImage(ctx, Image{Service: "web", Image: "docker.io/library/nginx:latest", Host: "docker.io", Repo: "library/nginx", Tag: "latest"})
 	if err != nil || len(res.Deny) != 1 || told == nil {
 		t.Errorf("deny %q, err %v, told %v", res.Deny, err, told)
+	}
+	two := plan(t, []string{"create"}, nil, cluster("payments-staging", 5, 2, "longhorn-retain"))
+	res, err = e.Evaluate(ctx, two, declaring(Forge{Service: "payments", Environment: "staging"}, two))
+	if err != nil || len(res.Deny) != 1 || len(res.Warn) != 0 || !strings.Contains(res.Modes, "resources.staging-single=enforce") {
+		t.Errorf("staging-single when the modes are away: deny %q warn %q modes %q", res.Deny, res.Warn, res.Modes)
+	}
+}
+
+// A result says which modes, other than the defaults, decided it.
+func TestRuleModesInTheResult(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	e, err := New(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Modes = modes{"images.pinned-version": "warn", "charts.allowed-repos": "enforce", "images.no-internal-hosts": "off"}
+	res, err := e.EvaluateImage(ctx, Image{Service: "web", Image: "docker.io/library/nginx:1.27", Host: "docker.io", Repo: "library/nginx", Tag: "1.27"})
+	if err != nil || res.Modes != "images.pinned-version=warn" {
+		t.Errorf("modes %q, %v", res.Modes, err)
 	}
 }

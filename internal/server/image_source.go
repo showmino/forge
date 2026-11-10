@@ -107,6 +107,7 @@ func (d *Deploys) pinImage(ctx context.Context, svc, image string) (pinnedImage,
 			return pinnedImage{}, connect.NewError(connect.CodeInternal, fmt.Errorf("check the image rules: %w", err))
 		}
 		noteAuditDetail(ctx, "policy_rules", d.o.Policy.Fingerprint())
+		noteAuditDetail(ctx, "policy_modes", res.Modes)
 		if res.Denied() {
 			return pinnedImage{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("the image rules refuse it: %s", strings.Join(res.Deny, "; ")))
 		}

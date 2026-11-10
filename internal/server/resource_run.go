@@ -349,7 +349,7 @@ func (r *Resources) evaluate(ctx context.Context, rec *store.PlanRecord, planJSO
 			msgs[i] = auditText(m, auditMessageMax)
 		}
 	}
-	return &forgev1.PolicyResult{Denied: res.Denied(), Deny: res.Deny, Warn: res.Warn, Rules: r.o.Policy.Fingerprint()}, nil
+	return &forgev1.PolicyResult{Denied: res.Denied(), Deny: res.Deny, Warn: res.Warn, Rules: r.o.Policy.Fingerprint(), Modes: res.Modes}, nil
 }
 
 // planCheck is what a plan run's result turned out to be.
@@ -578,7 +578,7 @@ func (r *Resources) appendOutcome(ctx context.Context, p *forgev1.ResourcePlan, 
 		}
 	}
 	ev.Details = details("environment", p.GetEnv(), "plan", p.GetName(), "policy", verdict,
-		"policy_rules", p.GetPolicy().GetRules(), "allow_destroy", flag(p.GetAllowDestroy()), "changes", changes)
+		"policy_rules", p.GetPolicy().GetRules(), "policy_modes", p.GetPolicy().GetModes(), "allow_destroy", flag(p.GetAllowDestroy()), "changes", changes)
 	switch {
 	case p.GetState() == forgev1.ResourcePlan_STATE_DENIED:
 		ev.Result = &forgev1.AuditResult{Code: "failed", Message: auditText(OpCodePolicyDenied+": "+deniedMessage(p.GetPolicy()), auditMessageMax)}

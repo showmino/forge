@@ -122,6 +122,9 @@ message PolicyResult {
   repeated string warn = 3;
   // The fingerprint of the rule set that decided.
   string rules = 4;
+  // The modes of the switchable rules that differ from their defaults, as
+  // "rule=mode" separated by commas: with rules, what decided (phase 15).
+  string modes = 5;
 }
 
 // ResourcePlan is a saved plan for one service and environment.

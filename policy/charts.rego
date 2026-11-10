@@ -5,7 +5,8 @@
 # repository as forge.yaml has it ("oci://ghcr.io/stefanprodan/charts"),
 # host its host, and allowed_repos the platform's list
 # (--allowed-chart-repos; empty allows any).
-# A message in deny refuses the chart.
+# A message in deny refuses the chart; one in warn lets it run and is
+# recorded in the audit log.
 #
 # A missing field reads as its fallback, which these rules refuse.
 package forge.charts

@@ -59,8 +59,12 @@ func TestUpdateRule(t *testing.T) {
 		}
 		return resp.Msg.GetRule(), nil
 	}
-	if _, err := set(readerCtx(), "rules/images.pinned-version", "off"); connect.CodeOf(err) != connect.CodePermissionDenied {
-		t.Errorf("a reader: %v", err)
+	member := context.WithValue(context.Background(), principalKey{}, &Principal{Subject: "bo", Groups: []string{"showmino:billing"}, Permissions: []string{PermServicesRead}})
+	ci := context.WithValue(context.Background(), principalKey{}, &Principal{Subject: "repo:showmino/payments", Permissions: []string{PermServicesRead, PermServicesWrite}, Workload: &Workload{}})
+	for who, ctx := range map[string]context.Context{"a reader": readerCtx(), "a team member": member, "a CI workload": ci} {
+		if _, err := set(ctx, "rules/images.pinned-version", "off"); connect.CodeOf(err) != connect.CodePermissionDenied {
+			t.Errorf("%s: %v", who, err)
+		}
 	}
 	if _, err := set(writerCtx(), "rules/promotion.checked-deploy", "off"); connect.CodeOf(err) != connect.CodeFailedPrecondition {
 		t.Errorf("a rule that guards Forge: %v", err)

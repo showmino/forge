@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"strings"
 
 	"github.com/open-policy-agent/opa/v1/rego"
 )
@@ -120,6 +121,9 @@ type Source struct {
 type Result struct {
 	Deny []string
 	Warn []string
+	// Modes are the modes in force that differ from the defaults,
+	// "images.pinned-version=warn,...": with Fingerprint, what decided.
+	Modes string
 }
 
 // Denied reports whether any rule refused the plan.
@@ -185,8 +189,8 @@ type ModeSource interface {
 
 // Engine evaluates a compiled rule set.
 type Engine struct {
-	// Modes, when set, are the modes of the switchable rules. A mode that
-	// cannot be read is its default, the stricter choice.
+	// Modes, when set, are the modes of the switchable rules. When they
+	// cannot be read, every switchable rule is enforced.
 	Modes ModeSource
 	// OnModesError is told when Modes fails; nil ignores it.
 	OnModesError func(error)
@@ -270,7 +274,7 @@ func (e *Engine) Evaluate(ctx context.Context, planJSON []byte, f Forge) (Result
 	if f.Resources == nil {
 		f.Resources = []Resource{}
 	}
-	return results(e.query.Eval(ctx, rego.EvalInput(map[string]any{"plan": plan, "forge": f, "modes": e.modes(ctx)})))
+	return e.evaluate(ctx, e.query, map[string]any{"plan": plan, "forge": f})
 }
 
 // EvaluatePromotion checks a promotion. An error means it could not be
@@ -284,8 +288,7 @@ func (e *Engine) EvaluatePromotion(ctx context.Context, p Promotion) (Result, er
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	input["modes"] = e.modes(ctx)
-	return results(e.promotion.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.promotion, input)
 }
 
 // EvaluateImage checks the image a service without a repo is to run. An
@@ -302,8 +305,7 @@ func (e *Engine) EvaluateImage(ctx context.Context, i Image) (Result, error) {
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	input["modes"] = e.modes(ctx)
-	return results(e.image.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.image, input)
 }
 
 // EvaluateChart checks the chart a service without a repo is to run. An
@@ -320,8 +322,7 @@ func (e *Engine) EvaluateChart(ctx context.Context, c Chart) (Result, error) {
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	input["modes"] = e.modes(ctx)
-	return results(e.chart.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.chart, input)
 }
 
 // EvaluateTarget checks the target an infrastructure repo is to deploy to.
@@ -340,30 +341,51 @@ func (e *Engine) EvaluateTarget(ctx context.Context, t Target) (Result, error) {
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	input["modes"] = e.modes(ctx)
-	return results(e.target.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.target, input)
 }
 
-// modes are the modes admins set, for the rules' input.modes. Without a
-// source, or when it fails, every rule has its default.
-func (e *Engine) modes(ctx context.Context) map[string]any {
+// modes are the modes admins set, for the rules' input.modes, and the ones
+// that differ from their defaults as text for the audit log: "rule=mode",
+// sorted, comma separated. Without a source every rule has its default.
+// When the source fails, every switchable rule is enforced: the strictest
+// choice, whatever an admin had set.
+func (e *Engine) modes(ctx context.Context) (map[string]any, string) {
 	out := map[string]any{}
 	if e.Modes == nil {
-		return out
+		return out, ""
 	}
 	set, err := e.Modes.RuleModes(ctx)
 	if err != nil {
 		if e.OnModesError != nil {
 			e.OnModesError(err)
 		}
-		return out
+		set = map[string]string{}
+		for _, r := range Rules {
+			if r.Switchable {
+				set[r.ID] = ModeEnforce
+			}
+		}
 	}
+	var changed []string
 	for id, m := range set {
 		if r, ok := RuleByID(id); ok && r.Switchable && ValidMode(m) {
 			out[id] = m
+			if m != r.Default {
+				changed = append(changed, id+"="+m)
+			}
 		}
 	}
-	return out
+	slices.Sort(changed)
+	return out, strings.Join(changed, ",")
+}
+
+// evaluate runs q on input with the modes, and records them in the result.
+func (e *Engine) evaluate(ctx context.Context, q rego.PreparedEvalQuery, input map[string]any) (Result, error) {
+	m, text := e.modes(ctx)
+	input["modes"] = m
+	res, err := results(q.Eval(ctx, rego.EvalInput(input)))
+	res.Modes = text
+	return res, err
 }
 
 // results reads the deny and, when bound, warn sets of one evaluation.

@@ -137,6 +137,7 @@ func (d *Deploys) checkChart(ctx context.Context, svc string, c *manifest.Chart)
 			return connect.NewError(connect.CodeInternal, fmt.Errorf("check the chart rules: %w", err))
 		}
 		noteAuditDetail(ctx, "policy_rules", d.o.Policy.Fingerprint())
+		noteAuditDetail(ctx, "policy_modes", res.Modes)
 		if res.Denied() {
 			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("the chart rules refuse it: %s", strings.Join(res.Deny, "; ")))
 		}

@@ -43,8 +43,9 @@ violation contains {"rule": "promotion.healthy-staging", "msg": msg} if {
 
 # Argo CD can still say Synced and Healthy about the deploy before the
 # latest one: the image being promoted is then not the one that was checked.
+# It stands on its own, whatever staging's sync: promotion.healthy-staging
+# may be warned or off, this rule never is.
 deny contains msg if {
-	sync == "Synced"
 	field(source, "at_revision", false) != true
 	msg := sprintf("%s does not run its latest deploy (%s) yet; wait for Argo CD to sync it", [from, shown(field(source, "deploy_commit", ""))])
 }

@@ -165,8 +165,10 @@ Modes:
 In the rules, each switchable rule's checks are tagged with its id
 (`violation`), and `policy/modes.rego` turns a violation into a deny or a
 warning by the rule's mode. Modes are stored in the table `rule_modes`; a rule
-nobody changed has its default, so nothing changes on upgrade. A mode that
-cannot be read falls back to the default, which is the stricter one.
+nobody changed has its default, so nothing changes on upgrade. When the modes
+cannot be read, every switchable rule is enforced, the strictest choice. Each
+audit event that checked rules records `policy_modes`: the modes in force that
+differ from the defaults, next to `policy_rules`, the rules' fingerprint.
 
 `PolicyService.ListRules` (readers) and `UpdateRule` (admins, action
 `rule.update`, audited); `forge policy list` and `forge policy set <rule>

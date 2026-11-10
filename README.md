@@ -585,7 +585,9 @@ touches only the declared database, the promotion ships the deploy that was
 checked, no other service's CI image, no internal registry, a target of the
 team) and are always enforced. Modes are kept in the table `rule_modes`; a
 rule set back to its default keeps no row. When the modes cannot be read,
-every rule has its default.
+every switchable rule is enforced. An audit event that checked rules records
+`policy_modes` (the modes that differ from the defaults) next to
+`policy_rules`, and a resource plan's policy result has them as `modes`.
 
 From GitHub Actions, `forge deploy start --env staging` needs no secret: with
 `permissions: id-token: write`, the CLI requests the job's OIDC token

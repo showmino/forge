@@ -214,6 +214,7 @@ func (r *Resources) ApplyResourcePlan(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("policy could not be evaluated, so %s was not applied: %w", planName, err))
 	}
 	noteAuditDetail(ctx, "policy_rules", pol.GetRules())
+	noteAuditDetail(ctx, "policy_modes", pol.GetModes())
 	if pol.GetDenied() {
 		noteAuditDetail(ctx, "policy", "denied")
 		if !m.GetValidateOnly() {
@@ -224,6 +225,8 @@ func (r *Resources) ApplyResourcePlan(ctx context.Context, req *connect.Request[
 		return nil, connect.NewError(connect.CodePermissionDenied, fmt.Errorf("%s is denied by policy: %s", planName, strings.Join(pol.GetDeny(), "; ")))
 	}
 	noteAuditDetail(ctx, "policy", "passed")
+	// A rule an admin set to warn lets it through; the audit event keeps what it said.
+	noteAuditDetail(ctx, "policy_warnings", strings.Join(pol.GetWarn(), "; "))
 	if m.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.ApplyResourcePlanResponse{Plan: r.view(rec)}), nil
 	}
