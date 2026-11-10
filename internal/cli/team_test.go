@@ -7,6 +7,8 @@ import (
 
 	"github.com/showmino/forge/internal/exitcode"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/server"
+	"github.com/showmino/forge/internal/store"
 )
 
 type fakeTeams []github.Team
@@ -143,4 +145,37 @@ func TestAuditAdoption(t *testing.T) {
 	if r := h.ok("audit", "adoption", "--weekly"); strings.Count(r.out, "\n") != 13 {
 		t.Errorf("12 weeks and a header:\n%s", r.out)
 	}
+}
+
+// Make a personal token, use it as FORGE_TOKEN within its scope, list it and
+// revoke it.
+func TestToken(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.sessions = server.NewSessions(server.SessionOptions{Store: store.NewMemory()})
+	h.startAPI(h.authn)
+
+	r := h.ok("token", "create", "ci-read", "--expires", "7d")
+	secret := strings.TrimSpace(r.out)
+	if !strings.HasPrefix(secret, "fgp_") || !strings.Contains(r.err, "shown once") {
+		t.Fatalf("create: out %q err %q", r.out, r.err)
+	}
+	if r := h.ok("token", "list"); !strings.Contains(r.out, "ci-read") || !strings.Contains(r.out, "read") {
+		t.Errorf("list:\n%s", r.out)
+	}
+	h.env["FORGE_TOKEN"] = secret
+	h.ok("service", "list")
+	if r := h.fails(int(exitcode.PermissionDenied), "service", "register", "payments", "--team", "billing"); !strings.Contains(r.err, "ci-read") {
+		t.Errorf("a read token registers: %q", r.err)
+	}
+	h.fails(int(exitcode.PermissionDenied), "token", "create", "another")
+	h.env["FORGE_TOKEN"] = writerToken
+
+	h.fails(int(exitcode.Usage), "token", "create", "x", "--expires", "500d")
+	if r := h.ok("token", "revoke", "ci-read"); r.out != "ci-read revoked\n" {
+		t.Errorf("revoke: %q", r.out)
+	}
+	h.fails(int(exitcode.NotFound), "token", "revoke", "ci-read")
+	h.env["FORGE_TOKEN"] = secret
+	h.fails(int(exitcode.Unauthenticated), "service", "list")
 }

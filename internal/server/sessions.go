@@ -137,7 +137,7 @@ func newSessionToken() (string, string, error) {
 
 // Authenticate implements Authenticator for session tokens.
 func (s *Sessions) Authenticate(ctx context.Context, token string) (*Principal, error) {
-	if !IsSessionToken(token) {
+	if !IsSessionToken(token) && !IsPersonalToken(token) {
 		return nil, errSessionEnded()
 	}
 	ses, err := s.o.Store.SessionByToken(ctx, hashToken(token))
@@ -152,6 +152,11 @@ func (s *Sessions) Authenticate(ctx context.Context, token string) (*Principal, 
 		s.end(ctx, ses, "expired")
 		return nil, errSessionEnded()
 	}
+	// A token is only what it claims to be: a login's token cannot pass as
+	// a personal one, nor the other way round.
+	if (ses.Kind == ClientToken) != IsPersonalToken(token) {
+		return nil, errSessionEnded()
+	}
 	if ses, err = s.recheck(ctx, ses, now); err != nil {
 		return nil, err
 	}
@@ -164,7 +169,11 @@ func (s *Sessions) Authenticate(ctx context.Context, token string) (*Principal, 
 			s.o.Log.Warn("recording a session's use", "session", ses.ID, "error", err)
 		}
 	}
-	return &Principal{Subject: ses.Subject, Email: ses.Email, Login: ses.Login, Groups: ses.Groups, Client: ses.Kind, Session: ses.ID}, nil
+	p := &Principal{Subject: ses.Subject, Email: ses.Email, Login: ses.Login, Groups: ses.Groups, Client: ses.Kind, Session: ses.ID}
+	if ses.Kind == ClientToken {
+		p.Scopes, p.TokenName = slices.Clone(ses.Scopes), ses.Label
+	}
+	return p, nil
 }
 
 // end deletes a session that is over.
@@ -409,6 +418,8 @@ func (s *Sessions) trim(ctx context.Context, subject string, now time.Time) {
 	if err != nil {
 		return
 	}
+	// Tokens are not logins: they neither count nor go.
+	all = slices.DeleteFunc(all, func(ses store.Session) bool { return ses.Kind == ClientToken })
 	slices.SortFunc(all, func(a, b store.Session) int { return b.LastUsedAt.Compare(a.LastUsedAt) })
 	for i, ses := range all {
 		switch {
@@ -470,7 +481,7 @@ func (a *authService) ListSessions(ctx context.Context, _ *connect.Request[forge
 	now := a.o.Sessions.o.Now()
 	out := &forgev1.ListSessionsResponse{}
 	for _, ses := range all {
-		if now.Before(ses.ExpiresAt) {
+		if now.Before(ses.ExpiresAt) && ses.Kind != ClientToken {
 			out.Sessions = append(out.Sessions, sessionProto(ses, p.Session))
 		}
 	}
@@ -493,8 +504,8 @@ func (a *authService) DeleteSession(ctx context.Context, req *connect.Request[fo
 		name = sessionPrefix + p.Session
 	}
 	id, ok := strings.CutPrefix(name, sessionPrefix)
-	if !ok || id == "" {
-		return nil, invalidArg("session %q must be sessions/<id>", req.Msg.GetName())
+	if !ok || id == "" || strings.HasPrefix(id, "tok_") {
+		return nil, invalidArg("session %q must be sessions/<id>; a token is revoked with DeleteToken", req.Msg.GetName())
 	}
 	noteAuditTarget(ctx, sessionPrefix+id)
 	err := a.o.Sessions.o.Store.DeleteSession(ctx, p.Subject, id)
@@ -523,7 +534,7 @@ type sessionFirst struct {
 }
 
 func (f sessionFirst) Authenticate(ctx context.Context, token string) (*Principal, error) {
-	if IsSessionToken(token) {
+	if IsSessionToken(token) || IsPersonalToken(token) {
 		return f.s.Authenticate(ctx, token)
 	}
 	return f.next.Authenticate(ctx, token)

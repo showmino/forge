@@ -82,6 +82,8 @@ type sessionFixture struct {
 	store   *store.Memory
 	members *fakeMembers
 	auth    forgev1connect.AuthServiceClient
+	// url is the API's, for clients of other services.
+	url string
 }
 
 func (f *sessionFixture) now() time.Time {
@@ -125,6 +127,7 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	f.auth = forgev1connect.NewAuthServiceClient(srv.Client(), srv.URL)
+	f.url = srv.URL
 	return f
 }
 

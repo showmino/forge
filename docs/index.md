@@ -52,6 +52,7 @@ The v1 CLI has twelve command groups; each maps one-to-one to an API resource so
 | `op` | `list`, `watch`, `cancel` | `forge op watch op_9f2c` | 3 |
 | `docs` | `list`, `get`, `search`, `lint` | `forge docs get payments runbook.md` | 7 |
 | `policy` | `list`, `set` | `forge policy set images.pinned-version --mode warn` | 15 |
+| `token` | `create`, `list`, `revoke` | `forge token create ci-deploys --scope deploy --expires 30d` | 15 |
 
 Utility commands ship in Phase 1: `forge version`, `forge completion <shell>`, `forge doctor` (checks config, auth, API reachability and version skew) and `forge init` (writes `forge.yaml` for an existing repo).
 

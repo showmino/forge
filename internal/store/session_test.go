@@ -49,6 +49,21 @@ func runSessionSuite(t *testing.T, s SessionStore) {
 		!slices.Equal(got.Groups, []string{"showmino:platform"}) || !got.CreatedAt.Equal(at) || !got.ExpiresAt.Equal(at.Add(time.Hour)) {
 		t.Fatalf("by token: %+v %v", got, err)
 	}
+	if got.Scopes != nil {
+		t.Errorf("a login has scopes: %v", got.Scopes)
+	}
+	// A personal token keeps its scopes, and an expiry far ahead.
+	never := time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)
+	tok := Session{ID: "ses_t", TokenHash: "hash-t", Kind: "token", Label: "ci-deploys", Subject: "ana", Scopes: []string{"read", "deploy"}, CreatedAt: at, LastUsedAt: at, ExpiresAt: never, CheckedAt: at}
+	if err := s.CreateSession(ctx, tok); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.SessionByToken(ctx, "hash-t"); err != nil || !slices.Equal(got.Scopes, []string{"read", "deploy"}) || got.Kind != "token" || !got.ExpiresAt.Equal(never) {
+		t.Errorf("a token: %+v %v", got, err)
+	}
+	if err := s.DeleteSession(ctx, "ana", "ses_t"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SessionByToken(ctx, "hash-nope"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an unknown token: %v", err)
 	}

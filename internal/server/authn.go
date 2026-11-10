@@ -45,6 +45,10 @@ type Principal struct {
 	// Session is the ID of the session the call was made with; empty for a
 	// call with an ID token.
 	Session string
+	// Scopes and TokenName are set for a call made with a personal token
+	// (Client is ClientToken): what it may do, and what its person called it.
+	Scopes    []string
+	TokenName string
 }
 
 // Workload is a CI job of a service's repo, from its GitHub Actions token.
@@ -213,6 +217,10 @@ func (i *authInterceptor) authenticate(ctx context.Context, procedure, header st
 		}
 	} else {
 		i.authz.Grant(p)
+	}
+	if p.Client == ClientToken && !tokenMayCall(p.Scopes, procedure) {
+		return ctx, connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("token %s may %s, not call %s; make one with more scopes from your login", p.TokenName, strings.Join(p.Scopes, ", "), procedure))
 	}
 	ctx = context.WithValue(ctx, accessKey{}, &access{org: i.authz.Org, teamOf: i.teamOf})
 	return context.WithValue(ctx, principalKey{}, p), nil

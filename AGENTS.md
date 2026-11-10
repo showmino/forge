@@ -168,6 +168,7 @@ Run `make test lint` before every commit. Write the test first.
 | Protos in `proto/forge/v1`, AIP-style names (`services/{id}`), `request_id`, `validate_only`, etags | `make generate` |
 | Who may do what: a write RPC calls `authorize(ctx, Act..., service)` (or `authorizeTeam`) with an action of the role table; reads use `require(ctx, PermServicesRead)` | `internal/server/rbac.go` (roles reader, team, admin; `actionRoles`) |
 | Every write RPC is in `auditActions`, every read in `auditReads` | `internal/server/audit.go`; `TestAuditCoversEveryProcedure` fails otherwise |
+| A personal token (`fgp_`) may call a read, the calls in `deployProcedures` with the deploy scope, any other write with settings, and never one in `credentialProcedures` | `tokenMayCall` in `internal/server/tokens.go`, checked by the auth interceptor; a new RPC that makes or ends a credential goes in `credentialProcedures` |
 | A resource run ends through `Resources.endRun`, which changes the plan once and appends the one outcome event | Operations started with `withoutOutcome(ctx)`; never append a resource outcome anywhere else |
 | Policy rules are `policy/*.rego`, package `forge.resources`, built into the binary | every rule has a passing and a failing case in `policy/policy_test.go`. A rule an admin may switch is a `violation` with its id, listed in `policy.Rules` and the defaults of `policy/modes.rego` (`TestRulesMatchTheModes`); a rule that guards Forge stays a plain `deny` |
 | Comments and docs are plain English, written for someone who was not there | the code around you |

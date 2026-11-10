@@ -208,6 +208,14 @@ their role, and is stored only as a hash. `forge auth token create|list|
 revoke` and the settings page. Expired and revoked tokens are refused, and
 every use updates "last used".
 
+Built (2026-11-11). The commands are `forge token create|list|revoke` (the
+owner's choice: `forge auth token` keeps printing the bearer token). A token is
+a session of kind `token` with its scopes (migration 0008, `sessions.scopes`);
+the auth interceptor allows a token a read, the deploy calls with `deploy`,
+any other write with `settings`, and never a call that makes or ends a session
+or a token. At most 20 per person; names unique per person. Each audit event
+of a call made with one has the detail `token`.
+
 ## G. Service actions
 
 `forge service restart <svc> --env <env>` restarts its pods (a rolling

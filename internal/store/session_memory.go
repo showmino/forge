@@ -9,6 +9,7 @@ import (
 
 func cloneSession(s Session) Session {
 	s.Groups = slices.Clone(s.Groups)
+	s.Scopes = slices.Clone(s.Scopes)
 	return s
 }
 

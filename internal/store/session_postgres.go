@@ -9,12 +9,15 @@ import (
 )
 
 const sessionColumns = `id, token_hash, kind, label, subject, email, login, user_groups,
-	created_at, last_used_at, expires_at, checked_at`
+	created_at, last_used_at, expires_at, checked_at, scopes`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	err := row.Scan(&s.ID, &s.TokenHash, &s.Kind, &s.Label, &s.Subject, &s.Email, &s.Login, &s.Groups,
-		&s.CreatedAt, &s.LastUsedAt, &s.ExpiresAt, &s.CheckedAt)
+		&s.CreatedAt, &s.LastUsedAt, &s.ExpiresAt, &s.CheckedAt, &s.Scopes)
+	if len(s.Scopes) == 0 {
+		s.Scopes = nil
+	}
 	return s, err
 }
 
@@ -23,10 +26,14 @@ func (p *Postgres) CreateSession(ctx context.Context, s Session) error {
 	if groups == nil {
 		groups = []string{}
 	}
+	scopes := s.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
 	_, err := p.pool.Exec(ctx, `INSERT INTO sessions (`+sessionColumns+`)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 		s.ID, s.TokenHash, s.Kind, s.Label, s.Subject, s.Email, s.Login, groups,
-		s.CreatedAt, s.LastUsedAt, s.ExpiresAt, s.CheckedAt)
+		s.CreatedAt, s.LastUsedAt, s.ExpiresAt, s.CheckedAt, scopes)
 	return err
 }
 

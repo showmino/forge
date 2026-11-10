@@ -47,6 +47,12 @@ const (
 	// AuthServiceDeleteSessionProcedure is the fully-qualified name of the AuthService's DeleteSession
 	// RPC.
 	AuthServiceDeleteSessionProcedure = "/forge.v1.AuthService/DeleteSession"
+	// AuthServiceCreateTokenProcedure is the fully-qualified name of the AuthService's CreateToken RPC.
+	AuthServiceCreateTokenProcedure = "/forge.v1.AuthService/CreateToken"
+	// AuthServiceListTokensProcedure is the fully-qualified name of the AuthService's ListTokens RPC.
+	AuthServiceListTokensProcedure = "/forge.v1.AuthService/ListTokens"
+	// AuthServiceDeleteTokenProcedure is the fully-qualified name of the AuthService's DeleteToken RPC.
+	AuthServiceDeleteTokenProcedure = "/forge.v1.AuthService/DeleteToken"
 	// AuthServiceTestPermissionsProcedure is the fully-qualified name of the AuthService's
 	// TestPermissions RPC.
 	AuthServiceTestPermissionsProcedure = "/forge.v1.AuthService/TestPermissions"
@@ -70,6 +76,15 @@ type AuthServiceClient interface {
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// DeleteSession ends one of the caller's own sessions at once.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
+	// CreateToken makes a personal token (fgp_...) for CI and scripts: it acts
+	// as its maker, never with more than their role, and only within its
+	// scopes. Only a login (the CLI's or the dashboard's) makes one, never a
+	// token or a CI job. The token is in the answer once; Forge keeps its hash.
+	CreateToken(context.Context, *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error)
+	// ListTokens returns the caller's tokens, newest first.
+	ListTokens(context.Context, *connect.Request[v1.ListTokensRequest]) (*connect.Response[v1.ListTokensResponse], error)
+	// DeleteToken revokes one of the caller's tokens at once.
+	DeleteToken(context.Context, *connect.Request[v1.DeleteTokenRequest]) (*connect.Response[v1.DeleteTokenResponse], error)
 	// TestPermissions returns which of the actions the caller may do, on a
 	// service or, without one, anywhere: for clients to hide or disable what
 	// the caller may not do. The server checks every call all the same.
@@ -120,6 +135,25 @@ func NewAuthServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(authServiceMethods.ByName("DeleteSession")),
 			connect.WithClientOptions(opts...),
 		),
+		createToken: connect.NewClient[v1.CreateTokenRequest, v1.CreateTokenResponse](
+			httpClient,
+			baseURL+AuthServiceCreateTokenProcedure,
+			connect.WithSchema(authServiceMethods.ByName("CreateToken")),
+			connect.WithClientOptions(opts...),
+		),
+		listTokens: connect.NewClient[v1.ListTokensRequest, v1.ListTokensResponse](
+			httpClient,
+			baseURL+AuthServiceListTokensProcedure,
+			connect.WithSchema(authServiceMethods.ByName("ListTokens")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
+		deleteToken: connect.NewClient[v1.DeleteTokenRequest, v1.DeleteTokenResponse](
+			httpClient,
+			baseURL+AuthServiceDeleteTokenProcedure,
+			connect.WithSchema(authServiceMethods.ByName("DeleteToken")),
+			connect.WithClientOptions(opts...),
+		),
 		testPermissions: connect.NewClient[v1.TestPermissionsRequest, v1.TestPermissionsResponse](
 			httpClient,
 			baseURL+AuthServiceTestPermissionsProcedure,
@@ -137,6 +171,9 @@ type authServiceClient struct {
 	createSession   *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
 	listSessions    *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
 	deleteSession   *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	createToken     *connect.Client[v1.CreateTokenRequest, v1.CreateTokenResponse]
+	listTokens      *connect.Client[v1.ListTokensRequest, v1.ListTokensResponse]
+	deleteToken     *connect.Client[v1.DeleteTokenRequest, v1.DeleteTokenResponse]
 	testPermissions *connect.Client[v1.TestPermissionsRequest, v1.TestPermissionsResponse]
 }
 
@@ -165,6 +202,21 @@ func (c *authServiceClient) DeleteSession(ctx context.Context, req *connect.Requ
 	return c.deleteSession.CallUnary(ctx, req)
 }
 
+// CreateToken calls forge.v1.AuthService.CreateToken.
+func (c *authServiceClient) CreateToken(ctx context.Context, req *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error) {
+	return c.createToken.CallUnary(ctx, req)
+}
+
+// ListTokens calls forge.v1.AuthService.ListTokens.
+func (c *authServiceClient) ListTokens(ctx context.Context, req *connect.Request[v1.ListTokensRequest]) (*connect.Response[v1.ListTokensResponse], error) {
+	return c.listTokens.CallUnary(ctx, req)
+}
+
+// DeleteToken calls forge.v1.AuthService.DeleteToken.
+func (c *authServiceClient) DeleteToken(ctx context.Context, req *connect.Request[v1.DeleteTokenRequest]) (*connect.Response[v1.DeleteTokenResponse], error) {
+	return c.deleteToken.CallUnary(ctx, req)
+}
+
 // TestPermissions calls forge.v1.AuthService.TestPermissions.
 func (c *authServiceClient) TestPermissions(ctx context.Context, req *connect.Request[v1.TestPermissionsRequest]) (*connect.Response[v1.TestPermissionsResponse], error) {
 	return c.testPermissions.CallUnary(ctx, req)
@@ -188,6 +240,15 @@ type AuthServiceHandler interface {
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
 	// DeleteSession ends one of the caller's own sessions at once.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
+	// CreateToken makes a personal token (fgp_...) for CI and scripts: it acts
+	// as its maker, never with more than their role, and only within its
+	// scopes. Only a login (the CLI's or the dashboard's) makes one, never a
+	// token or a CI job. The token is in the answer once; Forge keeps its hash.
+	CreateToken(context.Context, *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error)
+	// ListTokens returns the caller's tokens, newest first.
+	ListTokens(context.Context, *connect.Request[v1.ListTokensRequest]) (*connect.Response[v1.ListTokensResponse], error)
+	// DeleteToken revokes one of the caller's tokens at once.
+	DeleteToken(context.Context, *connect.Request[v1.DeleteTokenRequest]) (*connect.Response[v1.DeleteTokenResponse], error)
 	// TestPermissions returns which of the actions the caller may do, on a
 	// service or, without one, anywhere: for clients to hide or disable what
 	// the caller may not do. The server checks every call all the same.
@@ -234,6 +295,25 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(authServiceMethods.ByName("DeleteSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	authServiceCreateTokenHandler := connect.NewUnaryHandler(
+		AuthServiceCreateTokenProcedure,
+		svc.CreateToken,
+		connect.WithSchema(authServiceMethods.ByName("CreateToken")),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceListTokensHandler := connect.NewUnaryHandler(
+		AuthServiceListTokensProcedure,
+		svc.ListTokens,
+		connect.WithSchema(authServiceMethods.ByName("ListTokens")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
+	authServiceDeleteTokenHandler := connect.NewUnaryHandler(
+		AuthServiceDeleteTokenProcedure,
+		svc.DeleteToken,
+		connect.WithSchema(authServiceMethods.ByName("DeleteToken")),
+		connect.WithHandlerOptions(opts...),
+	)
 	authServiceTestPermissionsHandler := connect.NewUnaryHandler(
 		AuthServiceTestPermissionsProcedure,
 		svc.TestPermissions,
@@ -253,6 +333,12 @@ func NewAuthServiceHandler(svc AuthServiceHandler, opts ...connect.HandlerOption
 			authServiceListSessionsHandler.ServeHTTP(w, r)
 		case AuthServiceDeleteSessionProcedure:
 			authServiceDeleteSessionHandler.ServeHTTP(w, r)
+		case AuthServiceCreateTokenProcedure:
+			authServiceCreateTokenHandler.ServeHTTP(w, r)
+		case AuthServiceListTokensProcedure:
+			authServiceListTokensHandler.ServeHTTP(w, r)
+		case AuthServiceDeleteTokenProcedure:
+			authServiceDeleteTokenHandler.ServeHTTP(w, r)
 		case AuthServiceTestPermissionsProcedure:
 			authServiceTestPermissionsHandler.ServeHTTP(w, r)
 		default:
@@ -282,6 +368,18 @@ func (UnimplementedAuthServiceHandler) ListSessions(context.Context, *connect.Re
 
 func (UnimplementedAuthServiceHandler) DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.DeleteSession is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) CreateToken(context.Context, *connect.Request[v1.CreateTokenRequest]) (*connect.Response[v1.CreateTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.CreateToken is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) ListTokens(context.Context, *connect.Request[v1.ListTokensRequest]) (*connect.Response[v1.ListTokensResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.ListTokens is not implemented"))
+}
+
+func (UnimplementedAuthServiceHandler) DeleteToken(context.Context, *connect.Request[v1.DeleteTokenRequest]) (*connect.Response[v1.DeleteTokenResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuthService.DeleteToken is not implemented"))
 }
 
 func (UnimplementedAuthServiceHandler) TestPermissions(context.Context, *connect.Request[v1.TestPermissionsRequest]) (*connect.Response[v1.TestPermissionsResponse], error) {
