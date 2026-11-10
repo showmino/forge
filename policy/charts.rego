@@ -12,6 +12,8 @@ package forge.charts
 
 import rego.v1
 
+import data.forge.modes
+
 field(obj, key, fallback) := object.get(obj, key, fallback) if {
 	is_object(obj)
 } else := fallback
@@ -26,7 +28,7 @@ allowed := field(input, "allowed_repos", [])
 
 hostname := split(host, ":")[0]
 
-deny contains msg if {
+violation contains {"rule": "charts.allowed-repos", "msg": msg} if {
 	is_array(allowed)
 	count(allowed) > 0
 	not repo in allowed
@@ -44,3 +46,15 @@ deny contains msg if {
 local_host if not contains(hostname, ".")
 
 local_host if regex.match(`^[0-9.]+$`, hostname)
+
+# The switchable rules (modes.rego): a violation is a deny or a warning by
+# its rule's mode.
+deny contains v.msg if {
+	some v in violation
+	modes.mode(v.rule) == "enforce"
+}
+
+warn contains v.msg if {
+	some v in violation
+	modes.mode(v.rule) == "warn"
+}

@@ -112,6 +112,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Approvals:     h.approvals,
 		Audit:         h.audit,
 		TeamSettings:  h.audit,
+		RuleModes:     h.audit,
 		Sessions:      h.sessions,
 	})
 	if err != nil {

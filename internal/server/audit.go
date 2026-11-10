@@ -443,6 +443,10 @@ var auditActions = map[string]auditAction{
 		r := m.(*forgev1.RollbackDeployRequest)
 		return deploymentService(r.GetName()), r.GetName(), details("to", r.GetTo(), "validate_only", flag(r.GetValidateOnly()))
 	}},
+	forgev1connect.PolicyServiceUpdateRuleProcedure: {"rule.update", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.UpdateRuleRequest)
+		return "", r.GetRule().GetName(), details("mode", r.GetRule().GetMode(), "validate_only", flag(r.GetValidateOnly()))
+	}},
 	forgev1connect.TeamServiceUpdateTeamProcedure: {"team.update", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.UpdateTeamRequest)
 		return "", r.GetTeam().GetName(), details("oncall", r.GetTeam().GetOncall(), "validate_only", flag(r.GetValidateOnly()))
@@ -501,6 +505,7 @@ var auditReads = []string{
 	forgev1connect.TemplateServiceGetTemplateProcedure,
 	forgev1connect.TeamServiceListTeamsProcedure,
 	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure,
+	forgev1connect.PolicyServiceListRulesProcedure,
 	forgev1connect.DocsServiceListDocSetsProcedure,
 	forgev1connect.DocsServiceGetDocSetProcedure,
 	forgev1connect.DocsServiceGetDocPageProcedure,

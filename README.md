@@ -571,6 +571,22 @@ named by an address or a one-word name (`localhost:5000`, `10.0.0.5`) only
 runs when the list names it. A refused create or deploy exits 6 with the
 rule's message.
 
+Some rules an admin may soften. `forge policy list` (`PolicyService.ListRules`)
+shows every rule and its mode; `forge policy set images.pinned-version --mode
+warn` (`UpdateRule`, admins, audited as `rule.update`) changes one. **enforce**
+refuses the action, **warn** lets it go ahead and records the rule's message
+in the audit event as `policy_warnings` (a resource plan shows it among its
+warnings), **off** does not check it. The switchable rules are
+`images.pinned-version`, `images.allowed-registries`, `charts.allowed-repos`,
+`promotion.healthy-staging`, `resources.storage-limit`,
+`resources.production-ha`, `resources.instance-limit` (all enforce by default)
+and `resources.staging-single` (warn). The others guard Forge itself (a plan
+touches only the declared database, the promotion ships the deploy that was
+checked, no other service's CI image, no internal registry, a target of the
+team) and are always enforced. Modes are kept in the table `rule_modes`; a
+rule set back to its default keeps no row. When the modes cannot be read,
+every rule has its default.
+
 From GitHub Actions, `forge deploy start --env staging` needs no secret: with
 `permissions: id-token: write`, the CLI requests the job's OIDC token
 (audience `forge`) and forge-api accepts it when `--deploys` is on. The token

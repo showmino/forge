@@ -11,6 +11,8 @@ package forge.resources
 
 import rego.v1
 
+import data.forge.modes
+
 # The most storage a database may ask for, in Gi, per environment.
 max_storage_gi := {"staging": 20, "production": 50}
 
@@ -195,7 +197,7 @@ after(rc) := s if {
 	readable(s)
 }
 
-deny contains msg if {
+violation contains {"rule": "resources.storage-limit", "msg": msg} if {
 	some rc in changes
 	s := after(rc)
 	size := gi(s.manifest.spec.storage.size)
@@ -216,7 +218,7 @@ deny contains msg if {
 	msg := sprintf("storage cannot shrink from %dGi to %dGi", [was, now])
 }
 
-deny contains msg if {
+violation contains {"rule": "resources.production-ha", "msg": msg} if {
 	some rc in changes
 	s := after(rc)
 	environment == "production"
@@ -233,7 +235,7 @@ deny contains msg if {
 	msg := sprintf("%v instances is below the minimum of 1", [n])
 }
 
-deny contains msg if {
+violation contains {"rule": "resources.instance-limit", "msg": msg} if {
 	some rc in changes
 	s := after(rc)
 	n := s.manifest.spec.instances
@@ -268,11 +270,23 @@ declared_as(s) if {
 	field(d, "instances", -1) == s.manifest.spec.instances
 }
 
-warn contains msg if {
+violation contains {"rule": "resources.staging-single", "msg": msg} if {
 	some rc in changes
 	s := after(rc)
 	environment == "staging"
 	n := s.manifest.spec.instances
 	n > 1
 	msg := sprintf("staging has %v instances; 1 is usually enough", [n])
+}
+
+# The switchable rules (modes.rego): a violation is a deny or a warning by
+# its rule's mode.
+deny contains v.msg if {
+	some v in violation
+	modes.mode(v.rule) == "enforce"
+}
+
+warn contains v.msg if {
+	some v in violation
+	modes.mode(v.rule) == "warn"
 }

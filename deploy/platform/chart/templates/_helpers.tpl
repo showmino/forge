@@ -189,6 +189,7 @@ service is missing here.
 - /forge.v1.DocsService
 - /forge.v1.EnvironmentService
 - /forge.v1.OperationService
+- /forge.v1.PolicyService
 - /forge.v1.ResourceService
 - /forge.v1.ServiceCatalogService
 - /forge.v1.TeamService
