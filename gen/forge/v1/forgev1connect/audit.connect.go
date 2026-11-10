@@ -39,6 +39,9 @@ const (
 	// AuditServiceGetAuditEventProcedure is the fully-qualified name of the AuditService's
 	// GetAuditEvent RPC.
 	AuditServiceGetAuditEventProcedure = "/forge.v1.AuditService/GetAuditEvent"
+	// AuditServiceGetAdoptionProcedure is the fully-qualified name of the AuditService's GetAdoption
+	// RPC.
+	AuditServiceGetAdoptionProcedure = "/forge.v1.AuditService/GetAdoption"
 )
 
 // AuditServiceClient is a client for the forge.v1.AuditService service.
@@ -47,6 +50,10 @@ type AuditServiceClient interface {
 	ListAuditEvents(context.Context, *connect.Request[v1.ListAuditEventsRequest]) (*connect.Response[v1.ListAuditEventsResponse], error)
 	// GetAuditEvent returns one event.
 	GetAuditEvent(context.Context, *connect.Request[v1.GetAuditEventRequest]) (*connect.Response[v1.GetAuditEventResponse], error)
+	// GetAdoption says how much Forge is used, from the audit log: people,
+	// deploys and self-served changes in the last 30 days and the 30 before,
+	// and week by week (phase 15).
+	GetAdoption(context.Context, *connect.Request[v1.GetAdoptionRequest]) (*connect.Response[v1.GetAdoptionResponse], error)
 }
 
 // NewAuditServiceClient constructs a client for the forge.v1.AuditService service. By default, it
@@ -74,6 +81,13 @@ func NewAuditServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		getAdoption: connect.NewClient[v1.GetAdoptionRequest, v1.GetAdoptionResponse](
+			httpClient,
+			baseURL+AuditServiceGetAdoptionProcedure,
+			connect.WithSchema(auditServiceMethods.ByName("GetAdoption")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -81,6 +95,7 @@ func NewAuditServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 type auditServiceClient struct {
 	listAuditEvents *connect.Client[v1.ListAuditEventsRequest, v1.ListAuditEventsResponse]
 	getAuditEvent   *connect.Client[v1.GetAuditEventRequest, v1.GetAuditEventResponse]
+	getAdoption     *connect.Client[v1.GetAdoptionRequest, v1.GetAdoptionResponse]
 }
 
 // ListAuditEvents calls forge.v1.AuditService.ListAuditEvents.
@@ -93,12 +108,21 @@ func (c *auditServiceClient) GetAuditEvent(ctx context.Context, req *connect.Req
 	return c.getAuditEvent.CallUnary(ctx, req)
 }
 
+// GetAdoption calls forge.v1.AuditService.GetAdoption.
+func (c *auditServiceClient) GetAdoption(ctx context.Context, req *connect.Request[v1.GetAdoptionRequest]) (*connect.Response[v1.GetAdoptionResponse], error) {
+	return c.getAdoption.CallUnary(ctx, req)
+}
+
 // AuditServiceHandler is an implementation of the forge.v1.AuditService service.
 type AuditServiceHandler interface {
 	// ListAuditEvents returns events newest first.
 	ListAuditEvents(context.Context, *connect.Request[v1.ListAuditEventsRequest]) (*connect.Response[v1.ListAuditEventsResponse], error)
 	// GetAuditEvent returns one event.
 	GetAuditEvent(context.Context, *connect.Request[v1.GetAuditEventRequest]) (*connect.Response[v1.GetAuditEventResponse], error)
+	// GetAdoption says how much Forge is used, from the audit log: people,
+	// deploys and self-served changes in the last 30 days and the 30 before,
+	// and week by week (phase 15).
+	GetAdoption(context.Context, *connect.Request[v1.GetAdoptionRequest]) (*connect.Response[v1.GetAdoptionResponse], error)
 }
 
 // NewAuditServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -122,12 +146,21 @@ func NewAuditServiceHandler(svc AuditServiceHandler, opts ...connect.HandlerOpti
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	auditServiceGetAdoptionHandler := connect.NewUnaryHandler(
+		AuditServiceGetAdoptionProcedure,
+		svc.GetAdoption,
+		connect.WithSchema(auditServiceMethods.ByName("GetAdoption")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.AuditService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AuditServiceListAuditEventsProcedure:
 			auditServiceListAuditEventsHandler.ServeHTTP(w, r)
 		case AuditServiceGetAuditEventProcedure:
 			auditServiceGetAuditEventHandler.ServeHTTP(w, r)
+		case AuditServiceGetAdoptionProcedure:
+			auditServiceGetAdoptionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -143,4 +176,8 @@ func (UnimplementedAuditServiceHandler) ListAuditEvents(context.Context, *connec
 
 func (UnimplementedAuditServiceHandler) GetAuditEvent(context.Context, *connect.Request[v1.GetAuditEventRequest]) (*connect.Response[v1.GetAuditEventResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuditService.GetAuditEvent is not implemented"))
+}
+
+func (UnimplementedAuditServiceHandler) GetAdoption(context.Context, *connect.Request[v1.GetAdoptionRequest]) (*connect.Response[v1.GetAdoptionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.AuditService.GetAdoption is not implemented"))
 }

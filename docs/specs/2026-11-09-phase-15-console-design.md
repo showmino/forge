@@ -191,6 +191,14 @@ switch for admins, and links to the approvals.
 services off the golden path (C), teams without on-call (B) and resources
 not applied.
 
+Built (2026-11-11): each person's audit event records their role as the
+detail `role` (`admin` or `member`), so the self-service ratio counts only
+changes made from 0.54.0 on. `GetAdoption` reads the audit log of the last
+60 days or 12 weeks, whichever is longer (at most 200,000 events), and keeps
+the result five minutes. Resources applied and what is stuck come from the
+catalog, the checks and the resources, which the dashboard already reads.
+`forge audit adoption [--weekly]`.
+
 ## F. CLI tokens
 
 Personal tokens for CI and scripts, next to today's sessions: `fgp_…`, made

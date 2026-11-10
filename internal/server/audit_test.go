@@ -128,10 +128,11 @@ func TestAuditDetailsAllowlist(t *testing.T) {
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"display_name", "labels"}},
 	}))
 	evs := allEvents(t, audit)
-	if got := evs[0].GetDetails(); len(got) != 1 || got["validate_only"] != "true" {
+	// Besides the request's own details, a person's role.
+	if got := evs[0].GetDetails(); len(got) != 2 || got["validate_only"] != "true" || got["role"] != "admin" {
 		t.Errorf("register details %v", got)
 	}
-	if got := evs[1].GetDetails(); len(got) != 1 || got["update_mask"] != "display_name,labels" || evs[1].GetService() != "services/payments" {
+	if got := evs[1].GetDetails(); len(got) != 2 || got["update_mask"] != "display_name,labels" || evs[1].GetService() != "services/payments" {
 		t.Errorf("update: service %q details %v", evs[1].GetService(), got)
 	}
 	for _, e := range evs {

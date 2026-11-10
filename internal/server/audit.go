@@ -50,6 +50,11 @@ type auditRecord struct {
 	// failure overrides an OK result: a stream that ends with a failure
 	// message instead of an error (forge create) did not succeed.
 	failure string
+	// person is the caller when it is a person. Its role ("admin" or
+	// "member") is kept as the detail "role" (for the self-service ratio of
+	// GetAdoption), decided when the event is finished: the actor is set
+	// before the Authorizer grants the permissions that make an admin.
+	person *Principal
 }
 
 type auditKey struct{}
@@ -76,6 +81,7 @@ func (r *auditRecord) setActor(p *Principal) {
 		return
 	}
 	r.ev.Actor = &forgev1.AuditActor{Kind: actorUser, Subject: p.Subject, Email: p.Email}
+	r.person = p
 }
 
 func (r *auditRecord) setSystem() {
@@ -177,6 +183,15 @@ func (r *auditRecord) finish(h interface{ Get(string) string }, err error) *forg
 	r.ev.Result = &forgev1.AuditResult{Code: auditCode(err), Message: auditText(errMessage(err), auditMessageMax)}
 	if err == nil && r.failure != "" {
 		r.ev.Result = &forgev1.AuditResult{Code: "failed", Message: auditText(r.failure, auditMessageMax)}
+	}
+	if r.person != nil {
+		if r.ev.Details == nil {
+			r.ev.Details = map[string]string{}
+		}
+		r.ev.Details["role"] = "member"
+		if isAdmin(r.person) {
+			r.ev.Details["role"] = "admin"
+		}
 	}
 	if h != nil {
 		r.ev.Client = &forgev1.AuditClient{Version: auditText(h.Get(client.HeaderClientVersion), auditFieldMax), RequestId: auditText(h.Get(client.HeaderRequestID), auditFieldMax)}
@@ -506,6 +521,7 @@ var auditReads = []string{
 	forgev1connect.TeamServiceListTeamsProcedure,
 	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure,
 	forgev1connect.PolicyServiceListRulesProcedure,
+	forgev1connect.AuditServiceGetAdoptionProcedure,
 	forgev1connect.DocsServiceListDocSetsProcedure,
 	forgev1connect.DocsServiceGetDocSetProcedure,
 	forgev1connect.DocsServiceGetDocPageProcedure,

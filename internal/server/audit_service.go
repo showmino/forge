@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -14,7 +16,15 @@ import (
 )
 
 // auditService reads the audit log for every member (services.read).
-type auditService struct{ store store.AuditStore }
+type auditService struct {
+	store store.AuditStore
+	now   func() time.Time
+
+	// The last GetAdoption, kept for a few minutes.
+	mu            sync.Mutex
+	adoption      *forgev1.GetAdoptionResponse
+	adoptionUntil time.Time
+}
 
 func (s *auditService) ListAuditEvents(ctx context.Context, req *connect.Request[forgev1.ListAuditEventsRequest]) (*connect.Response[forgev1.ListAuditEventsResponse], error) {
 	if err := require(ctx, PermServicesRead); err != nil {
