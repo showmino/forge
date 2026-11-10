@@ -39,6 +39,9 @@ const (
 	// ServiceCatalogServiceGetServiceProcedure is the fully-qualified name of the
 	// ServiceCatalogService's GetService RPC.
 	ServiceCatalogServiceGetServiceProcedure = "/forge.v1.ServiceCatalogService/GetService"
+	// ServiceCatalogServiceListServiceChecksProcedure is the fully-qualified name of the
+	// ServiceCatalogService's ListServiceChecks RPC.
+	ServiceCatalogServiceListServiceChecksProcedure = "/forge.v1.ServiceCatalogService/ListServiceChecks"
 	// ServiceCatalogServiceRegisterServiceProcedure is the fully-qualified name of the
 	// ServiceCatalogService's RegisterService RPC.
 	ServiceCatalogServiceRegisterServiceProcedure = "/forge.v1.ServiceCatalogService/RegisterService"
@@ -59,6 +62,11 @@ type ServiceCatalogServiceClient interface {
 	ListServices(context.Context, *connect.Request[v1.ListServicesRequest]) (*connect.Response[v1.ListServicesResponse], error)
 	// GetService returns one service by name.
 	GetService(context.Context, *connect.Request[v1.GetServiceRequest]) (*connect.Response[v1.GetServiceResponse], error)
+	// ListServiceChecks says how far each service is on the golden path: CI,
+	// an SLO, tracing, a runbook and an on-call rotation. Worked out by Forge
+	// from the catalog, the audit log, the team's settings and the repo, and
+	// kept for a few minutes.
+	ListServiceChecks(context.Context, *connect.Request[v1.ListServiceChecksRequest]) (*connect.Response[v1.ListServiceChecksResponse], error)
 	// RegisterService adds a service to the catalog.
 	RegisterService(context.Context, *connect.Request[v1.RegisterServiceRequest]) (*connect.Response[v1.RegisterServiceResponse], error)
 	// UpdateService changes the fields named in update_mask.
@@ -103,6 +111,13 @@ func NewServiceCatalogServiceClient(httpClient connect.HTTPClient, baseURL strin
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		listServiceChecks: connect.NewClient[v1.ListServiceChecksRequest, v1.ListServiceChecksResponse](
+			httpClient,
+			baseURL+ServiceCatalogServiceListServiceChecksProcedure,
+			connect.WithSchema(serviceCatalogServiceMethods.ByName("ListServiceChecks")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		registerService: connect.NewClient[v1.RegisterServiceRequest, v1.RegisterServiceResponse](
 			httpClient,
 			baseURL+ServiceCatalogServiceRegisterServiceProcedure,
@@ -134,12 +149,13 @@ func NewServiceCatalogServiceClient(httpClient connect.HTTPClient, baseURL strin
 
 // serviceCatalogServiceClient implements ServiceCatalogServiceClient.
 type serviceCatalogServiceClient struct {
-	listServices    *connect.Client[v1.ListServicesRequest, v1.ListServicesResponse]
-	getService      *connect.Client[v1.GetServiceRequest, v1.GetServiceResponse]
-	registerService *connect.Client[v1.RegisterServiceRequest, v1.RegisterServiceResponse]
-	updateService   *connect.Client[v1.UpdateServiceRequest, v1.UpdateServiceResponse]
-	deleteService   *connect.Client[v1.DeleteServiceRequest, v1.DeleteServiceResponse]
-	createService   *connect.Client[v1.CreateServiceRequest, v1.CreateServiceResponse]
+	listServices      *connect.Client[v1.ListServicesRequest, v1.ListServicesResponse]
+	getService        *connect.Client[v1.GetServiceRequest, v1.GetServiceResponse]
+	listServiceChecks *connect.Client[v1.ListServiceChecksRequest, v1.ListServiceChecksResponse]
+	registerService   *connect.Client[v1.RegisterServiceRequest, v1.RegisterServiceResponse]
+	updateService     *connect.Client[v1.UpdateServiceRequest, v1.UpdateServiceResponse]
+	deleteService     *connect.Client[v1.DeleteServiceRequest, v1.DeleteServiceResponse]
+	createService     *connect.Client[v1.CreateServiceRequest, v1.CreateServiceResponse]
 }
 
 // ListServices calls forge.v1.ServiceCatalogService.ListServices.
@@ -150,6 +166,11 @@ func (c *serviceCatalogServiceClient) ListServices(ctx context.Context, req *con
 // GetService calls forge.v1.ServiceCatalogService.GetService.
 func (c *serviceCatalogServiceClient) GetService(ctx context.Context, req *connect.Request[v1.GetServiceRequest]) (*connect.Response[v1.GetServiceResponse], error) {
 	return c.getService.CallUnary(ctx, req)
+}
+
+// ListServiceChecks calls forge.v1.ServiceCatalogService.ListServiceChecks.
+func (c *serviceCatalogServiceClient) ListServiceChecks(ctx context.Context, req *connect.Request[v1.ListServiceChecksRequest]) (*connect.Response[v1.ListServiceChecksResponse], error) {
+	return c.listServiceChecks.CallUnary(ctx, req)
 }
 
 // RegisterService calls forge.v1.ServiceCatalogService.RegisterService.
@@ -178,6 +199,11 @@ type ServiceCatalogServiceHandler interface {
 	ListServices(context.Context, *connect.Request[v1.ListServicesRequest]) (*connect.Response[v1.ListServicesResponse], error)
 	// GetService returns one service by name.
 	GetService(context.Context, *connect.Request[v1.GetServiceRequest]) (*connect.Response[v1.GetServiceResponse], error)
+	// ListServiceChecks says how far each service is on the golden path: CI,
+	// an SLO, tracing, a runbook and an on-call rotation. Worked out by Forge
+	// from the catalog, the audit log, the team's settings and the repo, and
+	// kept for a few minutes.
+	ListServiceChecks(context.Context, *connect.Request[v1.ListServiceChecksRequest]) (*connect.Response[v1.ListServiceChecksResponse], error)
 	// RegisterService adds a service to the catalog.
 	RegisterService(context.Context, *connect.Request[v1.RegisterServiceRequest]) (*connect.Response[v1.RegisterServiceResponse], error)
 	// UpdateService changes the fields named in update_mask.
@@ -218,6 +244,13 @@ func NewServiceCatalogServiceHandler(svc ServiceCatalogServiceHandler, opts ...c
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	serviceCatalogServiceListServiceChecksHandler := connect.NewUnaryHandler(
+		ServiceCatalogServiceListServiceChecksProcedure,
+		svc.ListServiceChecks,
+		connect.WithSchema(serviceCatalogServiceMethods.ByName("ListServiceChecks")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	serviceCatalogServiceRegisterServiceHandler := connect.NewUnaryHandler(
 		ServiceCatalogServiceRegisterServiceProcedure,
 		svc.RegisterService,
@@ -250,6 +283,8 @@ func NewServiceCatalogServiceHandler(svc ServiceCatalogServiceHandler, opts ...c
 			serviceCatalogServiceListServicesHandler.ServeHTTP(w, r)
 		case ServiceCatalogServiceGetServiceProcedure:
 			serviceCatalogServiceGetServiceHandler.ServeHTTP(w, r)
+		case ServiceCatalogServiceListServiceChecksProcedure:
+			serviceCatalogServiceListServiceChecksHandler.ServeHTTP(w, r)
 		case ServiceCatalogServiceRegisterServiceProcedure:
 			serviceCatalogServiceRegisterServiceHandler.ServeHTTP(w, r)
 		case ServiceCatalogServiceUpdateServiceProcedure:
@@ -273,6 +308,10 @@ func (UnimplementedServiceCatalogServiceHandler) ListServices(context.Context, *
 
 func (UnimplementedServiceCatalogServiceHandler) GetService(context.Context, *connect.Request[v1.GetServiceRequest]) (*connect.Response[v1.GetServiceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ServiceCatalogService.GetService is not implemented"))
+}
+
+func (UnimplementedServiceCatalogServiceHandler) ListServiceChecks(context.Context, *connect.Request[v1.ListServiceChecksRequest]) (*connect.Response[v1.ListServiceChecksResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ServiceCatalogService.ListServiceChecks is not implemented"))
 }
 
 func (UnimplementedServiceCatalogServiceHandler) RegisterService(context.Context, *connect.Request[v1.RegisterServiceRequest]) (*connect.Response[v1.RegisterServiceResponse], error) {

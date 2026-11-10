@@ -43,6 +43,11 @@ var _ RepoHost = (*github.Client)(nil)
 type catalogService struct {
 	*Catalog
 	create *creator
+	checks *checker
+}
+
+func (s *catalogService) ListServiceChecks(ctx context.Context, req *connect.Request[forgev1.ListServiceChecksRequest]) (*connect.Response[forgev1.ListServiceChecksResponse], error) {
+	return s.checks.ListServiceChecks(ctx, req)
 }
 
 var _ forgev1connect.ServiceCatalogServiceHandler = (*catalogService)(nil)
@@ -711,6 +716,7 @@ func serviceFromManifest(m *manifest.Manifest) *forgev1.Service {
 		Labels:      m.Service.Labels,
 		Tier:        int32(m.Service.Tier), //nolint:gosec // Validate keeps it 0-3
 		Slo:         m.Service.SLO,
+		Tracing:     m.Service.Tracing,
 	}
 	switch m.Service.Lifecycle {
 	case "experimental":

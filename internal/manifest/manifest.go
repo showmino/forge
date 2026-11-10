@@ -258,6 +258,8 @@ type Service struct {
 	Tier int `yaml:"tier,omitempty"`
 	// SLO is the availability target, for example "99.9%".
 	SLO string `yaml:"slo,omitempty"`
+	// Tracing says the service sends traces with OpenTelemetry.
+	Tracing bool `yaml:"tracing,omitempty"`
 }
 
 // sloText is an availability target: a percentage up to 100, with at most

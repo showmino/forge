@@ -26,7 +26,7 @@ Inside a repo with a forge.yaml, commands that take a service name default to
 the service the manifest describes.`
 	cmd.AddCommand(
 		newServiceListCmd(f), newServiceGetCmd(f), newServiceRegisterCmd(f), newServiceConnectCmd(f), newServiceUpdateCmd(f),
-		newServiceOwnersCmd(f), newServiceDepsCmd(f), newServiceAddressCmd(f), newServiceOptionsCmd(f), newServiceDeleteCmd(f),
+		newServiceOwnersCmd(f), newServiceDepsCmd(f), newServiceChecksCmd(f), newServiceAddressCmd(f), newServiceOptionsCmd(f), newServiceDeleteCmd(f),
 	)
 	return cmd
 }
@@ -217,6 +217,7 @@ func newServiceGetCmd(f *Factory) *cobra.Command {
 				{"lifecycle", lifecycleString(s.GetLifecycle())},
 				{"tier", tierText(s.GetTier())},
 				{"slo", s.GetSlo()},
+				{"tracing", yesNo(s.GetTracing())},
 				{"repo", s.GetRepoUrl()},
 				{"environments", serviceEnvsText(s)},
 				{"dependencies", strings.Join(s.GetDependencies(), ", ")},
@@ -449,6 +450,7 @@ func fromManifest(m *manifest.Manifest) *forgev1.Service {
 	return &forgev1.Service{
 		Tier:         int32(m.Service.Tier), //nolint:gosec // Validate keeps it 0-3
 		Slo:          m.Service.SLO,
+		Tracing:      m.Service.Tracing,
 		DisplayName:  m.Service.DisplayName,
 		OwnerTeam:    m.Service.Team,
 		Owners:       m.Service.Owners,
@@ -485,6 +487,7 @@ func newServiceUpdateCmd(f *Factory) *cobra.Command {
 	var addOwners, removeOwners, environments []string
 	var tier int
 	var slo string
+	var tracing bool
 	cmd := &cobra.Command{
 		Use:   "update [name]",
 		Short: "Change fields of a service",
@@ -544,6 +547,7 @@ clears it. --slo is its availability target, such as 99.9%; "" clears it.`,
 					return nil
 				}},
 				{"slo", "slo", func() error { svc.Slo = slo; return nil }},
+				{"tracing", "tracing", func() error { svc.Tracing = tracing; return nil }},
 			}
 			for _, s := range steps {
 				if err := set(s.flag, s.path, s.apply); err != nil {
@@ -599,6 +603,7 @@ clears it. --slo is its availability target, such as 99.9%; "" clears it.`,
 	cmd.Flags().StringSliceVar(&environments, "environments", nil, "the deploy environments it has: staging, production or both")
 	cmd.Flags().IntVar(&tier, "tier", 0, "how critical it is: 1 critical, 2 high, 3 medium; 0 clears it")
 	cmd.Flags().StringVar(&slo, "slo", "", "its availability target, such as 99.9%; \"\" clears it")
+	cmd.Flags().BoolVar(&tracing, "tracing", false, "it sends traces with OpenTelemetry; --tracing=false clears it")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate on the server without changing anything")
 	return cmd
 }
@@ -757,4 +762,12 @@ func (f *Factory) exceptionOf(cmd *cobra.Command, name string) (*connect.Respons
 		return nil, err
 	}
 	return c.Approvals.ListExceptions(ctx, connect.NewRequest(&forgev1.ListExceptionsRequest{Service: name}))
+}
+
+// yesNo says a bool the way the table does.
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }

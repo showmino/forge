@@ -68,3 +68,33 @@ func TestTeamUpdate(t *testing.T) {
 		t.Errorf("clear: %q", r.out)
 	}
 }
+
+// The golden-path checks of a service: what passes, what is missing, and
+// the detail of one service.
+func TestServiceChecks(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.teams = fakeTeams{{Slug: "billing", Name: "Billing"}}
+	h.startAPI(h.authn)
+	h.ok("service", "register", "payments", "--team", "billing")
+
+	// No repo: CI and the runbook do not apply.
+	if r := h.ok("service", "checks"); !strings.Contains(r.out, "0/3") || !strings.Contains(r.out, "slo, tracing, oncall") {
+		t.Errorf("checks:\n%s", r.out)
+	}
+	h.ok("service", "update", "payments", "--slo", "99.9%", "--tracing")
+	h.ok("team", "update", "billing", "--oncall", "billing-primary")
+	if r := h.ok("service", "checks", "--missing"); !strings.Contains(r.out, "Every service passes") && r.out != "" {
+		t.Errorf("--missing after everything is set:\n%s", r.out)
+	}
+	r := h.ok("service", "checks", "payments")
+	for _, want := range []string{"ci", "n/a", "slo", "passed", "99.9%", "billing-primary"} {
+		if !strings.Contains(r.out, want) {
+			t.Errorf("one service lacks %q:\n%s", want, r.out)
+		}
+	}
+	if r := h.ok("service", "get", "payments"); !strings.Contains(r.out, "tracing") || !strings.Contains(r.out, "yes") {
+		t.Errorf("get:\n%s", r.out)
+	}
+	h.fails(int(exitcode.NotFound), "service", "checks", "nope")
+}

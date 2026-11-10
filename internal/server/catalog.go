@@ -341,7 +341,7 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 }
 
 // updatable lists the field mask paths UpdateService accepts.
-var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels", "environments", "tier", "slo"}
+var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels", "environments", "tier", "slo", "tracing"}
 
 func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev1.UpdateServiceRequest]) (*connect.Response[forgev1.UpdateServiceResponse], error) {
 	if _, ok := PrincipalFrom(ctx); !ok {
@@ -459,6 +459,8 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 				next.Tier = in.GetTier()
 			case "slo":
 				next.Slo = in.GetSlo()
+			case "tracing":
+				next.Tracing = in.GetTracing()
 			}
 		}
 		if err := validateService(next); err != nil {

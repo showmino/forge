@@ -68,6 +68,9 @@ func (g *DocsGitHub) Push(owner, repo string, files map[string]string, at time.T
 // treeSHA is a folder's id: it changes when anything below it does.
 func (r *docsRepo) treeSHA(dir string) string {
 	var b strings.Builder
+	// The folder's own path too: two folders that hold the same files (a
+	// folder and its only subfolder) are different trees.
+	b.WriteString(dir + "\n")
 	paths := make([]string, 0, len(r.files))
 	for p := range r.files {
 		if strings.HasPrefix(p, dir+"/") {
