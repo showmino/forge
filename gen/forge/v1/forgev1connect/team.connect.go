@@ -35,12 +35,17 @@ const (
 const (
 	// TeamServiceListTeamsProcedure is the fully-qualified name of the TeamService's ListTeams RPC.
 	TeamServiceListTeamsProcedure = "/forge.v1.TeamService/ListTeams"
+	// TeamServiceUpdateTeamProcedure is the fully-qualified name of the TeamService's UpdateTeam RPC.
+	TeamServiceUpdateTeamProcedure = "/forge.v1.TeamService/UpdateTeam"
 )
 
 // TeamServiceClient is a client for the forge.v1.TeamService service.
 type TeamServiceClient interface {
 	// ListTeams returns every team of the organization, ordered by name.
 	ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error)
+	// UpdateTeam changes what Forge keeps about a team: its on-call rotation.
+	// Admins only. The team itself (its name, its members) is GitHub's.
+	UpdateTeam(context.Context, *connect.Request[v1.UpdateTeamRequest]) (*connect.Response[v1.UpdateTeamResponse], error)
 }
 
 // NewTeamServiceClient constructs a client for the forge.v1.TeamService service. By default, it
@@ -61,12 +66,19 @@ func NewTeamServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		updateTeam: connect.NewClient[v1.UpdateTeamRequest, v1.UpdateTeamResponse](
+			httpClient,
+			baseURL+TeamServiceUpdateTeamProcedure,
+			connect.WithSchema(teamServiceMethods.ByName("UpdateTeam")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // teamServiceClient implements TeamServiceClient.
 type teamServiceClient struct {
-	listTeams *connect.Client[v1.ListTeamsRequest, v1.ListTeamsResponse]
+	listTeams  *connect.Client[v1.ListTeamsRequest, v1.ListTeamsResponse]
+	updateTeam *connect.Client[v1.UpdateTeamRequest, v1.UpdateTeamResponse]
 }
 
 // ListTeams calls forge.v1.TeamService.ListTeams.
@@ -74,10 +86,18 @@ func (c *teamServiceClient) ListTeams(ctx context.Context, req *connect.Request[
 	return c.listTeams.CallUnary(ctx, req)
 }
 
+// UpdateTeam calls forge.v1.TeamService.UpdateTeam.
+func (c *teamServiceClient) UpdateTeam(ctx context.Context, req *connect.Request[v1.UpdateTeamRequest]) (*connect.Response[v1.UpdateTeamResponse], error) {
+	return c.updateTeam.CallUnary(ctx, req)
+}
+
 // TeamServiceHandler is an implementation of the forge.v1.TeamService service.
 type TeamServiceHandler interface {
 	// ListTeams returns every team of the organization, ordered by name.
 	ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error)
+	// UpdateTeam changes what Forge keeps about a team: its on-call rotation.
+	// Admins only. The team itself (its name, its members) is GitHub's.
+	UpdateTeam(context.Context, *connect.Request[v1.UpdateTeamRequest]) (*connect.Response[v1.UpdateTeamResponse], error)
 }
 
 // NewTeamServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -94,10 +114,18 @@ func NewTeamServiceHandler(svc TeamServiceHandler, opts ...connect.HandlerOption
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	teamServiceUpdateTeamHandler := connect.NewUnaryHandler(
+		TeamServiceUpdateTeamProcedure,
+		svc.UpdateTeam,
+		connect.WithSchema(teamServiceMethods.ByName("UpdateTeam")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.TeamService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TeamServiceListTeamsProcedure:
 			teamServiceListTeamsHandler.ServeHTTP(w, r)
+		case TeamServiceUpdateTeamProcedure:
+			teamServiceUpdateTeamHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -109,4 +137,8 @@ type UnimplementedTeamServiceHandler struct{}
 
 func (UnimplementedTeamServiceHandler) ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.TeamService.ListTeams is not implemented"))
+}
+
+func (UnimplementedTeamServiceHandler) UpdateTeam(context.Context, *connect.Request[v1.UpdateTeamRequest]) (*connect.Response[v1.UpdateTeamResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.TeamService.UpdateTeam is not implemented"))
 }

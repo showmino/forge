@@ -443,6 +443,10 @@ var auditActions = map[string]auditAction{
 		r := m.(*forgev1.RollbackDeployRequest)
 		return deploymentService(r.GetName()), r.GetName(), details("to", r.GetTo(), "validate_only", flag(r.GetValidateOnly()))
 	}},
+	forgev1connect.TeamServiceUpdateTeamProcedure: {"team.update", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.UpdateTeamRequest)
+		return "", r.GetTeam().GetName(), details("oncall", r.GetTeam().GetOncall(), "validate_only", flag(r.GetValidateOnly()))
+	}},
 	forgev1connect.DeployServiceDeleteDeploymentProcedure: {"deploy.remove", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.DeleteDeploymentRequest)
 		return deploymentService(r.GetName()), r.GetName(), details("validate_only", flag(r.GetValidateOnly()))

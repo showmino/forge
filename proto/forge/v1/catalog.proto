@@ -87,6 +87,13 @@ message Service {
   // choice existed). Set at create; the owning team changes it with
   // UpdateService. Deploys, promotes and rollbacks go only to these.
   repeated string environments = 14;
+  // How critical the service is: 1 critical, 2 high, 3 medium; 0 not set.
+  // From forge.yaml's service.tier at create; the owning team changes it.
+  int32 tier = 15;
+  // The service's availability target, as text, for example "99.9%"; ""
+  // not set. From forge.yaml's service.slo at create; the owning team
+  // changes it.
+  string slo = 16;
 }
 
 // InfrastructureRepo is a repo of infrastructure code that its own GitHub

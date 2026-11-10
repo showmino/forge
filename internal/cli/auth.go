@@ -316,7 +316,7 @@ Admins may do everything. The actions:
   deploy.promote, deploy.rollback, deploy.remove, environment.create,
   environment.extend, environment.destroy, operation.cancel, resource.plan,
   resource.apply, resource.apply.production, cluster.read, approval.decide,
-  approval.exception`,
+  approval.exception, team.update`,
 		Example: `  forge auth can deploy.promote payments
   forge auth can service.create --team billing
   forge auth can resource.apply.production payments -o json`,

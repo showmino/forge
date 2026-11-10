@@ -111,6 +111,7 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Clusters:      h.clusters,
 		Approvals:     h.approvals,
 		Audit:         h.audit,
+		TeamSettings:  h.audit,
 		Sessions:      h.sessions,
 	})
 	if err != nil {
@@ -213,6 +214,16 @@ func TestServiceLifecycle(t *testing.T) {
 		t.Errorf("update yaml:\n%s", r.out)
 	}
 	h.fails(2, "service", "update", "payments") // nothing to update
+
+	// How critical it is, and its availability target.
+	h.ok("service", "update", "payments", "--tier", "1", "--slo", "99.95%")
+	r = h.ok("service", "get", "payments")
+	if !strings.Contains(r.out, "1 (critical)") || !strings.Contains(r.out, "99.95%") {
+		t.Errorf("get tier and slo:\n%s", r.out)
+	}
+	h.fails(2, "service", "update", "payments", "--tier", "4")
+	h.fails(2, "service", "update", "payments", "--slo", "high")
+	h.ok("service", "update", "payments", "--tier", "0", "--slo", "")
 
 	r = h.ok("service", "deps", "ledger", "-o", "name")
 	if r.out != "services/payments\n" {

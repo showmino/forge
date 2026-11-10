@@ -341,7 +341,7 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 }
 
 // updatable lists the field mask paths UpdateService accepts.
-var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels", "environments"}
+var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels", "environments", "tier", "slo"}
 
 func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev1.UpdateServiceRequest]) (*connect.Response[forgev1.UpdateServiceResponse], error) {
 	if _, ok := PrincipalFrom(ctx); !ok {
@@ -455,6 +455,10 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 				next.Labels = in.GetLabels()
 			case "environments":
 				next.Environments = envs
+			case "tier":
+				next.Tier = in.GetTier()
+			case "slo":
+				next.Slo = in.GetSlo()
 			}
 		}
 		if err := validateService(next); err != nil {
@@ -548,6 +552,12 @@ func validateService(s *forgev1.Service) error {
 		if !strings.HasPrefix(d, servicePrefix) || !manifest.ValidID(strings.TrimPrefix(d, servicePrefix)) {
 			return invalid(fmt.Sprintf("dependency %q must be a service name like services/payments", d))
 		}
+	}
+	if s.GetTier() < 0 || s.GetTier() > 3 {
+		return invalid(fmt.Sprintf("tier %d must be 1 (critical), 2 (high), 3 (medium) or 0 (not set)", s.GetTier()))
+	}
+	if s.GetSlo() != "" && !manifest.ValidSLO(s.GetSlo()) {
+		return invalid(fmt.Sprintf("slo %q must be a percentage such as \"99.9%%\"", s.GetSlo()))
 	}
 	if s.GetRepoUrl() != "" && !strings.Contains(s.GetRepoUrl(), "://") && !strings.HasPrefix(s.GetRepoUrl(), "git@") {
 		return invalid(fmt.Sprintf("repo_url %q must be a URL", s.GetRepoUrl()))
