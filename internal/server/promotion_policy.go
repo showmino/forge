@@ -47,11 +47,14 @@ func (d *Deploys) promotionAllowed(ctx context.Context, svc, from, to string, sr
 		return connect.NewError(connect.CodeInternal, fmt.Errorf("policy could not be evaluated, so %s%s was not promoted: %w", servicePrefix, svc, err))
 	}
 	noteAuditDetail(ctx, "policy_rules", d.o.Policy.Fingerprint())
+	noteAuditDetail(ctx, "policy_modes", res.Modes)
 	if res.Denied() {
 		noteAuditDetail(ctx, "policy", "denied")
 		return connect.NewError(connect.CodePermissionDenied, fmt.Errorf("promoting %s%s to %s is denied by policy: %s", servicePrefix, svc, to, strings.Join(res.Deny, "; ")))
 	}
 	noteAuditDetail(ctx, "policy", "passed")
+	// A rule an admin set to warn lets it through; the audit event keeps what it said.
+	noteAuditDetail(ctx, "policy_warnings", strings.Join(res.Warn, "; "))
 	return nil
 }
 

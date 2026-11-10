@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"strings"
 
 	"github.com/open-policy-agent/opa/v1/rego"
 )
@@ -120,13 +121,80 @@ type Source struct {
 type Result struct {
 	Deny []string
 	Warn []string
+	// Modes are the modes in force that differ from the defaults,
+	// "images.pinned-version=warn,...": with Fingerprint, what decided.
+	Modes string
 }
 
 // Denied reports whether any rule refused the plan.
 func (r Result) Denied() bool { return len(r.Deny) > 0 }
 
+// Modes, from most to least strict.
+const (
+	ModeEnforce = "enforce"
+	ModeWarn    = "warn"
+	ModeOff     = "off"
+)
+
+// Rule is one rule as people see it. A switchable rule has a mode an admin
+// may change; the others guard Forge itself and are always enforced.
+type Rule struct {
+	ID          string
+	Kind        string
+	Title       string
+	Description string
+	Switchable  bool
+	// Default is a switchable rule's mode when nobody changed it.
+	Default string
+}
+
+// Rules are the rules, switchable first, by kind. modes.rego's defaults name
+// the same switchable rules (TestRulesMatchTheModes).
+var Rules = []Rule{
+	{ID: "images.pinned-version", Kind: "Images", Title: "Images name a version", Description: "An image names a tag other than latest, or a digest: one that moves runs something else on every restart.", Switchable: true, Default: ModeEnforce},
+	{ID: "images.allowed-registries", Kind: "Images", Title: "Images come from the allowed registries", Description: "A service without a repo runs images only from the registries the platform allows (--allowed-registries).", Switchable: true, Default: ModeEnforce},
+	{ID: "charts.allowed-repos", Kind: "Charts", Title: "Charts come from the allowed repositories", Description: "A service runs Helm charts only from the repositories the platform allows (--allowed-chart-repos).", Switchable: true, Default: ModeEnforce},
+	{ID: "promotion.healthy-staging", Kind: "Promotion", Title: "Promote only a synced, healthy staging", Description: "Argo CD reports staging Synced and Healthy before it is promoted to production.", Switchable: true, Default: ModeEnforce},
+	{ID: "resources.storage-limit", Kind: "Resources", Title: "Storage within the environment's limit", Description: "A database's storage is at most the limit of its environment.", Switchable: true, Default: ModeEnforce},
+	{ID: "resources.production-ha", Kind: "Resources", Title: "Production databases run two instances", Description: "A database in production runs at least 2 instances, so one can fail.", Switchable: true, Default: ModeEnforce},
+	{ID: "resources.instance-limit", Kind: "Resources", Title: "Instances within the limit", Description: "A database runs at most the platform's limit of instances.", Switchable: true, Default: ModeEnforce},
+	{ID: "resources.staging-single", Kind: "Resources", Title: "Staging needs one instance", Description: "A database in staging usually needs one instance; more cost without helping.", Switchable: true, Default: ModeWarn},
+	{ID: "resources.declared-only", Kind: "Resources", Title: "A plan changes only the declared database", Description: "A plan changes only CloudNativePG clusters in the service's own namespace, exactly as forge.yaml declares them, with every change readable."},
+	{ID: "resources.no-silent-delete", Kind: "Resources", Title: "Deletes are asked for", Description: "A plan deletes a database only with --allow-destroy, and storage never shrinks."},
+	{ID: "resources.storage-class", Kind: "Resources", Title: "Retained storage", Description: "A database's volumes use the longhorn-retain storage class, and it runs at least one instance."},
+	{ID: "images.no-service-ci-images", Kind: "Images", Title: "No other service's CI image", Description: "An image built by a service's CI is deployed from that service's repo, never run as another service."},
+	{ID: "images.no-internal-hosts", Kind: "Images", Title: "No internal registries or chart hosts", Description: "A registry or chart host that is an address or a one-word name is inside the platform's network: only one the platform allows by name."},
+	{ID: "promotion.checked-deploy", Kind: "Promotion", Title: "Promote the deploy that was checked", Description: "Staging runs its latest deploy before it is promoted, so production gets the image that was checked."},
+	{ID: "targets.team-and-room", Kind: "Targets", Title: "Targets belong to the team", Description: "An infrastructure repo deploys only to a target of its team, to environments the target has and has room in."},
+}
+
+// ValidMode reports whether m is a mode.
+func ValidMode(m string) bool { return m == ModeEnforce || m == ModeWarn || m == ModeOff }
+
+// RuleByID returns the rule with id.
+func RuleByID(id string) (Rule, bool) {
+	for _, r := range Rules {
+		if r.ID == id {
+			return r, true
+		}
+	}
+	return Rule{}, false
+}
+
+// ModeSource holds the modes admins set, by rule id; a rule not in it has
+// its default. *Engine reads it before every evaluation.
+type ModeSource interface {
+	RuleModes(ctx context.Context) (map[string]string, error)
+}
+
 // Engine evaluates a compiled rule set.
 type Engine struct {
+	// Modes, when set, are the modes of the switchable rules. When they
+	// cannot be read, every switchable rule is enforced.
+	Modes ModeSource
+	// OnModesError is told when Modes fails; nil ignores it.
+	OnModesError func(error)
+
 	query       rego.PreparedEvalQuery
 	promotion   rego.PreparedEvalQuery
 	image       rego.PreparedEvalQuery
@@ -170,15 +238,15 @@ func NewFromFS(ctx context.Context, fsys fs.FS) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	pq, err := prepare("deny = data.forge.deploys.deny")
+	pq, err := prepare("deny = data.forge.deploys.deny; warn = data.forge.deploys.warn")
 	if err != nil {
 		return nil, err
 	}
-	iq, err := prepare("deny = data.forge.images.deny")
+	iq, err := prepare("deny = data.forge.images.deny; warn = data.forge.images.warn")
 	if err != nil {
 		return nil, err
 	}
-	cq, err := prepare("deny = data.forge.charts.deny")
+	cq, err := prepare("deny = data.forge.charts.deny; warn = data.forge.charts.warn")
 	if err != nil {
 		return nil, err
 	}
@@ -206,11 +274,11 @@ func (e *Engine) Evaluate(ctx context.Context, planJSON []byte, f Forge) (Result
 	if f.Resources == nil {
 		f.Resources = []Resource{}
 	}
-	return results(e.query.Eval(ctx, rego.EvalInput(map[string]any{"plan": plan, "forge": f})))
+	return e.evaluate(ctx, e.query, map[string]any{"plan": plan, "forge": f})
 }
 
 // EvaluatePromotion checks a promotion. An error means it could not be
-// checked; it must then not go ahead. Promotions have no warnings.
+// checked; it must then not go ahead.
 func (e *Engine) EvaluatePromotion(ctx context.Context, p Promotion) (Result, error) {
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -220,12 +288,11 @@ func (e *Engine) EvaluatePromotion(ctx context.Context, p Promotion) (Result, er
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	return results(e.promotion.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.promotion, input)
 }
 
 // EvaluateImage checks the image a service without a repo is to run. An
-// error means it could not be checked; it must then not run. Images have no
-// warnings.
+// error means it could not be checked; it must then not run.
 func (e *Engine) EvaluateImage(ctx context.Context, i Image) (Result, error) {
 	if i.AllowedRegistries == nil {
 		i.AllowedRegistries = []string{}
@@ -238,7 +305,7 @@ func (e *Engine) EvaluateImage(ctx context.Context, i Image) (Result, error) {
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	return results(e.image.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.image, input)
 }
 
 // EvaluateChart checks the chart a service without a repo is to run. An
@@ -255,7 +322,7 @@ func (e *Engine) EvaluateChart(ctx context.Context, c Chart) (Result, error) {
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	return results(e.chart.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.chart, input)
 }
 
 // EvaluateTarget checks the target an infrastructure repo is to deploy to.
@@ -274,7 +341,51 @@ func (e *Engine) EvaluateTarget(ctx context.Context, t Target) (Result, error) {
 	if err := json.Unmarshal(b, &input); err != nil {
 		return Result{}, err
 	}
-	return results(e.target.Eval(ctx, rego.EvalInput(input)))
+	return e.evaluate(ctx, e.target, input)
+}
+
+// modes are the modes admins set, for the rules' input.modes, and the ones
+// that differ from their defaults as text for the audit log: "rule=mode",
+// sorted, comma separated. Without a source every rule has its default.
+// When the source fails, every switchable rule is enforced: the strictest
+// choice, whatever an admin had set.
+func (e *Engine) modes(ctx context.Context) (map[string]any, string) {
+	out := map[string]any{}
+	if e.Modes == nil {
+		return out, ""
+	}
+	set, err := e.Modes.RuleModes(ctx)
+	if err != nil {
+		if e.OnModesError != nil {
+			e.OnModesError(err)
+		}
+		set = map[string]string{}
+		for _, r := range Rules {
+			if r.Switchable {
+				set[r.ID] = ModeEnforce
+			}
+		}
+	}
+	var changed []string
+	for id, m := range set {
+		if r, ok := RuleByID(id); ok && r.Switchable && ValidMode(m) {
+			out[id] = m
+			if m != r.Default {
+				changed = append(changed, id+"="+m)
+			}
+		}
+	}
+	slices.Sort(changed)
+	return out, strings.Join(changed, ",")
+}
+
+// evaluate runs q on input with the modes, and records them in the result.
+func (e *Engine) evaluate(ctx context.Context, q rego.PreparedEvalQuery, input map[string]any) (Result, error) {
+	m, text := e.modes(ctx)
+	input["modes"] = m
+	res, err := results(q.Eval(ctx, rego.EvalInput(input)))
+	res.Modes = text
+	return res, err
 }
 
 // results reads the deny and, when bound, warn sets of one evaluation.

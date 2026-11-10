@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+// PolicyService shows the rules Forge checks before it acts (plans,
+// promotions, images, charts, targets) and lets admins set the mode of the
+// switchable ones (phase 15). Resource names follow AIP style:
+// "rules/{rule}", for example "rules/images.pinned-version".
+service PolicyService {
+  // ListRules returns every rule: the switchable ones with their mode, then
+  // the ones that guard Forge itself and are always enforced.
+  rpc ListRules(ListRulesRequest) returns (ListRulesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // UpdateRule sets the mode of a switchable rule. Admins only.
+  rpc UpdateRule(UpdateRuleRequest) returns (UpdateRuleResponse);
+}
+
+// Rule is one rule as people see it.
+message Rule {
+  // "rules/{rule}".
+  string name = 1;
+  // "Images", "Charts", "Promotion", "Resources" or "Targets".
+  string kind = 2;
+  string title = 3;
+  string description = 4;
+  // False for a rule that guards Forge itself: always "enforce".
+  bool switchable = 5;
+  // "enforce": the action is refused. "warn": it goes ahead, and the
+  // warning is recorded. "off": the rule is not checked.
+  string mode = 6;
+  // The mode when nobody changed it.
+  string default_mode = 7;
+  // Who set the mode, and when; empty for a rule at its default.
+  string updated_by = 8;
+  google.protobuf.Timestamp update_time = 9;
+}
+
+message ListRulesRequest {}
+
+message ListRulesResponse {
+  repeated Rule rules = 1;
+}
+
+message UpdateRuleRequest {
+  // rule.name selects the rule.
+  Rule rule = 1;
+  // Only "mode" can be updated.
+  google.protobuf.FieldMask update_mask = 2;
+  string request_id = 3;
+  bool validate_only = 4;
+}
+
+message UpdateRuleResponse {
+  Rule rule = 1;
+}

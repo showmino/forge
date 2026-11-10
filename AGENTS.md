@@ -169,7 +169,7 @@ Run `make test lint` before every commit. Write the test first.
 | Who may do what: a write RPC calls `authorize(ctx, Act..., service)` (or `authorizeTeam`) with an action of the role table; reads use `require(ctx, PermServicesRead)` | `internal/server/rbac.go` (roles reader, team, admin; `actionRoles`) |
 | Every write RPC is in `auditActions`, every read in `auditReads` | `internal/server/audit.go`; `TestAuditCoversEveryProcedure` fails otherwise |
 | A resource run ends through `Resources.endRun`, which changes the plan once and appends the one outcome event | Operations started with `withoutOutcome(ctx)`; never append a resource outcome anywhere else |
-| Policy rules are `policy/*.rego`, package `forge.resources`, built into the binary | every rule has a passing and a failing case in `policy/policy_test.go` |
+| Policy rules are `policy/*.rego`, package `forge.resources`, built into the binary | every rule has a passing and a failing case in `policy/policy_test.go`. A rule an admin may switch is a `violation` with its id, listed in `policy.Rules` and the defaults of `policy/modes.rego` (`TestRulesMatchTheModes`); a rule that guards Forge stays a plain `deny` |
 | Comments and docs are plain English, written for someone who was not there | the code around you |
 
 Adding an RPC: edit the proto, `make generate`, the handler in

@@ -16,6 +16,7 @@ import (
 	"github.com/showmino/forge/gen/forge/v1/forgev1connect"
 	"github.com/showmino/forge/internal/envtest"
 	"github.com/showmino/forge/internal/github"
+	"github.com/showmino/forge/internal/store"
 	"github.com/showmino/forge/policy"
 )
 
@@ -34,6 +35,8 @@ type deployFixture struct {
 	catalog   *Catalog
 	// catalogClient reaches the same API, for creates.
 	catalogClient forgev1connect.ServiceCatalogServiceClient
+	// store is the API's audit log and its rules' modes.
+	store *store.Memory
 }
 
 func newDeployFixture(t *testing.T, noArgo bool, tweak func(*DeployOptions, *envtest.Argo)) *deployFixture {
@@ -107,10 +110,12 @@ func newDeployFixtureAuth(t *testing.T, noArgo bool, tweak func(*DeployOptions, 
 	if wrap != nil {
 		auth = wrap(catalog, auth)
 	}
+	f.store = store.NewMemory()
 	h, err := New(Options{
 		Authenticator: auth,
 		Authorizer:    Authorizer{WriterGroups: []string{"platform"}},
 		Catalog:       catalog, Operations: f.ops, Deploys: f.deploys,
+		Audit: f.store, RuleModes: f.store,
 	})
 	if err != nil {
 		t.Fatal(err)

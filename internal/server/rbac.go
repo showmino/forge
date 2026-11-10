@@ -56,6 +56,7 @@ const (
 	ActApprovalDecide          = "approval.decide"
 	ActApprovalException       = "approval.exception"
 	ActTeamUpdate              = "team.update"
+	ActRuleUpdate              = "rule.update"
 )
 
 // actionRoles is the lowest role that may do each action. An action that is
@@ -83,6 +84,7 @@ var actionRoles = map[string]role{
 	ActApprovalDecide:          roleTeam,
 	ActApprovalException:       roleTeam,
 	ActTeamUpdate:              roleAdmin,
+	ActRuleUpdate:              roleAdmin,
 }
 
 // Actions lists every action, sorted.

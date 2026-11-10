@@ -313,6 +313,7 @@ func run() error {
 		Templates:        templates,
 		Teams:            teamSource(app),
 		TeamSettings:     st,
+		RuleModes:        st,
 		Docs:             docsSource(app),
 		Sessions:         sessions,
 		Repos:            repoHost(app),

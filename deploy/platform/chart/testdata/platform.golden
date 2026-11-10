@@ -1270,6 +1270,13 @@ spec:
       timeouts:
         request: "0s"
     - matches:
+        - path: {type: PathPrefix, value: /forge.v1.PolicyService}
+      backendRefs:
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
+      # Operation logs stream; don't cut them at the default route timeout.
+      timeouts:
+        request: "0s"
+    - matches:
         - path: {type: PathPrefix, value: /forge.v1.ResourceService}
       backendRefs:
         - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}

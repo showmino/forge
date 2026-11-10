@@ -98,3 +98,33 @@ func TestServiceChecks(t *testing.T) {
 	}
 	h.fails(int(exitcode.NotFound), "service", "checks", "nope")
 }
+
+// An admin sets a rule's mode; a rule that guards Forge cannot change.
+func TestPolicy(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	r := h.ok("policy", "list")
+	for _, want := range []string{"images.pinned-version", "enforce", "resources.staging-single", "warn", "promotion.checked-deploy", "always"} {
+		if !strings.Contains(r.out, want) {
+			t.Errorf("list lacks %q:\n%s", want, r.out)
+		}
+	}
+	if r := h.ok("policy", "set", "images.pinned-version", "--mode", "warn", "--dry-run"); r.out != "rules/images.pinned-version is warn (default enforce) (dry run, nothing changed)\n" {
+		t.Errorf("dry run: %q", r.out)
+	}
+	if r := h.ok("policy", "set", "images.pinned-version", "--mode", "warn"); r.out != "rules/images.pinned-version is warn (default enforce)\n" {
+		t.Errorf("set: %q", r.out)
+	}
+	if r := h.ok("policy", "list"); !strings.Contains(r.out, "warn (default enforce)") {
+		t.Errorf("list after set:\n%s", r.out)
+	}
+	if r := h.ok("policy", "set", "rules/images.pinned-version", "--mode", "enforce"); r.out != "rules/images.pinned-version is enforce\n" {
+		t.Errorf("back to the default: %q", r.out)
+	}
+	if r := h.fails(int(exitcode.Conflict), "policy", "set", "promotion.checked-deploy", "--mode", "off"); !strings.Contains(r.err, "always enforced") {
+		t.Errorf("a rule that guards Forge: %q", r.err)
+	}
+	h.fails(int(exitcode.Usage), "policy", "set", "images.pinned-version", "--mode", "maybe")
+	h.fails(int(exitcode.Usage), "policy", "set", "images.pinned-version")
+	h.fails(int(exitcode.NotFound), "policy", "set", "nope", "--mode", "off")
+}

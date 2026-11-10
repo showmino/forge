@@ -115,6 +115,7 @@ func (c *creator) planInfrastructure(ctx context.Context, req *forgev1.CreateSer
 		return nil, nil, connect.NewError(connect.CodeInternal, fmt.Errorf("check the target rules: %w", err))
 	}
 	noteAuditDetail(ctx, "policy_rules", c.deploys.o.Policy.Fingerprint())
+	noteAuditDetail(ctx, "policy_modes", res.Modes)
 	if res.Denied() {
 		return nil, nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("the target rules refuse it: %s", strings.Join(res.Deny, "; ")))
 	}

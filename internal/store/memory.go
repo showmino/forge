@@ -35,6 +35,9 @@ type Memory struct {
 
 	teamMu sync.Mutex
 	teams  map[string]TeamSetting // by team slug
+
+	ruleMu sync.Mutex
+	rules  map[string]RuleMode // by rule id
 }
 
 type memEntry struct {

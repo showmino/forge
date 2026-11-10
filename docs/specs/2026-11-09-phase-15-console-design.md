@@ -134,19 +134,46 @@ adds OpenTelemetry sets it in its forge.yaml.
 
 ## D. Rules with modes
 
-Every deny rule in `policy/*.rego` gets a stable id, a kind (Promotion,
-Images, Charts, Resources, Targets), a name and a description. `ListRules`
-returns them with their mode, and `UpdateRule` (admins) sets the mode:
+The owner chose (2026-11-10) to make only the policy rules switchable. The
+rules that guard Forge itself stay enforced and are listed as such.
 
-- **enforce:** as today, the action is refused;
-- **warn:** the action goes ahead, and the audit event records the warning;
-- **off:** the rule is not evaluated.
+| Rule | Kind | Default |
+| --- | --- | --- |
+| `images.pinned-version`: an image names a version, not `latest` or none | Images | enforce |
+| `images.allowed-registries`: images come from the allowed registries | Images | enforce |
+| `charts.allowed-repos`: charts come from the allowed repositories | Charts | enforce |
+| `promotion.healthy-staging`: staging is Synced and Healthy before a promote | Promotion | enforce |
+| `resources.storage-limit`: storage within the environment's limit | Resources | enforce |
+| `resources.production-ha`: production databases run at least 2 instances | Resources | enforce |
+| `resources.instance-limit`: at most the environment's instances | Resources | enforce |
+| `resources.staging-single`: staging needs one instance | Resources | warn |
 
-Modes are stored in the database. A rule nobody has changed is enforced, so
-nothing changes on upgrade. Rules page: "Waiting for approval" (today's
-approvals), then the rules by kind with their open issues and a mode switch
-for admins. The CLI gets `forge policy list` and `forge policy set <rule>
---mode warn`. Every change is an audit event.
+Always enforced, shown without a switch: a plan touches only the declared
+database in the service's own namespace, matches forge.yaml, is readable,
+and deletes only with `--allow-destroy`, and storage never shrinks; an image
+is not another service's CI image and a registry or chart host is not an
+internal address; a promotion ships the deploy that was checked; a target
+belongs to the team and has the environment and room.
+
+Modes:
+
+- **enforce**: as today, the action is refused;
+- **warn**: the action goes ahead; the warning is in the answer where the
+  call has one (a resource plan) and in the audit event (`policy_warnings`);
+- **off**: the rule is not evaluated.
+
+In the rules, each switchable rule's checks are tagged with its id
+(`violation`), and `policy/modes.rego` turns a violation into a deny or a
+warning by the rule's mode. Modes are stored in the table `rule_modes`; a rule
+nobody changed has its default, so nothing changes on upgrade. When the modes
+cannot be read, every switchable rule is enforced, the strictest choice. Each
+audit event that checked rules records `policy_modes`: the modes in force that
+differ from the defaults, next to `policy_rules`, the rules' fingerprint.
+
+`PolicyService.ListRules` (readers) and `UpdateRule` (admins, action
+`rule.update`, audited); `forge policy list` and `forge policy set <rule>
+--mode warn`. The dashboard's Rules page lists them by kind, with a mode
+switch for admins, and links to the approvals.
 
 ## E. Adoption
 

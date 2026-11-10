@@ -6,7 +6,8 @@
 # allowed_registries is the platform's list (--allowed-registries; empty
 # allows any) and service_images is where the platform's services' CI pushes
 # their images ("ghcr.io/my-org/").
-# A message in deny refuses the image.
+# A message in deny refuses the image; one in warn lets it run and is
+# recorded in the audit log.
 #
 # A missing field reads as its fallback, which these rules refuse: an image
 # with no tag or no host does not run. Forge fills every field from a
@@ -14,6 +15,8 @@
 package forge.images
 
 import rego.v1
+
+import data.forge.modes
 
 field(obj, key, fallback) := object.get(obj, key, fallback) if {
 	is_object(obj)
@@ -42,18 +45,18 @@ short := name if {
 } else := "app"
 
 # A tag that moves runs something else on every restart.
-deny contains msg if {
+violation contains {"rule": "images.pinned-version", "msg": msg} if {
 	tag == "latest"
 	msg := sprintf("%s: the tag latest moves; name a version, such as %s:1.27", [image, short])
 }
 
-deny contains msg if {
+violation contains {"rule": "images.pinned-version", "msg": msg} if {
 	tag == ""
 	digest == ""
 	msg := sprintf("%s names no tag; name a version, such as %s:1.27", [image, short])
 }
 
-deny contains msg if {
+violation contains {"rule": "images.allowed-registries", "msg": msg} if {
 	is_array(allowed)
 	count(allowed) > 0
 	not host in allowed
@@ -82,3 +85,15 @@ deny contains msg if {
 local_registry if not contains(hostname, ".")
 
 local_registry if regex.match(`^[0-9.]+$`, hostname)
+
+# The switchable rules (modes.rego): a violation is a deny or a warning by
+# its rule's mode.
+deny contains v.msg if {
+	some v in violation
+	modes.mode(v.rule) == "enforce"
+}
+
+warn contains v.msg if {
+	some v in violation
+	modes.mode(v.rule) == "warn"
+}

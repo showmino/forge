@@ -107,9 +107,12 @@ func (d *Deploys) pinImage(ctx context.Context, svc, image string) (pinnedImage,
 			return pinnedImage{}, connect.NewError(connect.CodeInternal, fmt.Errorf("check the image rules: %w", err))
 		}
 		noteAuditDetail(ctx, "policy_rules", d.o.Policy.Fingerprint())
+		noteAuditDetail(ctx, "policy_modes", res.Modes)
 		if res.Denied() {
 			return pinnedImage{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("the image rules refuse it: %s", strings.Join(res.Deny, "; ")))
 		}
+		// A rule an admin set to warn lets it through; the audit event keeps what it said.
+		noteAuditDetail(ctx, "policy_warnings", strings.Join(res.Warn, "; "))
 	}
 	if d.o.Digests == nil {
 		return pinnedImage{}, connect.NewError(connect.CodeFailedPrecondition, errors.New("this Forge API cannot look up images in registries, so it cannot run one without a repo"))

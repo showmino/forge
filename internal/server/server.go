@@ -20,6 +20,7 @@ import (
 	"github.com/showmino/forge/internal/store"
 	"github.com/showmino/forge/internal/version"
 	"github.com/showmino/forge/pkg/client"
+	"github.com/showmino/forge/policy"
 )
 
 // OIDC describes the identity provider clients should log in with.
@@ -47,6 +48,9 @@ type Options struct {
 	// TeamSettings keeps what Forge knows about a team (its on-call
 	// rotation); nil leaves UpdateTeam unavailable.
 	TeamSettings store.TeamStore
+	// RuleModes keeps the modes admins set for the switchable policy
+	// rules; nil: every rule has its default, and UpdateRule is unavailable.
+	RuleModes store.RuleStore
 	// Docs reads services' docs from GitHub for DocsService; nil answers
 	// FAILED_PRECONDITION.
 	Docs DocsGitHub
@@ -160,6 +164,17 @@ func New(o Options) (http.Handler, error) {
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create, checks: newChecker(o.Catalog, o.Audit, o.TeamSettings, o.Docs, o.GitHubOrg, o.Logger)}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger, infra: o.Infrastructure}, opts))
+	if o.RuleModes != nil {
+		var engines []*policy.Engine
+		if o.Deploys != nil {
+			engines = append(engines, o.Deploys.o.Policy)
+		}
+		if o.Resources != nil {
+			engines = append(engines, o.Resources.o.Policy)
+		}
+		useRuleModes(o.RuleModes, o.Logger, engines...)
+	}
+	mux.Handle(forgev1connect.NewPolicyServiceHandler(&policyService{st: o.RuleModes, now: time.Now}, opts))
 	mux.Handle(forgev1connect.NewTeamServiceHandler(&teamService{src: o.Teams, settings: o.TeamSettings, org: o.GitHubOrg, log: o.Logger, now: time.Now}, opts))
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
