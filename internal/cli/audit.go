@@ -21,7 +21,7 @@ func newAuditCmd(f *Factory) *cobra.Command {
 	cmd.Long = `The audit log has one event per write call to the Forge API, refused calls
 included, plus the outcome of long-running work (rows marked ↳) and forge-api's
 own actions (actor "system"). Every member can read it; nothing can change it.`
-	cmd.AddCommand(newAuditListCmd(f), newAuditGetCmd(f))
+	cmd.AddCommand(newAuditListCmd(f), newAuditGetCmd(f), newAuditAdoptionCmd(f))
 	return cmd
 }
 

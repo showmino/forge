@@ -128,3 +128,19 @@ func TestPolicy(t *testing.T) {
 	h.fails(int(exitcode.Usage), "policy", "set", "images.pinned-version")
 	h.fails(int(exitcode.NotFound), "policy", "set", "nope", "--mode", "off")
 }
+
+// How much Forge is used, from the audit log: the harness's writer is an admin.
+func TestAuditAdoption(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.ok("service", "register", "payments", "--team", "billing")
+	r := h.ok("audit", "adoption")
+	for _, want := range []string{"people", "1", "self-served", "0% (0 of 1)"} {
+		if !strings.Contains(r.out, want) {
+			t.Errorf("adoption lacks %q:\n%s", want, r.out)
+		}
+	}
+	if r := h.ok("audit", "adoption", "--weekly"); strings.Count(r.out, "\n") != 13 {
+		t.Errorf("12 weeks and a header:\n%s", r.out)
+	}
+}

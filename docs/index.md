@@ -48,7 +48,7 @@ The v1 CLI has twelve command groups; each maps one-to-one to an API resource so
 | `env` | `list`, `create`, `get`, `destroy`, `extend` | `forge env create pr-142 --service payments --ttl 48h` | 3 |
 | `deploy` | `start`, `status`, `history`, `rollback`, `promote` | `forge deploy start payments --env staging --ref v1.4.2` | 4 |
 | `resource` | `plan`, `apply`, `list`, `get` | `forge resource plan --env staging` | 5 |
-| `audit` | `list`, `get` | `forge audit list --service payments --since 7d` | 5 |
+| `audit` | `list`, `get`, `adoption` | `forge audit list --service payments --since 7d` | 5 |
 | `op` | `list`, `watch`, `cancel` | `forge op watch op_9f2c` | 3 |
 | `docs` | `list`, `get`, `search`, `lint` | `forge docs get payments runbook.md` | 7 |
 | `policy` | `list`, `set` | `forge policy set images.pinned-version --mode warn` | 15 |

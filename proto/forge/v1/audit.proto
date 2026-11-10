@@ -18,6 +18,13 @@ service AuditService {
   rpc GetAuditEvent(GetAuditEventRequest) returns (GetAuditEventResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+
+  // GetAdoption says how much Forge is used, from the audit log: people,
+  // deploys and self-served changes in the last 30 days and the 30 before,
+  // and week by week (phase 15).
+  rpc GetAdoption(GetAdoptionRequest) returns (GetAdoptionResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 // AuditEvent is one entry of the audit log.
@@ -101,4 +108,38 @@ message GetAuditEventRequest {
 
 message GetAuditEventResponse {
   AuditEvent event = 1;
+}
+
+message GetAdoptionRequest {}
+
+message GetAdoptionResponse {
+  // The last 30 days, and the 30 before them.
+  AdoptionPeriod last = 1;
+  AdoptionPeriod previous = 2;
+  // The last 12 weeks, oldest first; the last is the week so far.
+  repeated AdoptionWeek weeks = 3;
+  // How far back the numbers go: the oldest event read. When the audit log
+  // is younger than the periods, they cover less.
+  google.protobuf.Timestamp since = 4;
+}
+
+// AdoptionPeriod counts one stretch of time.
+message AdoptionPeriod {
+  // People who changed something through Forge.
+  int32 active_users = 1;
+  // Deploys, promotions and rollbacks started, by people and by CI.
+  int32 deploys = 2;
+  // Changes by people, and how many of them by people outside the admin
+  // groups. Only changes whose audit event records the role count: Forge
+  // records it since 0.54.0.
+  int32 writes = 3;
+  int32 self_served = 4;
+}
+
+// AdoptionWeek counts one week, starting on a Monday (UTC).
+message AdoptionWeek {
+  google.protobuf.Timestamp start = 1;
+  int32 deploys = 2;
+  int32 self_served = 3;
+  int32 active_users = 4;
 }

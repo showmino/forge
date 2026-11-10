@@ -800,7 +800,16 @@ can change it.
 forge audit list --service payments --since 7d
 forge audit list --actor ana@example.com --failed
 forge audit get 1234
+forge audit adoption            # people, deploys, self-served changes: last 30 days and the 30 before
+forge audit adoption --weekly   # the last 12 weeks
 ```
+
+A person's event records their role as the detail `role` (`admin` or
+`member`, since 0.54.0). `forge audit adoption` (`AuditService.GetAdoption`,
+kept five minutes) counts from the log: the people who changed something, the
+deploys, promotions and rollbacks started (by people and CI), and the share of
+people's changes made by members outside the admin groups (only changes with
+a recorded role count). Dry runs and refused calls do not count.
 
 Events live in Forge's PostgreSQL (`--database-url`), or in memory with
 `--in-memory`.
