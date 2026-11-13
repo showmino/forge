@@ -4,6 +4,9 @@ image: ""
 port: 8080
 health: /healthz
 replicas: 1
+# Set by 'forge service restart' (a time): the pods' annotation, so a new
+# value rolls them. A deploy leaves it out.
+restartedAt: ""
 host: ""
 # The Gateway listener of the route; empty means the environment's own.
 listener: ""

@@ -54,6 +54,12 @@ const (
 	// DeployServiceDeleteDeploymentProcedure is the fully-qualified name of the DeployService's
 	// DeleteDeployment RPC.
 	DeployServiceDeleteDeploymentProcedure = "/forge.v1.DeployService/DeleteDeployment"
+	// DeployServiceRestartDeploymentProcedure is the fully-qualified name of the DeployService's
+	// RestartDeployment RPC.
+	DeployServiceRestartDeploymentProcedure = "/forge.v1.DeployService/RestartDeployment"
+	// DeployServiceScaleDeploymentProcedure is the fully-qualified name of the DeployService's
+	// ScaleDeployment RPC.
+	DeployServiceScaleDeploymentProcedure = "/forge.v1.DeployService/ScaleDeployment"
 	// DeployServiceSetAddressProcedure is the fully-qualified name of the DeployService's SetAddress
 	// RPC.
 	DeployServiceSetAddressProcedure = "/forge.v1.DeployService/SetAddress"
@@ -80,6 +86,14 @@ type DeployServiceClient interface {
 	// the GitOps repo, its Argo CD application and its namespace. The service
 	// stays in the catalog, with its other environment and its previews.
 	DeleteDeployment(context.Context, *connect.Request[v1.DeleteDeploymentRequest]) (*connect.Response[v1.DeleteDeploymentResponse], error)
+	// RestartDeployment restarts a deployment's pods, one at a time, without a
+	// new deploy: Forge marks the pod template in the deploy repo and Argo CD
+	// rolls the pods. The next deploy leaves the mark out.
+	RestartDeployment(context.Context, *connect.Request[v1.RestartDeploymentRequest]) (*connect.Response[v1.RestartDeploymentResponse], error)
+	// ScaleDeployment sets how many pods a deployment runs, until the next
+	// deploy, promote or rollback, which goes back to forge.yaml's
+	// run.replicas. An autoscaled deployment refuses it.
+	ScaleDeployment(context.Context, *connect.Request[v1.ScaleDeploymentRequest]) (*connect.Response[v1.ScaleDeploymentResponse], error)
 	// SetAddress changes where a service is reached, overriding forge.yaml's
 	// run.host and run.domain. It applies at the next deploy of each
 	// environment.
@@ -145,6 +159,18 @@ func NewDeployServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(deployServiceMethods.ByName("DeleteDeployment")),
 			connect.WithClientOptions(opts...),
 		),
+		restartDeployment: connect.NewClient[v1.RestartDeploymentRequest, v1.RestartDeploymentResponse](
+			httpClient,
+			baseURL+DeployServiceRestartDeploymentProcedure,
+			connect.WithSchema(deployServiceMethods.ByName("RestartDeployment")),
+			connect.WithClientOptions(opts...),
+		),
+		scaleDeployment: connect.NewClient[v1.ScaleDeploymentRequest, v1.ScaleDeploymentResponse](
+			httpClient,
+			baseURL+DeployServiceScaleDeploymentProcedure,
+			connect.WithSchema(deployServiceMethods.ByName("ScaleDeployment")),
+			connect.WithClientOptions(opts...),
+		),
 		setAddress: connect.NewClient[v1.SetAddressRequest, v1.SetAddressResponse](
 			httpClient,
 			baseURL+DeployServiceSetAddressProcedure,
@@ -170,6 +196,8 @@ type deployServiceClient struct {
 	rollbackDeploy    *connect.Client[v1.RollbackDeployRequest, v1.RollbackDeployResponse]
 	promoteDeploy     *connect.Client[v1.PromoteDeployRequest, v1.PromoteDeployResponse]
 	deleteDeployment  *connect.Client[v1.DeleteDeploymentRequest, v1.DeleteDeploymentResponse]
+	restartDeployment *connect.Client[v1.RestartDeploymentRequest, v1.RestartDeploymentResponse]
+	scaleDeployment   *connect.Client[v1.ScaleDeploymentRequest, v1.ScaleDeploymentResponse]
 	setAddress        *connect.Client[v1.SetAddressRequest, v1.SetAddressResponse]
 	listDomains       *connect.Client[v1.ListDomainsRequest, v1.ListDomainsResponse]
 }
@@ -209,6 +237,16 @@ func (c *deployServiceClient) DeleteDeployment(ctx context.Context, req *connect
 	return c.deleteDeployment.CallUnary(ctx, req)
 }
 
+// RestartDeployment calls forge.v1.DeployService.RestartDeployment.
+func (c *deployServiceClient) RestartDeployment(ctx context.Context, req *connect.Request[v1.RestartDeploymentRequest]) (*connect.Response[v1.RestartDeploymentResponse], error) {
+	return c.restartDeployment.CallUnary(ctx, req)
+}
+
+// ScaleDeployment calls forge.v1.DeployService.ScaleDeployment.
+func (c *deployServiceClient) ScaleDeployment(ctx context.Context, req *connect.Request[v1.ScaleDeploymentRequest]) (*connect.Response[v1.ScaleDeploymentResponse], error) {
+	return c.scaleDeployment.CallUnary(ctx, req)
+}
+
 // SetAddress calls forge.v1.DeployService.SetAddress.
 func (c *deployServiceClient) SetAddress(ctx context.Context, req *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error) {
 	return c.setAddress.CallUnary(ctx, req)
@@ -237,6 +275,14 @@ type DeployServiceHandler interface {
 	// the GitOps repo, its Argo CD application and its namespace. The service
 	// stays in the catalog, with its other environment and its previews.
 	DeleteDeployment(context.Context, *connect.Request[v1.DeleteDeploymentRequest]) (*connect.Response[v1.DeleteDeploymentResponse], error)
+	// RestartDeployment restarts a deployment's pods, one at a time, without a
+	// new deploy: Forge marks the pod template in the deploy repo and Argo CD
+	// rolls the pods. The next deploy leaves the mark out.
+	RestartDeployment(context.Context, *connect.Request[v1.RestartDeploymentRequest]) (*connect.Response[v1.RestartDeploymentResponse], error)
+	// ScaleDeployment sets how many pods a deployment runs, until the next
+	// deploy, promote or rollback, which goes back to forge.yaml's
+	// run.replicas. An autoscaled deployment refuses it.
+	ScaleDeployment(context.Context, *connect.Request[v1.ScaleDeploymentRequest]) (*connect.Response[v1.ScaleDeploymentResponse], error)
 	// SetAddress changes where a service is reached, overriding forge.yaml's
 	// run.host and run.domain. It applies at the next deploy of each
 	// environment.
@@ -298,6 +344,18 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(deployServiceMethods.ByName("DeleteDeployment")),
 		connect.WithHandlerOptions(opts...),
 	)
+	deployServiceRestartDeploymentHandler := connect.NewUnaryHandler(
+		DeployServiceRestartDeploymentProcedure,
+		svc.RestartDeployment,
+		connect.WithSchema(deployServiceMethods.ByName("RestartDeployment")),
+		connect.WithHandlerOptions(opts...),
+	)
+	deployServiceScaleDeploymentHandler := connect.NewUnaryHandler(
+		DeployServiceScaleDeploymentProcedure,
+		svc.ScaleDeployment,
+		connect.WithSchema(deployServiceMethods.ByName("ScaleDeployment")),
+		connect.WithHandlerOptions(opts...),
+	)
 	deployServiceSetAddressHandler := connect.NewUnaryHandler(
 		DeployServiceSetAddressProcedure,
 		svc.SetAddress,
@@ -327,6 +385,10 @@ func NewDeployServiceHandler(svc DeployServiceHandler, opts ...connect.HandlerOp
 			deployServicePromoteDeployHandler.ServeHTTP(w, r)
 		case DeployServiceDeleteDeploymentProcedure:
 			deployServiceDeleteDeploymentHandler.ServeHTTP(w, r)
+		case DeployServiceRestartDeploymentProcedure:
+			deployServiceRestartDeploymentHandler.ServeHTTP(w, r)
+		case DeployServiceScaleDeploymentProcedure:
+			deployServiceScaleDeploymentHandler.ServeHTTP(w, r)
 		case DeployServiceSetAddressProcedure:
 			deployServiceSetAddressHandler.ServeHTTP(w, r)
 		case DeployServiceListDomainsProcedure:
@@ -366,6 +428,14 @@ func (UnimplementedDeployServiceHandler) PromoteDeploy(context.Context, *connect
 
 func (UnimplementedDeployServiceHandler) DeleteDeployment(context.Context, *connect.Request[v1.DeleteDeploymentRequest]) (*connect.Response[v1.DeleteDeploymentResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.DeleteDeployment is not implemented"))
+}
+
+func (UnimplementedDeployServiceHandler) RestartDeployment(context.Context, *connect.Request[v1.RestartDeploymentRequest]) (*connect.Response[v1.RestartDeploymentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.RestartDeployment is not implemented"))
+}
+
+func (UnimplementedDeployServiceHandler) ScaleDeployment(context.Context, *connect.Request[v1.ScaleDeploymentRequest]) (*connect.Response[v1.ScaleDeploymentResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.DeployService.ScaleDeployment is not implemented"))
 }
 
 func (UnimplementedDeployServiceHandler) SetAddress(context.Context, *connect.Request[v1.SetAddressRequest]) (*connect.Response[v1.SetAddressResponse], error) {

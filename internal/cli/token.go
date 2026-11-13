@@ -21,8 +21,8 @@ never has more than your role, only what its scopes allow, and it ends when it
 expires, when you revoke it, or when you leave the organization. Only your
 login makes or revokes one: a token cannot. Use it as FORGE_TOKEN.
 
-Scopes: read (always), deploy (deploy, promote, roll back, previews, cancel)
-and settings (every other change you may make).`
+Scopes: read (always), deploy (deploy, promote, roll back, restart, scale,
+previews, cancel) and settings (every other change you may make).`
 	cmd.AddCommand(newTokenCreateCmd(f), newTokenListCmd(f), newTokenRevokeCmd(f))
 	return cmd
 }

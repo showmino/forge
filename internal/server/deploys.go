@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -253,7 +254,10 @@ type deployValues struct {
 	Autoscaling *deployAutoscaling  `yaml:"autoscaling,omitempty"`
 	// Chart is set for a service that runs a published chart (chart_source.go).
 	Chart *deployChart `yaml:"chart,omitempty"`
-	Forge deployRecord `yaml:"forge"`
+	// RestartedAt marks the pod template when 'forge service restart' asks
+	// for new pods (deploy_actions.go); a deploy leaves it out.
+	RestartedAt string       `yaml:"restartedAt,omitempty"`
+	Forge       deployRecord `yaml:"forge"`
 }
 
 // deployAutoscaling is the range KEDA keeps the Deployment in.
@@ -435,6 +439,13 @@ func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit s
 	}
 	if t, err := time.Parse(time.RFC3339, v.Forge.Time); err == nil {
 		dep.DeployTime = timestamppb.New(t)
+	}
+	if v.Chart == nil {
+		dep.Replicas = int32(min(v.Replicas, math.MaxInt32)) //nolint:gosec // bounded
+	}
+	dep.Autoscaled = v.Autoscaling != nil
+	if t, err := time.Parse(time.RFC3339, v.RestartedAt); err == nil {
+		dep.RestartTime = timestamppb.New(t)
 	}
 	if ops := d.o.Operations.List(dep.Name, false); len(ops) > 0 {
 		dep.Operation = ops[0].GetName()

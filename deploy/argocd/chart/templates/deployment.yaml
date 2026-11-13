@@ -17,6 +17,10 @@ spec:
   template:
     metadata:
       labels: {app: {{ .Values.name }}}
+      {{- with .Values.restartedAt }}
+      # Set by 'forge service restart': a new time rolls the pods.
+      annotations: {forge.dev/restarted-at: {{ . | quote }}}
+      {{- end }}
     spec:
       automountServiceAccountToken: false
       imagePullSecrets:

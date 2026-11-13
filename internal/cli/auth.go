@@ -307,16 +307,17 @@ service.create, service.register and cluster.read) on none. Prints yes or no
 and exits 0 or 5, so scripts can check before they try.
 
 Members of a service's owner team may update it, deploy, promote and roll it
-back, manage its environments, plan and apply its resources outside
+back, restart and scale it, manage its environments, plan and apply its resources outside
 production, and approve its production runs (an infrastructure repo's).
 Admins may do everything. The actions:
 
   service.create, service.create.any_team, service.register, service.update,
   service.update.team, service.delete, service.address, deploy.start,
-  deploy.promote, deploy.rollback, deploy.remove, environment.create,
-  environment.extend, environment.destroy, operation.cancel, resource.plan,
-  resource.apply, resource.apply.production, cluster.read, approval.decide,
-  approval.exception, team.update, rule.update`,
+  deploy.promote, deploy.rollback, deploy.remove, deploy.restart,
+  deploy.scale, environment.create, environment.extend, environment.destroy,
+  operation.cancel, resource.plan, resource.apply, resource.apply.production,
+  cluster.read, approval.decide, approval.exception, team.update,
+  rule.update`,
 		Example: `  forge auth can deploy.promote payments
   forge auth can service.create --team billing
   forge auth can resource.apply.production payments -o json`,

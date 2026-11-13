@@ -55,6 +55,8 @@ var deployProcedures = []string{
 	forgev1connect.DeployServiceStartDeployProcedure,
 	forgev1connect.DeployServicePromoteDeployProcedure,
 	forgev1connect.DeployServiceRollbackDeployProcedure,
+	forgev1connect.DeployServiceRestartDeploymentProcedure,
+	forgev1connect.DeployServiceScaleDeploymentProcedure,
 	forgev1connect.EnvironmentServiceCreateEnvironmentProcedure,
 	forgev1connect.EnvironmentServiceExtendEnvironmentProcedure,
 	forgev1connect.EnvironmentServiceDestroyEnvironmentProcedure,
@@ -305,4 +307,4 @@ func deployOnlyToken(ctx context.Context) (string, bool) {
 }
 
 // deployScopeKinds are the operations a deploy-only token may cancel.
-var deployScopeKinds = map[string]bool{kindDeploy: true, kindPromote: true, kindRollback: true, kindCreateEnv: true, kindDestroyEnv: true}
+var deployScopeKinds = map[string]bool{kindDeploy: true, kindPromote: true, kindRollback: true, kindCreateEnv: true, kindDestroyEnv: true, kindRestart: true, kindScale: true}

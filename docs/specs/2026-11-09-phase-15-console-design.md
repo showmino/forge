@@ -224,6 +224,17 @@ restart through the deploy repo's annotation, so Argo CD does it).
 count for that environment. Both use the team's role, are operations, and
 are audited. The service page gets an Actions tab with both.
 
+Built (2026-11-13). The owner chose that a scale lasts until the next deploy,
+promote or rollback, which writes forge.yaml's count again. `RestartDeployment`
+and `ScaleDeployment` (actions `deploy.restart` and `deploy.scale`, the
+team's; a token's `deploy` scope) change the environment's values in the
+deploy repo with a commit that has no `Forge-` lines, so the deploy history,
+a rollback and a promotion's version do not count it. A restart writes
+`restartedAt`, the pods' annotation `forge.dev/restarted-at`; every deploy
+leaves it out. A scale is 1 to 10 pods (forge.yaml's limit) and is refused
+for an autoscaled environment and a chart service; a chart refuses a restart
+too. `Deployment` gains `replicas`, `autoscaled` and `restart_time`.
+
 ## Decided by the owner (2026-11-09)
 
 1. **Tracing check:** a `forge.yaml` field (`service.tracing`) that the

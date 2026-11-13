@@ -21,6 +21,7 @@ jobs:
   - name: cleanup
     schedule: "0 3 * * *"
     command: [node, scripts/cleanup.js]
+restartedAt: "2026-10-10T08:30:00Z"
 forge:
   service: services/payments
   env: staging
