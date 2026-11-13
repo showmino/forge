@@ -202,13 +202,18 @@ func TestOpList(t *testing.T) {
 func TestOpCancel(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	// The work ends only once the cancel call has answered: ended sooner,
+	// the CLI would rightly report it as already finished.
+	release := make(chan struct{})
 	id := h.startOp("environments/a", func(ctx context.Context, emit func(string, string)) error {
 		emit("image", "waiting")
 		<-ctx.Done()
+		<-release
 		return ctx.Err()
 	})
 	h.fails(2, "op", "cancel", id) // no terminal, no --yes
 	r := h.ok("op", "cancel", id, "--yes")
+	close(release)
 	if r.out != "operations/"+id+" cancelling\n" {
 		t.Errorf("cancel: %q", r.out)
 	}
