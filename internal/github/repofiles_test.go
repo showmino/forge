@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -165,5 +168,32 @@ func TestRepoFilesDeleteFile(t *testing.T) {
 	g.mu.Unlock()
 	if _, err := r.DeleteFile(ctx, "c2", "tree-of-c2", "services/payments/staging/values.yaml", "again"); !errors.Is(err, ErrNotFastForward) {
 		t.Errorf("moved branch: %v, want ErrNotFastForward", err)
+	}
+}
+
+// History reads as many pages as the limit takes, and stops at a short one.
+func TestHistoryPages(t *testing.T) {
+	t.Parallel()
+	var pages []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		pages = append(pages, q.Get("page")+"/"+q.Get("per_page"))
+		page, _ := strconv.Atoi(q.Get("page"))
+		size, _ := strconv.Atoi(q.Get("per_page"))
+		var out []map[string]any
+		for i := (page - 1) * size; i < min(page*size, 230); i++ {
+			out = append(out, map[string]any{"sha": fmt.Sprintf("c%d", i), "commit": map[string]any{"message": "m"}})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	t.Cleanup(srv.Close)
+	r := &RepoFiles{Client: &Client{BaseURL: srv.URL}, Owner: "showmino", Name: "forge-deploys", Branch: "main"}
+	hist, err := r.History(context.Background(), "a.yaml", 500)
+	if err != nil || len(hist) != 230 || hist[229].SHA != "c229" || strings.Join(pages, ",") != "1/100,2/100,3/100" {
+		t.Errorf("History(500) = %d commits, pages %v, %v", len(hist), pages, err)
+	}
+	pages = nil
+	if hist, err := r.History(context.Background(), "a.yaml", 150); err != nil || len(hist) != 150 || strings.Join(pages, ",") != "1/100,2/100" {
+		t.Errorf("History(150) = %d commits, pages %v, %v", len(hist), pages, err)
 	}
 }

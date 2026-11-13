@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -193,4 +194,26 @@ func TestRestartWhileDeploying(t *testing.T) {
 	f.deploys.mu.Unlock()
 	_, err := f.client.RestartDeployment(context.Background(), as("writer", &forgev1.RestartDeploymentRequest{Name: "deployments/payments/staging"}))
 	refused(t, "restart while busy", err, connect.CodeFailedPrecondition, "operations/op_busy is already running")
+}
+
+// Restarts are commits of the values file with no record: many of them do
+// not hide the deploys from the history or a rollback.
+func TestManyRestartsKeepTheHistory(t *testing.T) {
+	t.Parallel()
+	f := newDeployFixture(t, false, nil)
+	ctx := context.Background()
+	f.deployOK(t, "staging")
+	f.deployOK(t, "staging")
+	for i := range 60 {
+		f.rewrite(t, "staging", func(v *deployValues) { v.RestartedAt = fmt.Sprintf("2026-11-13T10:%02d:00Z", i) })
+	}
+	name := "deployments/payments/staging"
+	hist, err := f.client.ListDeployHistory(ctx, as("reader", &forgev1.ListDeployHistoryRequest{Name: name, Limit: 2}))
+	if err != nil || len(hist.Msg.GetRecords()) != 2 {
+		t.Fatalf("history after 60 restarts: %v %v", hist, err)
+	}
+	resp, err := f.client.RollbackDeploy(ctx, as("writer", &forgev1.RollbackDeployRequest{Name: name, ValidateOnly: true}))
+	if err != nil || resp.Msg.GetDeployment() == nil {
+		t.Errorf("rollback after 60 restarts: %v", err)
+	}
 }

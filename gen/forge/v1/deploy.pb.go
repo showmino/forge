@@ -1871,7 +1871,7 @@ type ScaleDeploymentResponse struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	Operation  *Operation             `protobuf:"bytes,1,opt,name=operation,proto3" json:"operation,omitempty"`
 	Deployment *Deployment            `protobuf:"bytes,2,opt,name=deployment,proto3" json:"deployment,omitempty"`
-	// How many pods it ran before.
+	// How many pods it ran when the call was made.
 	PreviousReplicas int32 `protobuf:"varint,3,opt,name=previous_replicas,json=previousReplicas,proto3" json:"previous_replicas,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache

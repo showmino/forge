@@ -333,6 +333,6 @@ message ScaleDeploymentRequest {
 message ScaleDeploymentResponse {
   Operation operation = 1;
   Deployment deployment = 2;
-  // How many pods it ran before.
+  // How many pods it ran when the call was made.
   int32 previous_replicas = 3;
 }

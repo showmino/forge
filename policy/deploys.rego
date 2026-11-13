@@ -47,7 +47,7 @@ violation contains {"rule": "promotion.healthy-staging", "msg": msg} if {
 # may be warned or off, this rule never is.
 deny contains msg if {
 	field(source, "at_revision", false) != true
-	msg := sprintf("%s does not run its latest deploy (%s) yet; wait for Argo CD to sync it", [from, shown(field(source, "deploy_commit", ""))])
+	msg := sprintf("%s does not run its latest deploy repo commit (%s) yet; wait for Argo CD to sync it", [from, shown(field(source, "deploy_commit", ""))])
 }
 
 # The switchable rules (modes.rego): a violation is a deny or a warning by

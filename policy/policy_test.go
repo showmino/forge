@@ -481,7 +481,7 @@ func TestPromotionRules(t *testing.T) {
 		{"degraded", mod(func(p *Promotion) { p.Source.Health = "Degraded" }), "staging is Degraded; it must be Healthy to be promoted"},
 		{"progressing", mod(func(p *Promotion) { p.Source.Health = "Progressing" }), "staging is Progressing; it must be Healthy to be promoted"},
 		{"missing", mod(func(p *Promotion) { p.Source.Health = "Missing" }), "staging is Missing; it must be Healthy to be promoted"},
-		{"not at its latest deploy", mod(func(p *Promotion) { p.Source.AtRevision = false }), "staging does not run its latest deploy (9f8e7d6) yet; wait for Argo CD to sync it"},
+		{"not at its latest deploy", mod(func(p *Promotion) { p.Source.AtRevision = false }), "staging does not run its latest deploy repo commit (9f8e7d6) yet; wait for Argo CD to sync it"},
 		{"both", mod(func(p *Promotion) { p.Source.Sync = "OutOfSync"; p.Source.Health = "Degraded" }),
 			"staging is Degraded; it must be Healthy to be promoted|staging is OutOfSync; it must be Synced to be promoted"},
 	} {

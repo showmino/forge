@@ -681,7 +681,9 @@ neither is a deploy, so the history and a rollback skip them (the audit log
 has them). A scale (1 to 10 pods) lasts until the next deploy, promote or
 rollback, which runs `run.replicas` again: set it in `forge.yaml` to keep the
 count. An autoscaled environment and a service that runs a chart refuse a
-scale; a chart also refuses a restart.
+scale; a chart also refuses a restart. A restart needs the service chart of
+the same release (`deploys.chartRevision`'s default): an older one ignores
+the restart's mark, and the pods stay.
 
 ### Addresses
 

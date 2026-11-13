@@ -113,24 +113,36 @@ func (r *RepoFiles) CommitFiles(ctx context.Context, parent, tree string, files 
 	return commit.SHA, nil
 }
 
-// History returns up to limit commits that changed path, newest first.
+// historyPage is the most commits GitHub returns in one page.
+const historyPage = 100
+
+// History returns up to limit commits that changed path, newest first,
+// reading as many pages as that takes.
 func (r *RepoFiles) History(ctx context.Context, path string, limit int) ([]CommitInfo, error) {
-	var out []struct {
-		SHA    string `json:"sha"`
-		Commit struct {
-			Message   string `json:"message"`
-			Committer struct {
-				Date time.Time `json:"date"`
-			} `json:"committer"`
-		} `json:"commit"`
-	}
-	q := url.Values{"path": {path}, "sha": {r.Branch}, "per_page": {strconv.Itoa(limit)}}
-	if err := r.Client.doJSON(ctx, http.MethodGet, repoPath(r.Owner, r.Name)+"/commits?"+q.Encode(), nil, &out); err != nil {
-		return nil, err
-	}
-	hist := make([]CommitInfo, 0, len(out))
-	for _, c := range out {
-		hist = append(hist, CommitInfo{SHA: c.SHA, Message: c.Commit.Message, Time: c.Commit.Committer.Date})
+	var hist []CommitInfo
+	for page := 1; len(hist) < limit; page++ {
+		var out []struct {
+			SHA    string `json:"sha"`
+			Commit struct {
+				Message   string `json:"message"`
+				Committer struct {
+					Date time.Time `json:"date"`
+				} `json:"committer"`
+			} `json:"commit"`
+		}
+		size := min(limit, historyPage)
+		q := url.Values{"path": {path}, "sha": {r.Branch}, "per_page": {strconv.Itoa(size)}, "page": {strconv.Itoa(page)}}
+		if err := r.Client.doJSON(ctx, http.MethodGet, repoPath(r.Owner, r.Name)+"/commits?"+q.Encode(), nil, &out); err != nil {
+			return nil, err
+		}
+		for _, c := range out {
+			if len(hist) < limit {
+				hist = append(hist, CommitInfo{SHA: c.SHA, Message: c.Commit.Message, Time: c.Commit.Committer.Date})
+			}
+		}
+		if len(out) < size {
+			break // the last page
+		}
 	}
 	return hist, nil
 }
