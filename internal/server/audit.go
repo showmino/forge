@@ -488,6 +488,14 @@ var auditActions = map[string]auditAction{
 		r := m.(*forgev1.DeleteDeploymentRequest)
 		return deploymentService(r.GetName()), r.GetName(), details("validate_only", flag(r.GetValidateOnly()))
 	}},
+	forgev1connect.DeployServiceRestartDeploymentProcedure: {"deploy.restart", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.RestartDeploymentRequest)
+		return deploymentService(r.GetName()), r.GetName(), details("validate_only", flag(r.GetValidateOnly()))
+	}},
+	forgev1connect.DeployServiceScaleDeploymentProcedure: {"deploy.scale", func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.ScaleDeploymentRequest)
+		return deploymentService(r.GetName()), r.GetName(), details("replicas", strconv.Itoa(int(r.GetReplicas())), "validate_only", flag(r.GetValidateOnly()))
+	}},
 	forgev1connect.DeployServicePromoteDeployProcedure: {"deploy.promote", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.PromoteDeployRequest)
 		s := serviceName(r.GetService())

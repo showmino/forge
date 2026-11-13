@@ -45,6 +45,8 @@ const (
 	ActDeployPromote           = "deploy.promote"
 	ActDeployRollback          = "deploy.rollback"
 	ActDeployRemove            = "deploy.remove"
+	ActDeployRestart           = "deploy.restart"
+	ActDeployScale             = "deploy.scale"
 	ActEnvironmentCreate       = "environment.create"
 	ActEnvironmentExtend       = "environment.extend"
 	ActEnvironmentDestroy      = "environment.destroy"
@@ -73,6 +75,8 @@ var actionRoles = map[string]role{
 	ActDeployPromote:           roleTeam,
 	ActDeployRollback:          roleTeam,
 	ActDeployRemove:            roleTeam,
+	ActDeployRestart:           roleTeam,
+	ActDeployScale:             roleTeam,
 	ActEnvironmentCreate:       roleTeam,
 	ActEnvironmentExtend:       roleTeam,
 	ActEnvironmentDestroy:      roleTeam,
@@ -101,7 +105,7 @@ func Actions() []string {
 // clients show them.
 var serviceActions = []string{
 	ActServiceUpdate, ActServiceUpdateTeam, ActServiceAddress, ActServiceDelete,
-	ActDeployStart, ActDeployPromote, ActDeployRollback, ActDeployRemove,
+	ActDeployStart, ActDeployPromote, ActDeployRollback, ActDeployRemove, ActDeployRestart, ActDeployScale,
 	ActEnvironmentCreate, ActEnvironmentExtend, ActEnvironmentDestroy,
 	ActOperationCancel, ActResourcePlan, ActResourceApply, ActResourceApplyProduction,
 }

@@ -85,7 +85,7 @@ func TestPromotionPolicy(t *testing.T) {
 	}
 	latest := hist.Msg.GetRecords()[0].GetDeployCommit()
 	f.setStaging(t, "Synced", "Healthy", "chart", "0000000000000000000000000000000000000000")
-	refused("not at the latest deploy", "staging does not run its latest deploy ("+shortSHA(latest)+") yet")
+	refused("not at the latest deploy", "staging does not run its latest deploy repo commit ("+shortSHA(latest)+") yet")
 
 	// A rollback is never gated.
 	f.setStaging(t, "Synced", "Degraded")

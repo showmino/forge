@@ -862,7 +862,9 @@ func TestApply(t *testing.T) {
 	if op.GetError() != nil || op.GetKind() != "resource.apply" || op.GetTarget() != "resources/payments/staging" {
 		t.Fatalf("operation: %v", op)
 	}
-	if steps := eventSteps(op); !strings.HasPrefix(steps, "namespace,launch") || !strings.HasSuffix(steps, "apply") {
+	// The fake runner runs in-process and may report "init" before Start
+	// returns and "launch" is emitted; a real runner pod takes seconds.
+	if steps := eventSteps(op); !strings.HasPrefix(steps, "namespace,") || !strings.Contains(steps, "launch") || !strings.HasSuffix(steps, "apply") {
 		t.Errorf("events: %s", steps)
 	}
 	if last := op.GetEvents()[len(op.GetEvents())-1]; last.GetMessage() != "Deploy to give the app DATABASE_URL." {

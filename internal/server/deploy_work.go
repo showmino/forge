@@ -237,6 +237,8 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 		v.Forge.Operation = p
 	}
 	v.Forge.Time = d.o.Now().UTC().Format(time.RFC3339)
+	// New pods come with every deploy: a restart's mark is not carried on.
+	v.RestartedAt = ""
 	// Worked out now, for this environment: never copied from an older
 	// deploy (a rollback) or from another environment (a promote).
 	db, err := d.database(ctx, svc, env)

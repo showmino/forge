@@ -129,7 +129,7 @@ func TestRuleModes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !slices.ContainsFunc(res.Deny, func(d string) bool { return strings.Contains(d, "does not run its latest deploy") }) {
+		if !slices.ContainsFunc(res.Deny, func(d string) bool { return strings.Contains(d, "does not run its latest deploy repo commit") }) {
 			t.Errorf("healthy-staging %s: deny %q warn %q, want the checked deploy refused", m, res.Deny, res.Warn)
 		}
 	}

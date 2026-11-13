@@ -47,6 +47,8 @@ spec:
   template:
     metadata:
       labels: {app: payments}
+      # Set by 'forge service restart': a new time rolls the pods.
+      annotations: {forge.dev/restarted-at: "2026-10-10T08:30:00Z"}
     spec:
       automountServiceAccountToken: false
       imagePullSecrets:

@@ -669,6 +669,22 @@ ID; it becomes the Secret `<name>-secret`. A change applies at
 the next deploy (staging) or promote (production). A forge-api older than
 these fields refuses a `forge.yaml` that has them.
 
+Between deploys, the service's team can restart and scale an environment:
+
+```sh
+forge service restart payments --env production          # new pods, one at a time; same version
+forge service scale payments --env production --replicas 4
+```
+
+Both commit to the deploy repo and wait until Argo CD has the pods healthy;
+neither is a deploy, so the history and a rollback skip them (the audit log
+has them). A scale (1 to 10 pods) lasts until the next deploy, promote or
+rollback, which runs `run.replicas` again: set it in `forge.yaml` to keep the
+count. An autoscaled environment and a service that runs a chart refuse a
+scale; a chart also refuses a restart. A restart needs the service chart of
+the same release (`deploys.chartRevision`'s default): an older one ignores
+the restart's mark, and the pods stay.
+
 ### Addresses
 
 Where a service is reached depends on whether the platform has public

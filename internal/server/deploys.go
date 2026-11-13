@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -253,7 +254,10 @@ type deployValues struct {
 	Autoscaling *deployAutoscaling  `yaml:"autoscaling,omitempty"`
 	// Chart is set for a service that runs a published chart (chart_source.go).
 	Chart *deployChart `yaml:"chart,omitempty"`
-	Forge deployRecord `yaml:"forge"`
+	// RestartedAt marks the pod template when 'forge service restart' asks
+	// for new pods (deploy_actions.go); a deploy leaves it out.
+	RestartedAt string       `yaml:"restartedAt,omitempty"`
+	Forge       deployRecord `yaml:"forge"`
 }
 
 // deployAutoscaling is the range KEDA keeps the Deployment in.
@@ -435,6 +439,13 @@ func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit s
 	}
 	if t, err := time.Parse(time.RFC3339, v.Forge.Time); err == nil {
 		dep.DeployTime = timestamppb.New(t)
+	}
+	if v.Chart == nil {
+		dep.Replicas = int32(min(v.Replicas, math.MaxInt32)) //nolint:gosec // bounded
+	}
+	dep.Autoscaled = v.Autoscaling != nil
+	if t, err := time.Parse(time.RFC3339, v.RestartedAt); err == nil {
+		dep.RestartTime = timestamppb.New(t)
 	}
 	if ops := d.o.Operations.List(dep.Name, false); len(ops) > 0 {
 		dep.Operation = ops[0].GetName()
@@ -656,19 +667,29 @@ func (d *Deploys) ListDeployHistory(ctx context.Context, req *connect.Request[fo
 	return connect.NewResponse(&forgev1.ListDeployHistoryResponse{Records: out}), nil
 }
 
-// history returns Forge's records of svc/env, newest first.
+// historyWindow is the most commits of a values file history reads to find
+// its records: restarts and scales are commits without one.
+const historyWindow = 1000
+
+// history returns up to limit of Forge's records of svc/env, newest first.
+// The values file's commits also hold restarts and scales, which are no
+// records; it reads further back until it has limit records.
 func (d *Deploys) history(ctx context.Context, svc, env string, limit int) ([]deployRecord, error) {
-	commits, err := d.o.Repo.History(ctx, valuesPath(svc, env), limit)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("deploy repo history: %w", err))
-	}
-	var out []deployRecord
-	for _, c := range commits {
-		if r, ok := parseRecord(c.SHA, c.Message, c.Time); ok {
-			out = append(out, r)
+	for n := limit; ; n = min(n*4, historyWindow) {
+		commits, err := d.o.Repo.History(ctx, valuesPath(svc, env), n)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("deploy repo history: %w", err))
+		}
+		var out []deployRecord
+		for _, c := range commits {
+			if r, ok := parseRecord(c.SHA, c.Message, c.Time); ok && len(out) < limit {
+				out = append(out, r)
+			}
+		}
+		if len(out) >= limit || len(commits) < n || n >= historyWindow {
+			return out, nil
 		}
 	}
-	return out, nil
 }
 
 func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forgev1.RollbackDeployRequest]) (*connect.Response[forgev1.RollbackDeployResponse], error) {

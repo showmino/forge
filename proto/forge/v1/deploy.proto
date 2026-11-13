@@ -40,6 +40,16 @@ service DeployService {
   // stays in the catalog, with its other environment and its previews.
   rpc DeleteDeployment(DeleteDeploymentRequest) returns (DeleteDeploymentResponse) {}
 
+  // RestartDeployment restarts a deployment's pods, one at a time, without a
+  // new deploy: Forge marks the pod template in the deploy repo and Argo CD
+  // rolls the pods. The next deploy leaves the mark out.
+  rpc RestartDeployment(RestartDeploymentRequest) returns (RestartDeploymentResponse) {}
+
+  // ScaleDeployment sets how many pods a deployment runs, until the next
+  // deploy, promote or rollback, which goes back to forge.yaml's
+  // run.replicas. An autoscaled deployment refuses it.
+  rpc ScaleDeployment(ScaleDeploymentRequest) returns (ScaleDeploymentResponse) {}
+
   // SetAddress changes where a service is reached, overriding forge.yaml's
   // run.host and run.domain. It applies at the next deploy of each
   // environment.
@@ -95,7 +105,8 @@ message Deployment {
   Health health = 9;
   // Argo CD's condition or health message, when there is one.
   string message = 10;
-  // The deploy repo commit that set this version.
+  // The deploy repo commit of what runs: the deploy's, or a later restart's
+  // or scale's.
   string deploy_commit = 11;
   string deployed_by = 12;
   google.protobuf.Timestamp deploy_time = 13;
@@ -108,6 +119,14 @@ message Deployment {
   // The environment's Application in Argo CD's web UI; "" when forge-api
   // is not given Argo CD's address (--argocd-url).
   string argo_url = 16;
+  // How many pods it runs (the least, when autoscaled); 0 for a service that
+  // runs a chart, whose chart decides.
+  int32 replicas = 17;
+  // KEDA sets the pod count, between replicas and run.autoscaling.max.
+  bool autoscaled = 18;
+  // When RestartDeployment last restarted its pods since the deploy; unset
+  // once a deploy, promote or rollback replaces them.
+  google.protobuf.Timestamp restart_time = 19;
 }
 
 // DeployRecord is one change of one environment.
@@ -290,4 +309,30 @@ message PublicDomain {
   string name = 1;
   // A service that names no domain is reached under this one.
   bool is_default = 2;
+}
+
+message RestartDeploymentRequest {
+  // "deployments/{service}/{env}".
+  string name = 1;
+  bool validate_only = 2;
+}
+
+message RestartDeploymentResponse {
+  Operation operation = 1;
+  Deployment deployment = 2;
+}
+
+message ScaleDeploymentRequest {
+  // "deployments/{service}/{env}".
+  string name = 1;
+  // 1 to 10, the most forge.yaml's run.replicas may ask for.
+  int32 replicas = 2;
+  bool validate_only = 3;
+}
+
+message ScaleDeploymentResponse {
+  Operation operation = 1;
+  Deployment deployment = 2;
+  // How many pods it ran when the call was made.
+  int32 previous_replicas = 3;
 }

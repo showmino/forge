@@ -26,7 +26,8 @@ Inside a repo with a forge.yaml, commands that take a service name default to
 the service the manifest describes.`
 	cmd.AddCommand(
 		newServiceListCmd(f), newServiceGetCmd(f), newServiceRegisterCmd(f), newServiceConnectCmd(f), newServiceUpdateCmd(f),
-		newServiceOwnersCmd(f), newServiceDepsCmd(f), newServiceChecksCmd(f), newServiceAddressCmd(f), newServiceOptionsCmd(f), newServiceDeleteCmd(f),
+		newServiceOwnersCmd(f), newServiceDepsCmd(f), newServiceChecksCmd(f), newServiceAddressCmd(f), newServiceOptionsCmd(f),
+		newServiceRestartCmd(f), newServiceScaleCmd(f), newServiceDeleteCmd(f),
 	)
 	return cmd
 }
