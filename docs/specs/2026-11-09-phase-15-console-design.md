@@ -239,10 +239,13 @@ too. `Deployment` gains `replicas`, `autoscaled` and `restart_time`.
 
 The owner tried the console in staging and production and does not need
 on-call or the golden path. Removed everywhere (forge 0.57.0, forge-web
-v0.1.48): a team's on-call (`Team.oncall`, `UpdateTeam`, `forge team
-update`, action `team.update`), the golden-path checks (`ListServiceChecks`,
-`forge service checks`, the service page's card, Catalog's "off the golden
-path" filter), and `Service.tracing` with `forge service update --tracing`.
+v0.1.48): a team's on-call (`forge team update`, the action `team.update`,
+the dashboard's on-call column, count and dialog), the golden-path checks
+(`forge service checks`, the service page's card, Catalog's "off the golden
+path" filter), and `forge service update --tracing`. The protos keep
+`UpdateTeam`, `ListServiceChecks`, `Team.oncall` and `Service.tracing`,
+deprecated, so the API stays compatible (`buf breaking`, the owner's
+choice): the two calls answer UNIMPLEMENTED and the fields stay empty.
 Adoption's "Where adoption is stuck" loses its on-call and golden-path
 items. forge.yaml's `service.tracing` is still read and ignored, so a
 forge.yaml that sets it keeps deploying. The table `team_settings`

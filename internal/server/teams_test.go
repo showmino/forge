@@ -130,3 +130,16 @@ func TestTeamMembers(t *testing.T) {
 		t.Errorf("risk %v", teams[1])
 	}
 }
+
+// The calls removed in 0.57.0 stay in the API and say so.
+func TestRemovedCalls(t *testing.T) {
+	t.Parallel()
+	_, err := (&teamService{}).UpdateTeam(adminCtx(), connect.NewRequest(&forgev1.UpdateTeamRequest{}))
+	if connect.CodeOf(err) != connect.CodeUnimplemented || !contains(err, "on-call rotation was removed") {
+		t.Errorf("UpdateTeam: %v", err)
+	}
+	_, err = (&catalogService{}).ListServiceChecks(adminCtx(), connect.NewRequest(&forgev1.ListServiceChecksRequest{}))
+	if connect.CodeOf(err) != connect.CodeUnimplemented || !contains(err, "golden-path checks were removed") {
+		t.Errorf("ListServiceChecks: %v", err)
+	}
+}

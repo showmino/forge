@@ -480,6 +480,10 @@ var auditActions = map[string]auditAction{
 		}
 		return "", "", nil
 	}},
+	// Removed in 0.57.0, answers UNIMPLEMENTED; a call is still recorded.
+	forgev1connect.TeamServiceUpdateTeamProcedure: {"team.update", func(m any) (string, string, map[string]string) {
+		return "", m.(*forgev1.UpdateTeamRequest).GetTeam().GetName(), nil
+	}},
 	forgev1connect.DeployServiceDeleteDeploymentProcedure: {"deploy.remove", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.DeleteDeploymentRequest)
 		return deploymentService(r.GetName()), r.GetName(), details("validate_only", flag(r.GetValidateOnly()))
@@ -541,6 +545,7 @@ var auditReads = []string{
 	forgev1connect.TemplateServiceListTemplatesProcedure,
 	forgev1connect.TemplateServiceGetTemplateProcedure,
 	forgev1connect.TeamServiceListTeamsProcedure,
+	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure, // removed in 0.57.0
 	forgev1connect.PolicyServiceListRulesProcedure,
 	forgev1connect.AuditServiceGetAdoptionProcedure,
 	forgev1connect.AuthServiceListTokensProcedure,
