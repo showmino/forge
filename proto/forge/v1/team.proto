@@ -12,9 +12,11 @@ service TeamService {
   rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-  // UpdateTeam changes what Forge keeps about a team: its on-call rotation.
-  // Admins only. The team itself (its name, its members) is GitHub's.
-  rpc UpdateTeam(UpdateTeamRequest) returns (UpdateTeamResponse);
+  // UpdateTeam set a team's on-call rotation. Removed in Forge 0.57.0: it
+  // answers UNIMPLEMENTED. Kept so that the API stays compatible.
+  rpc UpdateTeam(UpdateTeamRequest) returns (UpdateTeamResponse) {
+    option deprecated = true;
+  }
 }
 
 // Team is a team of the GitHub organization.
@@ -26,9 +28,8 @@ message Team {
   // The name as people wrote it, for example "Platform Engineering".
   string display_name = 2;
   string description = 3;
-  // The name of the team's on-call rotation, for example
-  // "billing-primary"; "" when it has none. Set with UpdateTeam.
-  string oncall = 4;
+  // Removed in Forge 0.57.0: always "".
+  string oncall = 4 [deprecated = true];
   // How many members the team has on GitHub; 0 when GitHub could not say.
   int32 member_count = 5;
 }

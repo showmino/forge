@@ -57,7 +57,6 @@ const (
 	ActClusterRead             = "cluster.read"
 	ActApprovalDecide          = "approval.decide"
 	ActApprovalException       = "approval.exception"
-	ActTeamUpdate              = "team.update"
 	ActRuleUpdate              = "rule.update"
 )
 
@@ -87,7 +86,6 @@ var actionRoles = map[string]role{
 	ActClusterRead:             roleAdmin,
 	ActApprovalDecide:          roleTeam,
 	ActApprovalException:       roleTeam,
-	ActTeamUpdate:              roleAdmin,
 	ActRuleUpdate:              roleAdmin,
 }
 

@@ -73,8 +73,8 @@ var credentialProcedures = []string{
 }
 
 // humanProcedures are decisions a person makes themselves: approving or
-// refusing a production run, the exceptions to that, the rules' modes and
-// who is on call. A script holding a token would remove the human gate they
+// refusing a production run, the exceptions to that, and the rules' modes.
+// A script holding a token would remove the human gate they
 // exist for, so no token may, whatever its scopes.
 var humanProcedures = []string{
 	forgev1connect.ApprovalServiceApproveApprovalProcedure,
@@ -82,7 +82,6 @@ var humanProcedures = []string{
 	forgev1connect.ApprovalServiceRequestExceptionProcedure,
 	forgev1connect.ApprovalServiceRevokeExceptionProcedure,
 	forgev1connect.PolicyServiceUpdateRuleProcedure,
-	forgev1connect.TeamServiceUpdateTeamProcedure,
 }
 
 // tokenID is a token's name as Forge makes it: tokens/tok_ and 16 hex digits.

@@ -19,12 +19,11 @@ service ServiceCatalogService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 
-  // ListServiceChecks says how far each service is on the golden path: CI,
-  // an SLO, tracing, a runbook and an on-call rotation. Worked out by Forge
-  // from the catalog, the audit log, the team's settings and the repo, and
-  // kept for a few minutes.
+  // ListServiceChecks listed the golden-path checks. Removed in Forge
+  // 0.57.0: it answers UNIMPLEMENTED. Kept so that the API stays compatible.
   rpc ListServiceChecks(ListServiceChecksRequest) returns (ListServiceChecksResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
+    option deprecated = true;
   }
 
   // RegisterService adds a service to the catalog.
@@ -102,9 +101,8 @@ message Service {
   // not set. From forge.yaml's service.slo at create; the owning team
   // changes it.
   string slo = 16;
-  // The service sends traces with OpenTelemetry. From forge.yaml's
-  // service.tracing at create; the owning team changes it.
-  bool tracing = 17;
+  // Removed in Forge 0.57.0 with the golden-path checks: always false.
+  bool tracing = 17 [deprecated = true];
 }
 
 // InfrastructureRepo is a repo of infrastructure code that its own GitHub

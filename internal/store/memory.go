@@ -33,9 +33,6 @@ type Memory struct {
 	approvals map[string]Approval // by ID
 	aprOrder  []string            // IDs, oldest first
 
-	teamMu sync.Mutex
-	teams  map[string]TeamSetting // by team slug
-
 	ruleMu sync.Mutex
 	rules  map[string]RuleMode // by rule id
 }

@@ -43,8 +43,10 @@ const (
 type TeamServiceClient interface {
 	// ListTeams returns every team of the organization, ordered by name.
 	ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error)
-	// UpdateTeam changes what Forge keeps about a team: its on-call rotation.
-	// Admins only. The team itself (its name, its members) is GitHub's.
+	// UpdateTeam set a team's on-call rotation. Removed in Forge 0.57.0: it
+	// answers UNIMPLEMENTED. Kept so that the API stays compatible.
+	//
+	// Deprecated: do not use.
 	UpdateTeam(context.Context, *connect.Request[v1.UpdateTeamRequest]) (*connect.Response[v1.UpdateTeamResponse], error)
 }
 
@@ -87,6 +89,8 @@ func (c *teamServiceClient) ListTeams(ctx context.Context, req *connect.Request[
 }
 
 // UpdateTeam calls forge.v1.TeamService.UpdateTeam.
+//
+// Deprecated: do not use.
 func (c *teamServiceClient) UpdateTeam(ctx context.Context, req *connect.Request[v1.UpdateTeamRequest]) (*connect.Response[v1.UpdateTeamResponse], error) {
 	return c.updateTeam.CallUnary(ctx, req)
 }
@@ -95,8 +99,10 @@ func (c *teamServiceClient) UpdateTeam(ctx context.Context, req *connect.Request
 type TeamServiceHandler interface {
 	// ListTeams returns every team of the organization, ordered by name.
 	ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error)
-	// UpdateTeam changes what Forge keeps about a team: its on-call rotation.
-	// Admins only. The team itself (its name, its members) is GitHub's.
+	// UpdateTeam set a team's on-call rotation. Removed in Forge 0.57.0: it
+	// answers UNIMPLEMENTED. Kept so that the API stays compatible.
+	//
+	// Deprecated: do not use.
 	UpdateTeam(context.Context, *connect.Request[v1.UpdateTeamRequest]) (*connect.Response[v1.UpdateTeamResponse], error)
 }
 

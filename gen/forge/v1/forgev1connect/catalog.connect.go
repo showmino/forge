@@ -62,10 +62,10 @@ type ServiceCatalogServiceClient interface {
 	ListServices(context.Context, *connect.Request[v1.ListServicesRequest]) (*connect.Response[v1.ListServicesResponse], error)
 	// GetService returns one service by name.
 	GetService(context.Context, *connect.Request[v1.GetServiceRequest]) (*connect.Response[v1.GetServiceResponse], error)
-	// ListServiceChecks says how far each service is on the golden path: CI,
-	// an SLO, tracing, a runbook and an on-call rotation. Worked out by Forge
-	// from the catalog, the audit log, the team's settings and the repo, and
-	// kept for a few minutes.
+	// ListServiceChecks listed the golden-path checks. Removed in Forge
+	// 0.57.0: it answers UNIMPLEMENTED. Kept so that the API stays compatible.
+	//
+	// Deprecated: do not use.
 	ListServiceChecks(context.Context, *connect.Request[v1.ListServiceChecksRequest]) (*connect.Response[v1.ListServiceChecksResponse], error)
 	// RegisterService adds a service to the catalog.
 	RegisterService(context.Context, *connect.Request[v1.RegisterServiceRequest]) (*connect.Response[v1.RegisterServiceResponse], error)
@@ -169,6 +169,8 @@ func (c *serviceCatalogServiceClient) GetService(ctx context.Context, req *conne
 }
 
 // ListServiceChecks calls forge.v1.ServiceCatalogService.ListServiceChecks.
+//
+// Deprecated: do not use.
 func (c *serviceCatalogServiceClient) ListServiceChecks(ctx context.Context, req *connect.Request[v1.ListServiceChecksRequest]) (*connect.Response[v1.ListServiceChecksResponse], error) {
 	return c.listServiceChecks.CallUnary(ctx, req)
 }
@@ -199,10 +201,10 @@ type ServiceCatalogServiceHandler interface {
 	ListServices(context.Context, *connect.Request[v1.ListServicesRequest]) (*connect.Response[v1.ListServicesResponse], error)
 	// GetService returns one service by name.
 	GetService(context.Context, *connect.Request[v1.GetServiceRequest]) (*connect.Response[v1.GetServiceResponse], error)
-	// ListServiceChecks says how far each service is on the golden path: CI,
-	// an SLO, tracing, a runbook and an on-call rotation. Worked out by Forge
-	// from the catalog, the audit log, the team's settings and the repo, and
-	// kept for a few minutes.
+	// ListServiceChecks listed the golden-path checks. Removed in Forge
+	// 0.57.0: it answers UNIMPLEMENTED. Kept so that the API stays compatible.
+	//
+	// Deprecated: do not use.
 	ListServiceChecks(context.Context, *connect.Request[v1.ListServiceChecksRequest]) (*connect.Response[v1.ListServiceChecksResponse], error)
 	// RegisterService adds a service to the catalog.
 	RegisterService(context.Context, *connect.Request[v1.RegisterServiceRequest]) (*connect.Response[v1.RegisterServiceResponse], error)

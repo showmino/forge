@@ -386,3 +386,13 @@ resources:
 		}
 	}
 }
+
+// service.tracing fed the golden-path checks, which are gone: a forge.yaml
+// that still sets it must keep parsing, or every deploy of it would fail.
+func TestTracingIsStillRead(t *testing.T) {
+	t.Parallel()
+	m, err := Parse([]byte("apiVersion: forge.dev/v1\nservice:\n  name: payments\n  team: billing\n  tracing: true\n"))
+	if err != nil || m.Service.Name != "payments" {
+		t.Fatalf("Parse: %v %v", m, err)
+	}
+}
