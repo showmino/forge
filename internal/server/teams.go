@@ -3,22 +3,17 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"connectrpc.com/connect"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/protobuf/proto"
 
 	forgev1 "github.com/showmino/forge/gen/forge/v1"
 	"github.com/showmino/forge/internal/github"
-	"github.com/showmino/forge/internal/store"
 )
 
 const teamPrefix = "teams/"
@@ -38,14 +33,13 @@ type TeamCounter interface {
 	TeamMemberCount(ctx context.Context, org, slug string) (int, error)
 }
 
-// teamService serves TeamService: the teams from GitHub, and what Forge
-// keeps about them (their on-call rotation) from settings.
+// teamService serves TeamService: the teams from GitHub, with how many
+// members each has.
 type teamService struct {
-	src      TeamSource
-	settings store.TeamStore
-	org      string
-	log      *slog.Logger
-	now      func() time.Time
+	src TeamSource
+	org string
+	log *slog.Logger
+	now func() time.Time
 
 	mu      sync.Mutex
 	teams   []*forgev1.Team
@@ -62,7 +56,7 @@ func (s *teamService) ListTeams(ctx context.Context, _ *connect.Request[forgev1.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.teams != nil && s.now().Sub(s.fetched) < teamsFresh {
-		return s.withSettings(ctx, s.teams)
+		return connect.NewResponse(&forgev1.ListTeamsResponse{Teams: s.teams}), nil
 	}
 	got, err := s.src.ListTeams(ctx, s.org)
 	if err != nil {
@@ -81,7 +75,7 @@ func (s *teamService) ListTeams(ctx context.Context, _ *connect.Request[forgev1.
 	}
 	s.countMembers(ctx, teams)
 	s.teams, s.fetched = teams, s.now()
-	return s.withSettings(ctx, teams)
+	return connect.NewResponse(&forgev1.ListTeamsResponse{Teams: teams}), nil
 }
 
 // countMembers asks GitHub how many members each team has, a few teams at
@@ -106,66 +100,4 @@ func (s *teamService) countMembers(ctx context.Context, teams []*forgev1.Team) {
 		})
 	}
 	_ = g.Wait()
-}
-
-// withSettings answers with the teams and what Forge keeps about them. The
-// settings are read on every call: an admin's change shows at once.
-func (s *teamService) withSettings(ctx context.Context, teams []*forgev1.Team) (*connect.Response[forgev1.ListTeamsResponse], error) {
-	if s.settings == nil {
-		return connect.NewResponse(&forgev1.ListTeamsResponse{Teams: teams}), nil
-	}
-	set, err := s.settings.TeamSettings(ctx)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the teams' settings: %w", err))
-	}
-	out := make([]*forgev1.Team, 0, len(teams))
-	for _, t := range teams {
-		c := proto.Clone(t).(*forgev1.Team)
-		c.Oncall = set[strings.TrimPrefix(t.GetName(), teamPrefix)].Oncall
-		out = append(out, c)
-	}
-	return connect.NewResponse(&forgev1.ListTeamsResponse{Teams: out}), nil
-}
-
-// oncallName is a rotation's name as people write it in a paging tool:
-// letters, digits, '.', '_', '/', '-', at most 100.
-var oncallName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`)
-
-// UpdateTeam sets a team's on-call rotation. Admins only: a team's members
-// are GitHub's, and who is paged is the platform's to keep straight.
-func (s *teamService) UpdateTeam(ctx context.Context, req *connect.Request[forgev1.UpdateTeamRequest]) (*connect.Response[forgev1.UpdateTeamResponse], error) {
-	in := req.Msg.GetTeam()
-	slug := strings.TrimPrefix(in.GetName(), teamPrefix)
-	if !strings.HasPrefix(in.GetName(), teamPrefix) || slug == "" {
-		return nil, invalid(fmt.Sprintf("team.name %q must look like teams/{team}", in.GetName()))
-	}
-	if err := authorizeTeam(ctx, ActTeamUpdate, ""); err != nil {
-		return nil, err
-	}
-	if paths := req.Msg.GetUpdateMask().GetPaths(); !slices.Equal(paths, []string{"oncall"}) {
-		return nil, invalid(fmt.Sprintf("update_mask must be [oncall], got %q", paths))
-	}
-	if in.GetOncall() != "" && !oncallName.MatchString(in.GetOncall()) {
-		return nil, invalid(fmt.Sprintf("oncall %q must be a rotation's name: letters, digits, '.', '_', '/' and '-', at most 100", in.GetOncall()))
-	}
-	if s.settings == nil {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("this Forge keeps no team settings"))
-	}
-	list, err := s.ListTeams(ctx, connect.NewRequest(&forgev1.ListTeamsRequest{}))
-	if err != nil {
-		return nil, err
-	}
-	i := slices.IndexFunc(list.Msg.GetTeams(), func(t *forgev1.Team) bool { return t.GetName() == teamPrefix+slug })
-	if i < 0 {
-		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("teams/%s is not a team of %s on GitHub", slug, s.org))
-	}
-	out := proto.Clone(list.Msg.GetTeams()[i]).(*forgev1.Team)
-	out.Oncall = in.GetOncall()
-	if req.Msg.GetValidateOnly() {
-		return connect.NewResponse(&forgev1.UpdateTeamResponse{Team: out}), nil
-	}
-	if err := s.settings.SetTeamOncall(ctx, slug, in.GetOncall(), actorOf(ctx), s.now()); err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("save the team's on-call rotation: %w", err))
-	}
-	return connect.NewResponse(&forgev1.UpdateTeamResponse{Team: out}), nil
 }

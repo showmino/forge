@@ -111,7 +111,6 @@ func (h *harness) startAPI(authn server.Authenticator) {
 		Clusters:      h.clusters,
 		Approvals:     h.approvals,
 		Audit:         h.audit,
-		TeamSettings:  h.audit,
 		RuleModes:     h.audit,
 		Sessions:      h.sessions,
 	})

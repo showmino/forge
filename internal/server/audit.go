@@ -480,10 +480,6 @@ var auditActions = map[string]auditAction{
 		}
 		return "", "", nil
 	}},
-	forgev1connect.TeamServiceUpdateTeamProcedure: {"team.update", func(m any) (string, string, map[string]string) {
-		r := m.(*forgev1.UpdateTeamRequest)
-		return "", r.GetTeam().GetName(), details("oncall", r.GetTeam().GetOncall(), "validate_only", flag(r.GetValidateOnly()))
-	}},
 	forgev1connect.DeployServiceDeleteDeploymentProcedure: {"deploy.remove", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.DeleteDeploymentRequest)
 		return deploymentService(r.GetName()), r.GetName(), details("validate_only", flag(r.GetValidateOnly()))
@@ -545,7 +541,6 @@ var auditReads = []string{
 	forgev1connect.TemplateServiceListTemplatesProcedure,
 	forgev1connect.TemplateServiceGetTemplateProcedure,
 	forgev1connect.TeamServiceListTeamsProcedure,
-	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure,
 	forgev1connect.PolicyServiceListRulesProcedure,
 	forgev1connect.AuditServiceGetAdoptionProcedure,
 	forgev1connect.AuthServiceListTokensProcedure,

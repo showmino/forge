@@ -42,7 +42,6 @@ type Backend interface {
 	ResourceStore
 	SessionStore
 	ApprovalStore
-	TeamStore
 	RuleStore
 }
 

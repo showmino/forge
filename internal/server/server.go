@@ -45,9 +45,6 @@ type Options struct {
 	// Teams lists the organization's teams for TeamService; nil answers
 	// FAILED_PRECONDITION.
 	Teams TeamSource
-	// TeamSettings keeps what Forge knows about a team (its on-call
-	// rotation); nil leaves UpdateTeam unavailable.
-	TeamSettings store.TeamStore
 	// RuleModes keeps the modes admins set for the switchable policy
 	// rules; nil: every rule has its default, and UpdateRule is unavailable.
 	RuleModes store.RuleStore
@@ -161,7 +158,7 @@ func New(o Options) (http.Handler, error) {
 	if oidc, ok := o.Repos.(OIDCSubjects); ok {
 		create.oidc = oidc
 	}
-	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create, checks: newChecker(o.Catalog, o.Audit, o.TeamSettings, o.Docs, o.GitHubOrg, o.Logger)}, opts))
+	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
 	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger, infra: o.Infrastructure}, opts))
 	if o.RuleModes != nil {
@@ -175,7 +172,7 @@ func New(o Options) (http.Handler, error) {
 		useRuleModes(o.RuleModes, o.Logger, engines...)
 	}
 	mux.Handle(forgev1connect.NewPolicyServiceHandler(&policyService{st: o.RuleModes, now: time.Now}, opts))
-	mux.Handle(forgev1connect.NewTeamServiceHandler(&teamService{src: o.Teams, settings: o.TeamSettings, org: o.GitHubOrg, log: o.Logger, now: time.Now}, opts))
+	mux.Handle(forgev1connect.NewTeamServiceHandler(&teamService{src: o.Teams, org: o.GitHubOrg, log: o.Logger, now: time.Now}, opts))
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))

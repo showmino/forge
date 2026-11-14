@@ -258,7 +258,8 @@ type Service struct {
 	Tier int `yaml:"tier,omitempty"`
 	// SLO is the availability target, for example "99.9%".
 	SLO string `yaml:"slo,omitempty"`
-	// Tracing says the service sends traces with OpenTelemetry.
+	// Tracing fed the golden-path checks, removed 2026-11-14. It is still
+	// read, and ignored, so that a forge.yaml that sets it keeps deploying.
 	Tracing bool `yaml:"tracing,omitempty"`
 }
 

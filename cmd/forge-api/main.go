@@ -312,7 +312,6 @@ func run() error {
 		CLIRepo:          *cliRepo,
 		Templates:        templates,
 		Teams:            teamSource(app),
-		TeamSettings:     st,
 		RuleModes:        st,
 		Docs:             docsSource(app),
 		Sessions:         sessions,

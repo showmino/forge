@@ -201,7 +201,7 @@ func TestTokensMakeNoHumanDecisions(t *testing.T) {
 	for _, proc := range []string{
 		forgev1connect.ApprovalServiceApproveApprovalProcedure, forgev1connect.ApprovalServiceRejectApprovalProcedure,
 		forgev1connect.ApprovalServiceRequestExceptionProcedure, forgev1connect.ApprovalServiceRevokeExceptionProcedure,
-		forgev1connect.PolicyServiceUpdateRuleProcedure, forgev1connect.TeamServiceUpdateTeamProcedure,
+		forgev1connect.PolicyServiceUpdateRuleProcedure,
 	} {
 		if tokenMayCall(all, proc) {
 			t.Errorf("a settings token may call %s", proc)

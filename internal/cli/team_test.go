@@ -42,66 +42,6 @@ func TestTeamListWithoutGitHub(t *testing.T) {
 	}
 }
 
-// An admin sets a team's on-call rotation; the list shows it.
-func TestTeamUpdate(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t)
-	h.teams = fakeTeams{{Slug: "billing", Name: "Billing"}}
-	h.startAPI(h.authn)
-
-	if r := h.ok("team", "update", "billing", "--oncall", "billing-primary", "--dry-run"); r.out != "teams/billing is on call as billing-primary (dry run, nothing changed)\n" {
-		t.Errorf("dry run: %q", r.out)
-	}
-	if r := h.ok("team", "list"); strings.Contains(r.out, "billing-primary") {
-		t.Errorf("a dry run changed the list: %q", r.out)
-	}
-	if r := h.ok("team", "update", "teams/billing", "--oncall", "billing-primary"); r.out != "teams/billing is on call as billing-primary\n" {
-		t.Errorf("update: %q", r.out)
-	}
-	if r := h.ok("team", "list"); !strings.Contains(r.out, "billing-primary") {
-		t.Errorf("list: %q", r.out)
-	}
-	if r := h.fails(int(exitcode.Usage), "team", "update", "billing"); !strings.Contains(r.err, "nothing to update") {
-		t.Errorf("no flag: %q", r.err)
-	}
-	if r := h.fails(int(exitcode.NotFound), "team", "update", "nobody", "--oncall", "x"); !strings.Contains(r.err, "not a team") {
-		t.Errorf("unknown team: %q", r.err)
-	}
-	if r := h.ok("team", "update", "billing", "--oncall", ""); r.out != "teams/billing has no on-call rotation\n" {
-		t.Errorf("clear: %q", r.out)
-	}
-}
-
-// The golden-path checks of a service: what passes, what is missing, and
-// the detail of one service.
-func TestServiceChecks(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t)
-	h.teams = fakeTeams{{Slug: "billing", Name: "Billing"}}
-	h.startAPI(h.authn)
-	h.ok("service", "register", "payments", "--team", "billing")
-
-	// No repo: CI and the runbook do not apply.
-	if r := h.ok("service", "checks"); !strings.Contains(r.out, "0/3") || !strings.Contains(r.out, "slo, tracing, oncall") {
-		t.Errorf("checks:\n%s", r.out)
-	}
-	h.ok("service", "update", "payments", "--slo", "99.9%", "--tracing")
-	h.ok("team", "update", "billing", "--oncall", "billing-primary")
-	if r := h.ok("service", "checks", "--missing"); !strings.Contains(r.out, "Every service passes") && r.out != "" {
-		t.Errorf("--missing after everything is set:\n%s", r.out)
-	}
-	r := h.ok("service", "checks", "payments")
-	for _, want := range []string{"ci", "n/a", "slo", "passed", "99.9%", "billing-primary"} {
-		if !strings.Contains(r.out, want) {
-			t.Errorf("one service lacks %q:\n%s", want, r.out)
-		}
-	}
-	if r := h.ok("service", "get", "payments"); !strings.Contains(r.out, "tracing") || !strings.Contains(r.out, "yes") {
-		t.Errorf("get:\n%s", r.out)
-	}
-	h.fails(int(exitcode.NotFound), "service", "checks", "nope")
-}
-
 // An admin sets a rule's mode; a rule that guards Forge cannot change.
 func TestPolicy(t *testing.T) {
 	t.Parallel()

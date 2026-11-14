@@ -40,9 +40,9 @@ The v1 CLI has twelve command groups; each maps one-to-one to an API resource so
 | --- | --- | --- | --- |
 | `auth` | `login`, `logout`, `status`, `token` | `forge auth login --sso` | 1 |
 | `context` | `list`, `use`, `current`, `set`, `delete` | `forge context use staging-eu` | 1 |
-| `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `checks`, `delete` | `forge service get payments -o yaml` | 1, 15 |
+| `service` | `list`, `get`, `register`, `update`, `owners`, `deps`, `restart`, `scale`, `delete` | `forge service get payments -o yaml` | 1, 15 |
 | `template` | `list`, `get`, `lint` | `forge template list --tag go` | 2 |
-| `team` | `list`, `update` | `forge team update billing --oncall billing-primary` | 6, 15 |
+| `team` | `list` | `forge team list` | 6 |
 | `domain` | `list` | `forge domain list` | 6 |
 | `create` (shortcut) | scaffold from a template | `forge create payments --template go-grpc --team billing` | 2 |
 | `env` | `list`, `create`, `get`, `destroy`, `extend` | `forge env create pr-142 --service payments --ttl 48h` | 3 |
