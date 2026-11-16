@@ -318,9 +318,21 @@ production has nothing to go back to and stays. A promotion that succeeds
 records a **release**: a number, and for every part in production its
 version, commit and deploy commit (`forge application releases shop`; the
 table `application_releases`). `forge application rollback shop [--to <n>]`
-returns every part to the release before the newest, or to release `n`, and
-records that as a new release; a part that joined the application since is
-left alone. If a part fails there, the rollback stops and is run again.
+returns every part to release `n` or, without a number, to the newest
+release that is not what production runs: the one before the newest, or the
+newest itself when production has moved since it was recorded. It records
+that as a new release; a part that joined the application since is left
+alone. If a part fails there, the rollback stops and is run again.
+
+While either runs, production of every part of the application is locked,
+also of the parts it does not change, so the release it records is what
+production runs. Both check, once they hold the locks, that no part changed
+since they were planned, and do nothing if one did. What they cannot undo:
+a version tag cut for a part stays in its repo after the part is put back
+(the next promotion of that commit reuses it), and an operation lives in
+forge-api's memory, so a restart of forge-api in the middle leaves the parts
+as far as it got, with no put back and no release; `forge application get`
+shows it, and the promotion or a rollback is run again.
 Staging stays per part, and a single part can still be promoted or rolled
 back on its own; the releases then do not say so until the next one. Both
 calls need what a part's promote and rollback need, membership of the

@@ -80,27 +80,30 @@ func TestApplicationPromoteAndRollback(t *testing.T) {
 		t.Fatalf("a rollback with one release: %v", err)
 	}
 
+	// A restart is a commit of the values that is no deploy: what the part
+	// ran before the next promotion is that commit.
+	restart, err := f.client.RestartDeployment(context.Background(), as("writer", &forgev1.RestartDeploymentRequest{Name: "deployments/payments/production"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op := wait(t, f.ops, restart.Msg.GetOperation().GetName()); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	restarted := f.values(t, "production").RestartedAt
+	if restarted == "" {
+		t.Fatal("the restart left no mark")
+	}
+
 	// A part that fails in production is put back to what it ran.
 	if op := f.deployRef(t, "staging", "release"); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
-	// The fake Argo CD reports by application, not by version: the new
-	// version is unhealthy until the promotion gives up on it.
-	f.argo.SetUnhealthy("payments-production", "the new version crashes")
+	// The new version is unhealthy; what ran before it is healthy again.
+	f.argo.SetUnhealthyOnce("payments-production", "the new version crashes")
 	started, err := s.PromoteApplication(ctx, connect.NewRequest(&forgev1.PromoteApplicationRequest{Name: "applications/shop"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for gaveUp := false; !gaveUp; time.Sleep(5 * time.Millisecond) {
-		cur, _ := f.ops.Get(started.Msg.GetOperation().GetName())
-		for _, e := range cur.GetEvents() {
-			gaveUp = gaveUp || e.GetStep() == "failed"
-		}
-		if cur.GetDone() {
-			break
-		}
-	}
-	f.argo.SetUnhealthy("payments-production", "")
 	op := wait(t, f.ops, started.Msg.GetOperation().GetName())
 	if op.GetError() == nil || op.GetError().GetCode() != "promote_failed" || !strings.Contains(op.GetError().GetMessage(), "put back to what they ran: payments") {
 		t.Fatalf("a failed promotion: %v", op.GetError())
@@ -110,6 +113,22 @@ func TestApplicationPromoteAndRollback(t *testing.T) {
 	}
 	if len(releases()) != 1 {
 		t.Errorf("a failed promotion recorded a release")
+	}
+	if strings.Contains(op.GetError().GetMessage(), "NOT put back") {
+		t.Errorf("the part was not put back: %s", op.GetError().GetMessage())
+	}
+	// The locks are free again, and a reader may do none of this.
+	reader := context.WithValue(context.Background(), principalKey{}, &Principal{Subject: "bo", Permissions: []string{PermServicesRead}})
+	if _, err := s.PromoteApplication(reader, connect.NewRequest(&forgev1.PromoteApplicationRequest{Name: "applications/shop", ValidateOnly: true})); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("a reader promoting: %v", err)
+	}
+	if _, err := s.RollbackApplication(reader, connect.NewRequest(&forgev1.RollbackApplicationRequest{Name: "applications/shop", ValidateOnly: true})); connect.CodeOf(err) != connect.CodePermissionDenied {
+		t.Errorf("a reader rolling back: %v", err)
+	}
+	// Without a store of releases nothing can be rolled back.
+	bare := &applicationService{catalog: f.catalog, deploys: f.deploys, now: time.Now}
+	if _, err := bare.RollbackApplication(ctx, connect.NewRequest(&forgev1.RollbackApplicationRequest{Name: "applications/shop"})); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("a rollback without releases: %v", err)
 	}
 
 	// Release 2: the other commit.

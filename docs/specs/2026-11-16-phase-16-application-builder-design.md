@@ -211,6 +211,18 @@ address to look at.
 - When a part fails, the failed part is put back too, not only the parts
   before it. A part that was new in production stays.
 - A rollback that fails part way stops; running it again finishes it.
+- Without a number, a rollback goes to the newest release that is not what
+  production runs, which is the one before the newest unless production
+  moved since.
+- The operation locks production of every part, and checks under the locks
+  that nothing changed since it was planned.
+
+After the independent review: a put back and a rollback restore the values
+at the exact deploy repo commit (a restart's or a scale's too, and one
+older than the 50 deploys a single rollback searches); a chart part whose
+values changed counts as changed; the audit event names the parts and
+keeps each part's policy outcome. Not done: `request_id` on the two calls
+(the locks refuse a second call), and a way to cancel a put back.
 
 ## E. The builder page (forge-web)
 

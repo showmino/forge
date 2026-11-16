@@ -141,6 +141,20 @@ func noteAuditDetail(ctx context.Context, key, value string) {
 	}
 }
 
+// takeAuditDetail removes a detail of the call's audit event and returns
+// it; "" when there is none.
+func takeAuditDetail(ctx context.Context, key string) string {
+	r := auditFrom(ctx)
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	v := r.ev.Details[key]
+	delete(r.ev.Details, key)
+	return v
+}
+
 // noteAuditTarget replaces the call's target, when the request did not name it.
 func noteAuditTarget(ctx context.Context, target string) {
 	if r := auditFrom(ctx); r != nil && target != "" {

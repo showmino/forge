@@ -788,9 +788,22 @@ func (d *Deploys) planRollback(ctx context.Context, svc, env, to string) (mutati
 			return mutation{}, connect.NewError(connect.CodeNotFound, fmt.Errorf("no deploy %s in the last 50 of %s%s/%s", to, deployNamePrefix, svc, env))
 		}
 	}
-	data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), target.DeployCommit)
+	return d.planRestore(ctx, svc, env, target.DeployCommit)
+}
+
+// planRestore checks a return of svc in env to the values it had at the
+// deploy repo commit commit, and returns what it would apply. The commit
+// need not be a deploy's own: a restart's or a scale's is restored too.
+func (d *Deploys) planRestore(ctx context.Context, svc, env, commit string) (mutation, error) {
+	if err := authorize(ctx, ActDeployRollback, servicePrefix+svc); err != nil {
+		return mutation{}, err
+	}
+	if err := d.requireEnv(ctx, svc, env); err != nil {
+		return mutation{}, err
+	}
+	data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), commit)
 	if err != nil {
-		return mutation{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read %s: %w", shortSHA(target.DeployCommit), err))
+		return mutation{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read %s: %w", shortSHA(commit), err))
 	}
 	v, err := parseValues(data)
 	if err != nil {
