@@ -135,6 +135,15 @@ var (
 	reservedEnv = []string{"PORT", "DATABASE_URL"}
 )
 
+// MaxLinks is how many parts run.links may name.
+const MaxLinks = 16
+
+// LinkEnv is the environment variable that holds the address of the linked
+// part: "shop-api" gives SHOP_API_URL.
+func LinkEnv(part string) string {
+	return strings.ToUpper(strings.ReplaceAll(part, "-", "_")) + "_URL"
+}
+
 // ValidGroup reports whether s is a secret group name run.secrets can use.
 func ValidGroup(s string) bool { return vaultName.MatchString(s) }
 
@@ -176,6 +185,17 @@ func (r *Run) validateOptions() error {
 	}
 	for _, k := range sortedKeys(r.Env) {
 		if err := use(k, "run.env"); err != nil {
+			return err
+		}
+	}
+	if len(r.Links) > MaxLinks {
+		return fmt.Errorf("run.links has %d parts; at most %d", len(r.Links), MaxLinks)
+	}
+	for i, l := range r.Links {
+		if !ValidID(l) {
+			return fmt.Errorf("run.links[%d] %q must be the name of a part of the application, such as shop-api", i, l)
+		}
+		if err := use(LinkEnv(l), "run.links"); err != nil {
 			return err
 		}
 	}

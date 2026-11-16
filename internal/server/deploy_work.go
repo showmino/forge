@@ -124,6 +124,12 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	v.setAddress(addr)
 	v.setOptions(src.run)
 	v.forEnv(env)
+	if src.chart != nil && len(v.Forge.Links) > 0 {
+		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s runs a chart, which Forge gives no variables: remove run.links (other parts can still link to it)", servicePrefix, src.serviceID))
+	}
+	if v.Links, err = d.links(ctx, src.serviceID, v.Forge.Links, env); err != nil {
+		return nil, err
+	}
 	if src.chart != nil {
 		// The chart decides how it runs; Forge's chart gives it its address.
 		v.Health, v.Replicas, v.Chart = "", 0, deployChartFor(src.chart, env)

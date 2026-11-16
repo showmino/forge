@@ -133,6 +133,13 @@ and the builder with E.
 - `GetApplication` reports the links, and a link whose target is not
   running in that environment.
 
+**As built (2026-11-16):** `run.links` and `<PART>_URL` are built, for
+deploys and promotes. Two things differ from the above. A part that runs a
+chart cannot have links of its own, because Forge gives a chart no
+variables; it can be linked to. Previews get no links, as they get no
+`run.env` either. The shared database is not built yet: how the owning
+part's credentials reach another namespace is the owner's to decide.
+
 ## C. Workers
 
 - `forge.yaml`: `run.worker: true`. The service chart then renders no

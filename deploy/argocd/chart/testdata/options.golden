@@ -79,6 +79,8 @@ spec:
                 secretKeyRef: {name: main-app, key: uri}
             - {name: FEATURE_X, value: "true"}
             - {name: LOG_LEVEL, value: "info"}
+            # The address of a part of the same application (run.links).
+            - {name: LEDGER_URL, value: "http://ledger.ledger-production.svc"}
             - name: STRIPE_HOOK
               valueFrom:
                 secretKeyRef: {name: stripe-secret, key: "webhook-secret"}
@@ -158,6 +160,8 @@ spec:
                     secretKeyRef: {name: main-app, key: uri}
                 - {name: FEATURE_X, value: "true"}
                 - {name: LOG_LEVEL, value: "info"}
+                # The address of a part of the same application (run.links).
+                - {name: LEDGER_URL, value: "http://ledger.ledger-production.svc"}
                 - name: STRIPE_HOOK
                   valueFrom:
                     secretKeyRef: {name: stripe-secret, key: "webhook-secret"}

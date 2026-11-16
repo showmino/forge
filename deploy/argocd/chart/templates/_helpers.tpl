@@ -14,6 +14,10 @@ dependencies' addresses for the environment it runs in. */}}
 {{- range $k, $v := .Values.vars }}
 - {name: {{ $k }}, value: {{ $v | quote }}}
 {{- end }}
+{{- range $k, $v := .Values.links }}
+# The address of a part of the same application (run.links).
+- {name: {{ $k }}, value: {{ $v | quote }}}
+{{- end }}
 {{- range .Values.secrets }}
 {{- $secret := printf "%s-secret" .name }}
 {{- range $k, $field := .env }}

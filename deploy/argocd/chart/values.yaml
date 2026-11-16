@@ -27,6 +27,9 @@ dns: null
 resources: null
 # run.env: plain environment variables, NAME: value.
 vars: {}
+# run.links: the addresses of other parts of the service's application,
+# by the variable each is given as. {SHOP_API_URL: http://shop-api.shop-api-staging.svc}
+links: {}
 # 1Password items (or, with another secretBackend, that backend's own
 # shape): [{name: stripe, item: vaults/Apps/items/stripe, env: {STRIPE_KEY: credential}}]
 secrets: []

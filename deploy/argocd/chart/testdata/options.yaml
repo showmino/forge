@@ -13,6 +13,8 @@ resources:
 vars:
   LOG_LEVEL: info
   FEATURE_X: "true"
+links:
+  LEDGER_URL: http://ledger.ledger-production.svc
 secrets:
   - name: stripe
     item: vaults/Apps/items/stripe

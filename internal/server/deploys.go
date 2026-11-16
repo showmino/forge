@@ -223,6 +223,9 @@ type deployRecord struct {
 	// so that a promotion gives production what the service asked for.
 	Replicas     int `yaml:"replicas,omitempty"`
 	AutoscaleMax int `yaml:"autoscaleMax,omitempty"`
+	// Links is run.links, kept so that a promotion links the service to the
+	// same parts in the next environment.
+	Links []string `yaml:"links,omitempty"`
 	// Image and DeployCommit come from the commit, not the values file.
 	Image        string `yaml:"-"`
 	DeployCommit string `yaml:"-"`
@@ -246,12 +249,15 @@ type deployValues struct {
 	// Database is set when the service has a database in this environment.
 	Database *deployDatabase `yaml:"database,omitempty"`
 	// forge.yaml's run options; Autoscaling only in production.
-	Resources   *manifest.Resources `yaml:"resources,omitempty"`
-	Vars        map[string]string   `yaml:"vars,omitempty"`
-	Secrets     []manifest.Secret   `yaml:"secrets,omitempty"`
-	Jobs        []manifest.Job      `yaml:"jobs,omitempty"`
-	Writable    []string            `yaml:"writable,omitempty"`
-	Autoscaling *deployAutoscaling  `yaml:"autoscaling,omitempty"`
+	Resources *manifest.Resources `yaml:"resources,omitempty"`
+	Vars      map[string]string   `yaml:"vars,omitempty"`
+	// Links are the addresses of the parts run.links names, in this
+	// environment, by the variable each is given as (links.go).
+	Links       map[string]string  `yaml:"links,omitempty"`
+	Secrets     []manifest.Secret  `yaml:"secrets,omitempty"`
+	Jobs        []manifest.Job     `yaml:"jobs,omitempty"`
+	Writable    []string           `yaml:"writable,omitempty"`
+	Autoscaling *deployAutoscaling `yaml:"autoscaling,omitempty"`
 	// Chart is set for a service that runs a published chart (chart_source.go).
 	Chart *deployChart `yaml:"chart,omitempty"`
 	// RestartedAt marks the pod template when 'forge service restart' asks
@@ -274,6 +280,7 @@ func (v *deployValues) setOptions(r *manifest.Run) {
 	}
 	v.Resources, v.Vars, v.Secrets, v.Jobs, v.Writable = r.Resources, r.Env, r.Secrets, r.Jobs, r.Writable
 	v.Forge.Replicas = r.Replicas
+	v.Forge.Links = r.Links
 	if r.Autoscaling != nil {
 		v.Forge.AutoscaleMax = r.Autoscaling.Max
 	}
@@ -427,6 +434,7 @@ func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit s
 		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: hostURL(v.Host, v.isPublic()),
 		Sync: forgev1.Deployment_SYNC_STATUS_UNKNOWN, Health: forgev1.Deployment_HEALTH_UNKNOWN,
 		Message: st.Message, DeployCommit: deployCommit, DeployedBy: v.Forge.Actor, Version: v.Forge.Version,
+		Links: linkNames(v.Forge.Links),
 	}
 	if s, ok := syncStates[st.Sync]; ok {
 		dep.Sync = s
@@ -828,6 +836,10 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	v.Env = to
 	v.setAddress(addr)
 	v.forEnv(to)
+	// The same parts, at their addresses in the next environment.
+	if v.Links, err = d.links(ctx, svc, v.Forge.Links, to); err != nil {
+		return nil, err
+	}
 	if v.Chart != nil {
 		// The chart and its shared values go as staging ran them; the next
 		// environment's own values come from forge.yaml as it is now.
