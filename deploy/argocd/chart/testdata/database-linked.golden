@@ -25,26 +25,28 @@ spec:
       default: {cpu: 500m, memory: 512Mi}
 ---
 # Source: forge-chart/templates/database-access.yaml
+# The copy is Forge's own Secret, by a fixed name. forge-api may replace and
+# delete it in every service's namespace, so that it can also remove a copy
+# after the link is gone; it reads no Secret here.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: forge-database-link
+  name: forge-linked-database
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: ["forge-linked-database"]
-    # Forge's copy of ledger/main: kept up to date, and removed with the link.
+    resourceNames: [forge-linked-database]
     verbs: [update, delete]
 ---
 # Source: forge-chart/templates/database-access.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: forge-database-link
+  name: forge-linked-database
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: forge-database-link
+  name: forge-linked-database
 subjects:
   - kind: ServiceAccount
     name: "forge-api"

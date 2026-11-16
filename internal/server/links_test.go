@@ -174,13 +174,54 @@ func TestDeployLinkedDatabase(t *testing.T) {
 	}
 
 	// A changed password reaches the copy at the next deploy.
-	source(map[string][]byte{"uri": []byte("postgresql://app:two@main-rw.ledger-staging:5432/app")})
+	source(map[string][]byte{"fqdn-uri": []byte("postgresql://app:two@main-rw.ledger-staging.svc.cluster.local:5432/app")})
 	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
 		t.Fatal(op.GetError())
 	}
-	if s := copied(); string(s.Data["uri"]) != "postgresql://app:two@main-rw.ledger-staging:5432/app" {
+	if s := copied(); string(s.Data["uri"]) != "postgresql://app:two@main-rw.ledger-staging.svc.cluster.local:5432/app" {
 		t.Error("the copy was not brought up to date")
 	}
+	gone := func(why string) {
+		t.Helper()
+		if _, err := kube.Secrets("payments-staging").Get(context.Background(), linkSecretName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("%s: the copy is still there (%v)", why, err)
+		}
+	}
+
+	// A URL that only resolves in the database's own namespace is not copied.
+	source(map[string][]byte{"uri": []byte("postgresql://app:two@main-rw:5432/app")})
+	if op := f.deployRef(t, "staging", ""); op.GetError() == nil || !strings.Contains(op.GetError().GetMessage(), "fqdn-uri") {
+		t.Errorf("a Secret without fqdn-uri: %v", op.GetError())
+	}
+	source(map[string][]byte{"fqdn-uri": []byte("postgresql://app:two@main-rw.ledger-staging.svc.cluster.local:5432/app")})
+
+	// A part that links, or shares, cannot leave the application: it would
+	// keep what the application gave it.
+	f.catalog.EnableTeardown(f.deploys, nil, f.ops)
+	leave := func(svc, want string) {
+		t.Helper()
+		_, err := f.catalog.UpdateService(ctx, connect.NewRequest(&forgev1.UpdateServiceRequest{
+			Service:    &forgev1.Service{Name: "services/" + svc, Application: ""},
+			UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"application"}},
+		}))
+		if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s leaving: want a refusal with %q, got %v", svc, want, err)
+		}
+	}
+	leave("payments", "links to parts of the application")
+	leave("ledger", "shares its database main")
+
+	// When the owner stops sharing, the copies go.
+	var told []string
+	f.deploys.revokeSharedDatabase(context.Background(), "ledger", "staging", func(_, msg string) { told = append(told, msg) })
+	gone("after the owner stopped sharing")
+	if len(told) != 1 || !strings.Contains(told[0], "services/payments") {
+		t.Errorf("events: %q", told)
+	}
+	if op := f.deployRef(t, "staging", ""); op.GetError() != nil {
+		t.Fatal(op.GetError())
+	}
+	copied()
 
 	// Without the link, the copy goes.
 	gh.Files[envSHA+":forge.yaml"] = []byte(base)
@@ -190,7 +231,5 @@ func TestDeployLinkedDatabase(t *testing.T) {
 	if f.values(t, "staging").Database != nil {
 		t.Error("the values still name a database")
 	}
-	if _, err := kube.Secrets("payments-staging").Get(context.Background(), linkSecretName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-		t.Errorf("the copy is still there: %v", err)
-	}
+	gone("after the link was removed")
 }

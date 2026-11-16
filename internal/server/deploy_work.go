@@ -276,17 +276,28 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 	default:
 		v.Database = nil
 	}
-	if v.Chart != nil {
-		return d.applyChart(ctx, svc, env, v, emit)
+	// What ran until now, read before the commit replaces it.
+	var hadLink string
+	var wasShared bool
+	if prev := d.currentValues(ctx, svc, env); prev != nil && prev.Database != nil {
+		hadLink, wasShared = prev.Database.From, prev.Database.Shared
 	}
-	// A link that is gone takes its copy of the credentials with it, while
-	// the chart still lets forge-api delete it.
-	if prev := d.currentValues(ctx, svc, env); linked == nil && prev != nil && prev.Database != nil && prev.Database.From != "" {
-		if err := d.o.Cluster.DeleteLinkedDatabase(ctx, svc, env); err != nil {
-			emit("database", fmt.Sprintf("the copy of %s's credentials in Secret %s could not be removed (%v); delete it by hand", prev.Database.From, linkSecretName, err))
-		} else {
-			emit("database", "removed the copy of "+prev.Database.From+"'s credentials")
+	// Credentials go only once the deploy stands: until then the pods that
+	// run may still need them.
+	settle := func() {
+		if linked == nil {
+			d.dropLinkedDatabase(ctx, svc, env, hadLink, emit)
 		}
+		if wasShared && (v.Database == nil || !v.Database.Shared) {
+			d.revokeSharedDatabase(ctx, svc, env, emit)
+		}
+	}
+	if v.Chart != nil {
+		if err := d.applyChart(ctx, svc, env, v, emit); err != nil {
+			return err
+		}
+		settle()
+		return nil
 	}
 	rec := v.Forge
 	rec.Image = v.Image
@@ -314,7 +325,11 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 			return stands(fmt.Errorf("copy the credentials of %s: %w", linked.values.From, err))
 		}
 	}
-	return stands(d.awaitSync(ctx, svc, env, commit, content, emit))
+	if err := d.awaitSync(ctx, svc, env, commit, content, emit); err != nil {
+		return stands(err)
+	}
+	settle()
+	return nil
 }
 
 // waitNamespace waits for <svc>-<env>, which Argo CD makes on the first deploy.

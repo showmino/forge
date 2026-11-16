@@ -402,6 +402,20 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 		checkedEnvs = serviceEnvs(cur)
 	}
 
+	if slices.Contains(paths, "application") && c.teardown != nil && c.teardown.hasDeploys() {
+		cur, err := c.get(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if cur.GetApplication() != in.GetApplication() {
+			// Leaving would keep what the application gave: addresses, and
+			// credentials of a shared database.
+			if why := c.teardown.deploys.linksHold(ctx, strings.TrimPrefix(name, servicePrefix)); why != "" {
+				return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s cannot change application: %s", name, why))
+			}
+		}
+	}
+
 	var out *forgev1.Service
 	var undoGrant, undoRevoke undo
 	err = c.store.Write(ctx, func(tx store.Tx) error {

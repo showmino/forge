@@ -62,8 +62,9 @@ spec:
     - {group: onepassword.com, kind: OnePasswordItem}
     - {group: batch, kind: CronJob}
     - {group: keda.sh, kind: ScaledObject}
-    # A database shared between the parts of an application: the Role that
-    # lets forge-api read, or keep, that one Secret (the service chart's
+    # A database shared between the parts of an application: the Roles that
+    # let forge-api read the one Secret of a shared database and keep its
+    # copy in a linking part's namespace (the service chart's
     # database-access.yaml).
     - {group: rbac.authorization.k8s.io, kind: Role}
     - {group: rbac.authorization.k8s.io, kind: RoleBinding}

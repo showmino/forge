@@ -37,14 +37,12 @@ func (c *Cluster) CopyDatabaseSecret(ctx context.Context, from, to, env, secret 
 	if err != nil {
 		return fmt.Errorf("read Secret %s in %s-%s: %w", secret, from, env, err)
 	}
-	// "uri" names the database by its short host, which resolves only in
-	// its own namespace; "fqdn-uri" is the same URL with the full name.
+	// "fqdn-uri" names the database by its full name. "uri" has the short
+	// one, which resolves only in the database's own namespace, so it is
+	// never copied.
 	url := src.Data["fqdn-uri"]
 	if len(url) == 0 {
-		url = src.Data["uri"]
-	}
-	if len(url) == 0 {
-		return fmt.Errorf("the Secret %s in %s-%s has no uri", secret, from, env)
+		return fmt.Errorf("the Secret %s in %s-%s has no fqdn-uri, the URL that works from another namespace", secret, from, env)
 	}
 	cp := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
