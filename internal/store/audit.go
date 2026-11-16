@@ -43,6 +43,7 @@ type Backend interface {
 	SessionStore
 	ApprovalStore
 	RuleStore
+	ReleaseStore
 }
 
 const auditPrefix = "auditEvents/"

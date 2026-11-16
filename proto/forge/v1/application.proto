@@ -3,10 +3,12 @@ syntax = "proto3";
 package forge.v1;
 
 import "forge/v1/deploy.proto";
+import "forge/v1/operation.proto";
+import "google/protobuf/timestamp.proto";
 
-// ApplicationService reads applications: services ("parts") that belong
+// ApplicationService is about applications: services ("parts") that belong
 // together under one name and one team, such as a web app, its API and its
-// worker. A service joins an application through its `application` field;
+// worker, and that go to production together. A service joins an application through its `application` field;
 // an application exists while a service names it, and nothing else is
 // stored. Resource names follow AIP style: "applications/{application}".
 service ApplicationService {
@@ -18,6 +20,20 @@ service ApplicationService {
   // GetApplication returns one application with what each part runs in
   // staging and production.
   rpc GetApplication(GetApplicationRequest) returns (GetApplicationResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // PromoteApplication promotes, as one operation, every part whose staging
+  // differs from production, a part after the parts it links to. Each part
+  // is promoted as DeployService.PromoteDeploy would, under the same rules.
+  // If a part fails, the parts already promoted are returned to what they
+  // ran. A promotion that succeeds records a release.
+  rpc PromoteApplication(PromoteApplicationRequest) returns (PromoteApplicationResponse) {}
+  // RollbackApplication returns every part to what it ran in production in
+  // an earlier release, as one operation, and records that as a release.
+  rpc RollbackApplication(RollbackApplicationRequest) returns (RollbackApplicationResponse) {}
+  // ListApplicationReleases returns an application's releases, newest
+  // first.
+  rpc ListApplicationReleases(ListApplicationReleasesRequest) returns (ListApplicationReleasesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 }
@@ -57,4 +73,87 @@ message GetApplicationRequest {
 
 message GetApplicationResponse {
   Application application = 1;
+}
+
+// ApplicationRelease is what every part of an application ran in production
+// after one promotion or rollback of the application.
+message ApplicationRelease {
+  // "applications/{application}/releases/{number}".
+  string name = 1;
+  // Counts from 1 for each application.
+  int32 number = 2;
+  google.protobuf.Timestamp create_time = 3;
+  // Who promoted or rolled back.
+  string creator = 4;
+  // Empty for a promotion; "rollback to release {n}" for a rollback.
+  string note = 5;
+  // Every part that ran in production then, ordered by service name.
+  repeated ReleasePart parts = 6;
+}
+
+// ReleasePart is what one part ran in production in a release.
+message ReleasePart {
+  // "services/{service}".
+  string service = 1;
+  // The part's version, such as "v1.4.0"; "" for one without versions.
+  string version = 2;
+  // The commit of the part (for an image, its digest) that ran.
+  string commit = 3;
+  // The deploy repo commit that put it there: what a rollback restores.
+  string deploy_commit = 4;
+}
+
+// PlannedPart is what a promotion or rollback of the application does to
+// one part.
+message PlannedPart {
+  // "services/{service}".
+  string service = 1;
+  // What production runs now; "" when the part is not there yet.
+  string from_version = 2;
+  // What it will run.
+  string to_version = 3;
+}
+
+message PromoteApplicationRequest {
+  // "applications/{application}".
+  string name = 1;
+  bool validate_only = 2;
+  // How far each part's version goes up when its promotion cuts a final
+  // version. Default patch.
+  Bump bump = 3;
+}
+
+message PromoteApplicationResponse {
+  // Unset with validate_only.
+  Operation operation = 1;
+  // The parts the promotion changes, in the order it promotes them.
+  repeated PlannedPart parts = 2;
+}
+
+message RollbackApplicationRequest {
+  // "applications/{application}".
+  string name = 1;
+  // The release to return to; 0 is the one before the newest.
+  int32 release = 2;
+  bool validate_only = 3;
+}
+
+message RollbackApplicationResponse {
+  // Unset with validate_only.
+  Operation operation = 1;
+  // The parts the rollback changes.
+  repeated PlannedPart parts = 2;
+  // The release it returns to.
+  ApplicationRelease release = 3;
+}
+
+message ListApplicationReleasesRequest {
+  // "applications/{application}".
+  string name = 1;
+  // At most this many; 0 is 20.
+  int32 page_size = 2;
+}
+
+message ListApplicationReleasesResponse {
+  repeated ApplicationRelease releases = 1;
 }

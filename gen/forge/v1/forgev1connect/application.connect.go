@@ -39,6 +39,15 @@ const (
 	// ApplicationServiceGetApplicationProcedure is the fully-qualified name of the ApplicationService's
 	// GetApplication RPC.
 	ApplicationServiceGetApplicationProcedure = "/forge.v1.ApplicationService/GetApplication"
+	// ApplicationServicePromoteApplicationProcedure is the fully-qualified name of the
+	// ApplicationService's PromoteApplication RPC.
+	ApplicationServicePromoteApplicationProcedure = "/forge.v1.ApplicationService/PromoteApplication"
+	// ApplicationServiceRollbackApplicationProcedure is the fully-qualified name of the
+	// ApplicationService's RollbackApplication RPC.
+	ApplicationServiceRollbackApplicationProcedure = "/forge.v1.ApplicationService/RollbackApplication"
+	// ApplicationServiceListApplicationReleasesProcedure is the fully-qualified name of the
+	// ApplicationService's ListApplicationReleases RPC.
+	ApplicationServiceListApplicationReleasesProcedure = "/forge.v1.ApplicationService/ListApplicationReleases"
 )
 
 // ApplicationServiceClient is a client for the forge.v1.ApplicationService service.
@@ -49,6 +58,18 @@ type ApplicationServiceClient interface {
 	// GetApplication returns one application with what each part runs in
 	// staging and production.
 	GetApplication(context.Context, *connect.Request[v1.GetApplicationRequest]) (*connect.Response[v1.GetApplicationResponse], error)
+	// PromoteApplication promotes, as one operation, every part whose staging
+	// differs from production, a part after the parts it links to. Each part
+	// is promoted as DeployService.PromoteDeploy would, under the same rules.
+	// If a part fails, the parts already promoted are returned to what they
+	// ran. A promotion that succeeds records a release.
+	PromoteApplication(context.Context, *connect.Request[v1.PromoteApplicationRequest]) (*connect.Response[v1.PromoteApplicationResponse], error)
+	// RollbackApplication returns every part to what it ran in production in
+	// an earlier release, as one operation, and records that as a release.
+	RollbackApplication(context.Context, *connect.Request[v1.RollbackApplicationRequest]) (*connect.Response[v1.RollbackApplicationResponse], error)
+	// ListApplicationReleases returns an application's releases, newest
+	// first.
+	ListApplicationReleases(context.Context, *connect.Request[v1.ListApplicationReleasesRequest]) (*connect.Response[v1.ListApplicationReleasesResponse], error)
 }
 
 // NewApplicationServiceClient constructs a client for the forge.v1.ApplicationService service. By
@@ -76,13 +97,35 @@ func NewApplicationServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		promoteApplication: connect.NewClient[v1.PromoteApplicationRequest, v1.PromoteApplicationResponse](
+			httpClient,
+			baseURL+ApplicationServicePromoteApplicationProcedure,
+			connect.WithSchema(applicationServiceMethods.ByName("PromoteApplication")),
+			connect.WithClientOptions(opts...),
+		),
+		rollbackApplication: connect.NewClient[v1.RollbackApplicationRequest, v1.RollbackApplicationResponse](
+			httpClient,
+			baseURL+ApplicationServiceRollbackApplicationProcedure,
+			connect.WithSchema(applicationServiceMethods.ByName("RollbackApplication")),
+			connect.WithClientOptions(opts...),
+		),
+		listApplicationReleases: connect.NewClient[v1.ListApplicationReleasesRequest, v1.ListApplicationReleasesResponse](
+			httpClient,
+			baseURL+ApplicationServiceListApplicationReleasesProcedure,
+			connect.WithSchema(applicationServiceMethods.ByName("ListApplicationReleases")),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // applicationServiceClient implements ApplicationServiceClient.
 type applicationServiceClient struct {
-	listApplications *connect.Client[v1.ListApplicationsRequest, v1.ListApplicationsResponse]
-	getApplication   *connect.Client[v1.GetApplicationRequest, v1.GetApplicationResponse]
+	listApplications        *connect.Client[v1.ListApplicationsRequest, v1.ListApplicationsResponse]
+	getApplication          *connect.Client[v1.GetApplicationRequest, v1.GetApplicationResponse]
+	promoteApplication      *connect.Client[v1.PromoteApplicationRequest, v1.PromoteApplicationResponse]
+	rollbackApplication     *connect.Client[v1.RollbackApplicationRequest, v1.RollbackApplicationResponse]
+	listApplicationReleases *connect.Client[v1.ListApplicationReleasesRequest, v1.ListApplicationReleasesResponse]
 }
 
 // ListApplications calls forge.v1.ApplicationService.ListApplications.
@@ -95,6 +138,21 @@ func (c *applicationServiceClient) GetApplication(ctx context.Context, req *conn
 	return c.getApplication.CallUnary(ctx, req)
 }
 
+// PromoteApplication calls forge.v1.ApplicationService.PromoteApplication.
+func (c *applicationServiceClient) PromoteApplication(ctx context.Context, req *connect.Request[v1.PromoteApplicationRequest]) (*connect.Response[v1.PromoteApplicationResponse], error) {
+	return c.promoteApplication.CallUnary(ctx, req)
+}
+
+// RollbackApplication calls forge.v1.ApplicationService.RollbackApplication.
+func (c *applicationServiceClient) RollbackApplication(ctx context.Context, req *connect.Request[v1.RollbackApplicationRequest]) (*connect.Response[v1.RollbackApplicationResponse], error) {
+	return c.rollbackApplication.CallUnary(ctx, req)
+}
+
+// ListApplicationReleases calls forge.v1.ApplicationService.ListApplicationReleases.
+func (c *applicationServiceClient) ListApplicationReleases(ctx context.Context, req *connect.Request[v1.ListApplicationReleasesRequest]) (*connect.Response[v1.ListApplicationReleasesResponse], error) {
+	return c.listApplicationReleases.CallUnary(ctx, req)
+}
+
 // ApplicationServiceHandler is an implementation of the forge.v1.ApplicationService service.
 type ApplicationServiceHandler interface {
 	// ListApplications returns every application, ordered by name, with its
@@ -103,6 +161,18 @@ type ApplicationServiceHandler interface {
 	// GetApplication returns one application with what each part runs in
 	// staging and production.
 	GetApplication(context.Context, *connect.Request[v1.GetApplicationRequest]) (*connect.Response[v1.GetApplicationResponse], error)
+	// PromoteApplication promotes, as one operation, every part whose staging
+	// differs from production, a part after the parts it links to. Each part
+	// is promoted as DeployService.PromoteDeploy would, under the same rules.
+	// If a part fails, the parts already promoted are returned to what they
+	// ran. A promotion that succeeds records a release.
+	PromoteApplication(context.Context, *connect.Request[v1.PromoteApplicationRequest]) (*connect.Response[v1.PromoteApplicationResponse], error)
+	// RollbackApplication returns every part to what it ran in production in
+	// an earlier release, as one operation, and records that as a release.
+	RollbackApplication(context.Context, *connect.Request[v1.RollbackApplicationRequest]) (*connect.Response[v1.RollbackApplicationResponse], error)
+	// ListApplicationReleases returns an application's releases, newest
+	// first.
+	ListApplicationReleases(context.Context, *connect.Request[v1.ListApplicationReleasesRequest]) (*connect.Response[v1.ListApplicationReleasesResponse], error)
 }
 
 // NewApplicationServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -126,12 +196,37 @@ func NewApplicationServiceHandler(svc ApplicationServiceHandler, opts ...connect
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	applicationServicePromoteApplicationHandler := connect.NewUnaryHandler(
+		ApplicationServicePromoteApplicationProcedure,
+		svc.PromoteApplication,
+		connect.WithSchema(applicationServiceMethods.ByName("PromoteApplication")),
+		connect.WithHandlerOptions(opts...),
+	)
+	applicationServiceRollbackApplicationHandler := connect.NewUnaryHandler(
+		ApplicationServiceRollbackApplicationProcedure,
+		svc.RollbackApplication,
+		connect.WithSchema(applicationServiceMethods.ByName("RollbackApplication")),
+		connect.WithHandlerOptions(opts...),
+	)
+	applicationServiceListApplicationReleasesHandler := connect.NewUnaryHandler(
+		ApplicationServiceListApplicationReleasesProcedure,
+		svc.ListApplicationReleases,
+		connect.WithSchema(applicationServiceMethods.ByName("ListApplicationReleases")),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/forge.v1.ApplicationService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ApplicationServiceListApplicationsProcedure:
 			applicationServiceListApplicationsHandler.ServeHTTP(w, r)
 		case ApplicationServiceGetApplicationProcedure:
 			applicationServiceGetApplicationHandler.ServeHTTP(w, r)
+		case ApplicationServicePromoteApplicationProcedure:
+			applicationServicePromoteApplicationHandler.ServeHTTP(w, r)
+		case ApplicationServiceRollbackApplicationProcedure:
+			applicationServiceRollbackApplicationHandler.ServeHTTP(w, r)
+		case ApplicationServiceListApplicationReleasesProcedure:
+			applicationServiceListApplicationReleasesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -147,4 +242,16 @@ func (UnimplementedApplicationServiceHandler) ListApplications(context.Context, 
 
 func (UnimplementedApplicationServiceHandler) GetApplication(context.Context, *connect.Request[v1.GetApplicationRequest]) (*connect.Response[v1.GetApplicationResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApplicationService.GetApplication is not implemented"))
+}
+
+func (UnimplementedApplicationServiceHandler) PromoteApplication(context.Context, *connect.Request[v1.PromoteApplicationRequest]) (*connect.Response[v1.PromoteApplicationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApplicationService.PromoteApplication is not implemented"))
+}
+
+func (UnimplementedApplicationServiceHandler) RollbackApplication(context.Context, *connect.Request[v1.RollbackApplicationRequest]) (*connect.Response[v1.RollbackApplicationResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApplicationService.RollbackApplication is not implemented"))
+}
+
+func (UnimplementedApplicationServiceHandler) ListApplicationReleases(context.Context, *connect.Request[v1.ListApplicationReleasesRequest]) (*connect.Response[v1.ListApplicationReleasesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("forge.v1.ApplicationService.ListApplicationReleases is not implemented"))
 }

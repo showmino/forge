@@ -506,6 +506,14 @@ var auditActions = map[string]auditAction{
 		return s, deployNamePrefix + strings.TrimPrefix(s, servicePrefix) + "/" + to,
 			details("from", r.GetFrom(), "to", r.GetTo(), "validate_only", flag(r.GetValidateOnly()))
 	}},
+	forgev1connect.ApplicationServicePromoteApplicationProcedure: {kindApplicationPromote, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.PromoteApplicationRequest)
+		return "", r.GetName(), details("validate_only", flag(r.GetValidateOnly()))
+	}},
+	forgev1connect.ApplicationServiceRollbackApplicationProcedure: {kindApplicationRollback, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.RollbackApplicationRequest)
+		return "", r.GetName(), details("release", strconv.Itoa(int(r.GetRelease())), "validate_only", flag(r.GetValidateOnly()))
+	}},
 	forgev1connect.DeployServiceSetAddressProcedure: {"service.address", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.SetAddressRequest)
 		s := serviceName(r.GetService())
@@ -547,6 +555,7 @@ var auditReads = []string{
 	forgev1connect.TeamServiceListTeamsProcedure,
 	forgev1connect.ApplicationServiceListApplicationsProcedure,
 	forgev1connect.ApplicationServiceGetApplicationProcedure,
+	forgev1connect.ApplicationServiceListApplicationReleasesProcedure,
 	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure, // removed in 0.57.0
 	forgev1connect.PolicyServiceListRulesProcedure,
 	forgev1connect.AuditServiceGetAdoptionProcedure,

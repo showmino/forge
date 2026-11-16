@@ -195,6 +195,23 @@ address to look at.
 - Promoting or rolling back a single part stays possible. The application
   page then shows that production no longer matches a release.
 
+**As built (2026-11-16).** Differences from the above:
+
+- Parts are promoted one at a time, in link order and then by name, not
+  several at once.
+- There is no approval step: Forge's approvals are for the production runs
+  of infrastructure repos, and promoting a service has none. Each part's
+  promotion policy applies as it does to `forge deploy promote`.
+- No new actions in the role table: the calls need `deploy.promote` and
+  `deploy.rollback` on the application's team. The audit log has them as
+  `application.promote` and `application.rollback`.
+- A part's promotion inside the application's operation writes no audit
+  event of its own: the one operation has one outcome, and its events name
+  each part.
+- When a part fails, the failed part is put back too, not only the parts
+  before it. A part that was new in production stays.
+- A rollback that fails part way stops; running it again finishes it.
+
 ## E. The builder page (forge-web)
 
 - **New application:** name and team, then parts.

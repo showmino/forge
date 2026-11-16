@@ -55,6 +55,8 @@ var deployProcedures = []string{
 	forgev1connect.DeployServiceStartDeployProcedure,
 	forgev1connect.DeployServicePromoteDeployProcedure,
 	forgev1connect.DeployServiceRollbackDeployProcedure,
+	forgev1connect.ApplicationServicePromoteApplicationProcedure,
+	forgev1connect.ApplicationServiceRollbackApplicationProcedure,
 	forgev1connect.DeployServiceRestartDeploymentProcedure,
 	forgev1connect.DeployServiceScaleDeploymentProcedure,
 	forgev1connect.EnvironmentServiceCreateEnvironmentProcedure,
