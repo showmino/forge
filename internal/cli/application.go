@@ -74,8 +74,9 @@ func newApplicationGetCmd(f *Factory) *cobra.Command {
 		Use:   "get <name>",
 		Short: "Show an application's parts and what each runs",
 		Long: `Show the parts of an application: each service, and the version it runs in
-staging and in production with its health. The columns are empty for a part
-that does not run there.`,
+staging and in production with its health, and the parts it links to
+(run.links in its forge.yaml). The columns are empty for a part that does not
+run there.`,
 		Example: `  forge application get shop
   forge application get shop -o json`,
 		Args: cobra.ExactArgs(1),
@@ -102,14 +103,29 @@ that does not run there.`,
 			if format == output.Table {
 				f.infof("%s, team %s", app.GetName(), app.GetOwnerTeam())
 			}
-			v := output.View{Headers: []string{"part", "staging", "production"}, Data: app}
+			v := output.View{Headers: []string{"part", "staging", "production", "links to"}, Data: app}
 			for _, p := range app.GetParts() {
-				v.Rows = append(v.Rows, []string{strings.TrimPrefix(p.GetService(), "services/"), partRuns(p, "staging"), partRuns(p, "production")})
+				v.Rows = append(v.Rows, []string{strings.TrimPrefix(p.GetService(), "services/"), partRuns(p, "staging"), partRuns(p, "production"), partLinks(p)})
 				v.Names = append(v.Names, p.GetService())
 			}
 			return output.Print(f.IO.Out, format, v)
 		},
 	}
+}
+
+// partLinks names the parts p links to (run.links), as what it runs says:
+// production's when it runs there, else staging's.
+func partLinks(p *forgev1.ApplicationPart) string {
+	var links []string
+	for _, d := range p.GetDeployments() {
+		if links == nil || d.GetEnv() == "production" {
+			links = d.GetLinks()
+		}
+	}
+	for i, l := range links {
+		links[i] = strings.TrimPrefix(l, "services/")
+	}
+	return strings.Join(links, ", ")
 }
 
 // partRuns says what a part runs in env: its version (or, without one, its

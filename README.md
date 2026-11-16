@@ -295,6 +295,18 @@ application shares its name with one of its own parts or with no service.
 shop` each part with what it runs in staging and production. An application
 exists while a service names it; nothing else is stored.
 
+A part reaches another part of its application through `run.links` in its
+forge.yaml: `links: [shop-api]` gives its pods `SHOP_API_URL` (the name in
+capitals, `-` as `_`, then `_URL`), the address of `shop-api` inside the
+cluster in the same environment, such as `http://shop-api.shop-api-staging.svc`.
+Forge works the address out at every deploy and promote, so production links
+to production. A link is refused unless both services are parts of the same
+application in the catalog; whether the linked part runs yet is not checked.
+A part that runs a chart can be linked to (the address is its `chart.expose`
+Service) but cannot have links itself. Previews get no links, as they get no
+`run.env`. The service chart sets the variables from its value `links`, so
+the service chart (`deploys.chartRevision`) must be at this release too.
+
 The owner team also gets the role `maintain` on the service's repo, when
 forge-api has a GitHub App: `forge create` gives it right after making the
 repo (step `grant_team`; if that fails the repo is deleted again),

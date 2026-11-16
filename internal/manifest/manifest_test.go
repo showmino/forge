@@ -94,6 +94,28 @@ func TestApplication(t *testing.T) {
 	}
 }
 
+// run.links: the parts of its application a service calls (phase 16).
+func TestLinks(t *testing.T) {
+	t.Parallel()
+	base := "apiVersion: forge.dev/v1\nservice:\n  name: shop\n  team: billing\n"
+	m, err := Parse([]byte(base + "  application: shop\nrun:\n  links: [shop-api, ledger]\n"))
+	if err != nil || len(m.Run.Links) != 2 || LinkEnv(m.Run.Links[0]) != "SHOP_API_URL" {
+		t.Fatalf("set: %+v %v", m.Run, err)
+	}
+	for _, bad := range []string{
+		"run:\n  links: [shop-api]\n",                                            // no application
+		"  application: shop\nrun:\n  links: [shop]\n",                           // itself
+		"  application: shop\nrun:\n  links: [Shop_API]\n",                       // not a name
+		"  application: shop\nrun:\n  links: [shop-api, shop-api]\n",             // twice
+		"  application: shop\nrun:\n  links: [a-b, a_b]\n",                       // not a name
+		"  application: shop\nrun:\n  env: {LEDGER_URL: x}\n  links: [ledger]\n", // the variable is taken
+	} {
+		if _, err := Parse([]byte(base + bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
 // service.tier and service.slo: how critical a service is, and its
 // availability target (phase 15).
 func TestTierAndSLO(t *testing.T) {

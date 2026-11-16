@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -102,6 +103,10 @@ type Run struct {
 	Secrets     []Secret          `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 	Jobs        []Job             `yaml:"jobs,omitempty" json:"jobs,omitempty"`
 	Autoscaling *Autoscaling      `yaml:"autoscaling,omitempty" json:"autoscaling,omitempty"`
+	// Links are other parts of the service's application that it calls:
+	// for each, its pods get <PART>_URL (LinkEnv), the part's address
+	// inside the cluster in the same environment.
+	Links []string `yaml:"links,omitempty" json:"links,omitempty"`
 	// Staging holds what differs in staging.
 	Staging *StagingRun `yaml:"staging,omitempty" json:"staging,omitempty"`
 }
@@ -302,6 +307,14 @@ func (m *Manifest) Validate() error {
 	}
 	if a := m.Service.Application; a != "" && !ValidID(a) {
 		return fmt.Errorf("service.application %q must be a lowercase DNS label (a-z, 0-9, '-', max 63)", a)
+	}
+	if r := m.Run; r != nil && len(r.Links) > 0 {
+		if m.Service.Application == "" {
+			return errors.New("run.links names parts of the service's application: set service.application")
+		}
+		if slices.Contains(r.Links, m.Service.Name) {
+			return fmt.Errorf("run.links: %s cannot link to itself", m.Service.Name)
+		}
 	}
 	if m.Service.Tier < 0 || m.Service.Tier > 3 {
 		return fmt.Errorf("service.tier %d must be 1 (critical), 2 (high) or 3 (medium)", m.Service.Tier)
