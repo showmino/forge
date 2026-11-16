@@ -417,6 +417,8 @@ type Argo struct {
 	// Degraded app: like Argo CD 3.x it sets no health message, and the
 	// reason is on a pod <svc>-0 (label app=<svc>) in the namespace.
 	Unhealthy map[string]string
+	// once is Unhealthy for the next head of an app only (SetUnhealthyOnce).
+	once map[string]string
 	// Lag is how long Argo takes to notice a new head; change it while
 	// running with SetLag.
 	Lag time.Duration
@@ -447,6 +449,19 @@ func (a *Argo) SetUnhealthy(name, reason string) {
 		return
 	}
 	a.Unhealthy[name] = reason
+}
+
+// SetUnhealthyOnce makes the next head Argo syncs for the app name
+// Degraded with the reason, and the heads after it healthy again: a new
+// version that fails, and the version before it that runs when it is put
+// back.
+func (a *Argo) SetUnhealthyOnce(name, reason string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.once == nil {
+		a.once = map[string]string{}
+	}
+	a.once[name] = reason
 }
 
 // SetLag changes Lag; it applies to heads Argo has not synced yet.
@@ -550,6 +565,10 @@ func (a *Argo) sync(ctx context.Context, name, head string) error {
 	health := map[string]any{"status": "Healthy"}
 	a.mu.Lock()
 	reason, bad := a.Unhealthy[name]
+	if r, ok := a.once[name]; ok && !bad {
+		reason, bad = r, true
+		delete(a.once, name)
+	}
 	a.mu.Unlock()
 	refused := a.Refused[name]
 	if bad {

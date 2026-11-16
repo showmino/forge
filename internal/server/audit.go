@@ -141,6 +141,20 @@ func noteAuditDetail(ctx context.Context, key, value string) {
 	}
 }
 
+// takeAuditDetail removes a detail of the call's audit event and returns
+// it; "" when there is none.
+func takeAuditDetail(ctx context.Context, key string) string {
+	r := auditFrom(ctx)
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	v := r.ev.Details[key]
+	delete(r.ev.Details, key)
+	return v
+}
+
 // noteAuditTarget replaces the call's target, when the request did not name it.
 func noteAuditTarget(ctx context.Context, target string) {
 	if r := auditFrom(ctx); r != nil && target != "" {
@@ -506,6 +520,14 @@ var auditActions = map[string]auditAction{
 		return s, deployNamePrefix + strings.TrimPrefix(s, servicePrefix) + "/" + to,
 			details("from", r.GetFrom(), "to", r.GetTo(), "validate_only", flag(r.GetValidateOnly()))
 	}},
+	forgev1connect.ApplicationServicePromoteApplicationProcedure: {kindApplicationPromote, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.PromoteApplicationRequest)
+		return "", r.GetName(), details("validate_only", flag(r.GetValidateOnly()))
+	}},
+	forgev1connect.ApplicationServiceRollbackApplicationProcedure: {kindApplicationRollback, func(m any) (string, string, map[string]string) {
+		r := m.(*forgev1.RollbackApplicationRequest)
+		return "", r.GetName(), details("release", strconv.Itoa(int(r.GetRelease())), "validate_only", flag(r.GetValidateOnly()))
+	}},
 	forgev1connect.DeployServiceSetAddressProcedure: {"service.address", func(m any) (string, string, map[string]string) {
 		r := m.(*forgev1.SetAddressRequest)
 		s := serviceName(r.GetService())
@@ -547,6 +569,7 @@ var auditReads = []string{
 	forgev1connect.TeamServiceListTeamsProcedure,
 	forgev1connect.ApplicationServiceListApplicationsProcedure,
 	forgev1connect.ApplicationServiceGetApplicationProcedure,
+	forgev1connect.ApplicationServiceListApplicationReleasesProcedure,
 	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure, // removed in 0.57.0
 	forgev1connect.PolicyServiceListRulesProcedure,
 	forgev1connect.AuditServiceGetAdoptionProcedure,

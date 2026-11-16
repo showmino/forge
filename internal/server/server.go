@@ -45,6 +45,10 @@ type Options struct {
 	// Teams lists the organization's teams for TeamService; nil answers
 	// FAILED_PRECONDITION.
 	Teams TeamSource
+	// ApplicationReleases keeps the releases of applications; nil keeps
+	// none: promoting an application then ends with an error after its
+	// parts are promoted, and rolling one back is refused.
+	ApplicationReleases store.ReleaseStore
 	// RuleModes keeps the modes admins set for the switchable policy
 	// rules; nil: every rule has its default, and UpdateRule is unavailable.
 	RuleModes store.RuleStore
@@ -173,7 +177,7 @@ func New(o Options) (http.Handler, error) {
 	}
 	mux.Handle(forgev1connect.NewPolicyServiceHandler(&policyService{st: o.RuleModes, now: time.Now}, opts))
 	mux.Handle(forgev1connect.NewTeamServiceHandler(&teamService{src: o.Teams, org: o.GitHubOrg, log: o.Logger, now: time.Now}, opts))
-	mux.Handle(forgev1connect.NewApplicationServiceHandler(&applicationService{catalog: o.Catalog, deploys: o.Deploys}, opts))
+	mux.Handle(forgev1connect.NewApplicationServiceHandler(&applicationService{catalog: o.Catalog, deploys: o.Deploys, releases: o.ApplicationReleases, now: time.Now}, opts))
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))

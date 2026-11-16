@@ -732,20 +732,49 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if err != nil {
 		return nil, err
 	}
-	if err := authorize(ctx, ActDeployRollback, servicePrefix+svc); err != nil {
-		return nil, err
-	}
-	if err := d.requireEnv(ctx, svc, env); err != nil {
-		return nil, err
-	}
-	recs, err := d.history(ctx, svc, env, 50)
+	m, err := d.planRollback(ctx, svc, env, req.Msg.GetTo())
 	if err != nil {
 		return nil, err
 	}
+	v, moved := m.v, m.moved
+	preview := d.deploymentFrom(svc, env, v, "", AppStatus{})
+	if req.Msg.GetValidateOnly() {
+		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
+	}
+	op, err := d.startMutation(ctx, kindRollback, svc, env, v, withAddressNote(moved, nil))
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&forgev1.RollbackDeployResponse{Operation: op, Deployment: preview}), nil
+}
+
+// mutation is a change of what svc runs in env, checked and ready to apply.
+type mutation struct {
+	svc, env string
+	v        deployValues
+	// cut, when set, makes sure the commit has its version and returns it.
+	cut func(context.Context, func(string, string)) (string, error)
+	// moved says that the address changes; "" when it does not.
+	moved string
+}
+
+// planRollback checks a rollback of svc in env to the deploy commit to (""
+// for the one before the current) and returns what it would apply.
+func (d *Deploys) planRollback(ctx context.Context, svc, env, to string) (mutation, error) {
+	if err := authorize(ctx, ActDeployRollback, servicePrefix+svc); err != nil {
+		return mutation{}, err
+	}
+	if err := d.requireEnv(ctx, svc, env); err != nil {
+		return mutation{}, err
+	}
+	recs, err := d.history(ctx, svc, env, 50)
+	if err != nil {
+		return mutation{}, err
+	}
 	var target *deployRecord
-	switch to := req.Msg.GetTo(); {
+	switch {
 	case to == "" && len(recs) < 2:
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s/%s has no earlier deploy to roll back to", deployNamePrefix, svc, env))
+		return mutation{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s/%s has no earlier deploy to roll back to", deployNamePrefix, svc, env))
 	case to == "":
 		target = &recs[1]
 	default:
@@ -756,16 +785,29 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 			}
 		}
 		if target == nil {
-			return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("no deploy %s in the last 50 of %s%s/%s", to, deployNamePrefix, svc, env))
+			return mutation{}, connect.NewError(connect.CodeNotFound, fmt.Errorf("no deploy %s in the last 50 of %s%s/%s", to, deployNamePrefix, svc, env))
 		}
 	}
-	data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), target.DeployCommit)
+	return d.planRestore(ctx, svc, env, target.DeployCommit)
+}
+
+// planRestore checks a return of svc in env to the values it had at the
+// deploy repo commit commit, and returns what it would apply. The commit
+// need not be a deploy's own: a restart's or a scale's is restored too.
+func (d *Deploys) planRestore(ctx context.Context, svc, env, commit string) (mutation, error) {
+	if err := authorize(ctx, ActDeployRollback, servicePrefix+svc); err != nil {
+		return mutation{}, err
+	}
+	if err := d.requireEnv(ctx, svc, env); err != nil {
+		return mutation{}, err
+	}
+	data, err := d.o.Repo.Read(ctx, valuesPath(svc, env), commit)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read %s: %w", shortSHA(target.DeployCommit), err))
+		return mutation{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read %s: %w", shortSHA(commit), err))
 	}
 	v, err := parseValues(data)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return mutation{}, connect.NewError(connect.CodeInternal, err)
 	}
 	v.Forge.Kind, v.Forge.Actor = kindRollback, actorOf(ctx)
 	// The address is worked out now, like the database: from the domain the
@@ -781,34 +823,26 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	var moved string
 	if !v.Worker {
 		if addr, moved, err = d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host, stagingInternal: v.Forge.StagingInternal}, cur); err != nil {
-			return nil, err
+			return mutation{}, err
 		}
 	}
 	v.setAddress(addr)
 	// Like the address: under today's settings, not the restored deploy's.
 	if err := d.secretsAllowed(v); err != nil {
-		return nil, err
+		return mutation{}, err
 	}
 	if v.Chart != nil {
 		if err := d.chartAllowed(ctx, svc, env, v.Chart); err != nil {
-			return nil, err
+			return mutation{}, err
 		}
 	}
 	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, env); err != nil {
-		return nil, err
+		return mutation{}, err
 	}
 	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, svc+"-"+env); err != nil {
-		return nil, err
+		return mutation{}, err
 	}
-	preview := d.deploymentFrom(svc, env, v, "", AppStatus{})
-	if req.Msg.GetValidateOnly() {
-		return connect.NewResponse(&forgev1.RollbackDeployResponse{Deployment: preview}), nil
-	}
-	op, err := d.startMutation(ctx, kindRollback, svc, env, v, withAddressNote(moved, nil))
-	if err != nil {
-		return nil, err
-	}
-	return connect.NewResponse(&forgev1.RollbackDeployResponse{Operation: op, Deployment: preview}), nil
+	return mutation{svc: svc, env: env, v: v, moved: moved}, nil
 }
 
 func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev1.PromoteDeployRequest]) (*connect.Response[forgev1.PromoteDeployResponse], error) {
@@ -835,95 +869,11 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if !ok || svc == "" {
 		return nil, invalidArg("service %q must be services/<name>", req.Msg.GetService())
 	}
-	if err := authorize(ctx, ActDeployPromote, servicePrefix+svc); err != nil {
-		return nil, err
-	}
-	if err := d.requireBoth(ctx, svc); err != nil {
-		return nil, err
-	}
-	src, srcCommit, err := d.current(ctx, svc, from)
-	if connect.CodeOf(err) == connect.CodeNotFound {
-		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s has nothing in %s to promote", req.Msg.GetService(), from))
-	}
+	m, err := d.planPromote(ctx, svc, from, to, req.Msg.GetBump())
 	if err != nil {
 		return nil, err
 	}
-	if err := d.promotionAllowed(ctx, svc, from, to, src, srcCommit); err != nil {
-		return nil, err
-	}
-	bump, err := bumpOf(req.Msg.GetBump(), to)
-	if err != nil {
-		return nil, err
-	}
-	var addr address
-	var moved string
-	if !src.Worker {
-		if addr, moved, err = d.addressFor(ctx, svc, to, wanted{domain: src.Forge.Domain, host: src.Forge.Host, stagingInternal: src.Forge.StagingInternal}, d.currentValues(ctx, svc, to)); err != nil {
-			return nil, err
-		}
-	}
-	v := src
-	v.Env = to
-	v.setAddress(addr)
-	v.forEnv(to)
-	// The same parts, at their addresses in the next environment.
-	if v.Links, err = d.links(ctx, svc, v.Forge.Links, to); err != nil {
-		return nil, err
-	}
-	if _, err := d.linkedDatabase(ctx, svc, v.Forge.Links, to); err != nil {
-		return nil, err
-	}
-	if v.Chart != nil {
-		// The chart and its shared values go as staging ran them; the next
-		// environment's own values come from forge.yaml as it is now.
-		mc, err := d.manifestChart(ctx, svc)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the forge.yaml of %s in the deploy repo: %w", svc, err))
-		}
-		c := *v.Chart
-		c.EnvValues = mc.EnvValues(to)
-		v.Chart, v.Replicas = &c, 0
-		if err := d.chartAllowed(ctx, svc, to, &c); err != nil {
-			return nil, err
-		}
-	}
-	if err := d.secretsAllowed(v); err != nil {
-		return nil, err
-	}
-	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
-	// Staging's candidate number is not production's version: that is cut
-	// below, or there is none.
-	stagingVersion := v.Forge.Version
-	v.Forge.Version = ""
-	var cut func(context.Context, func(string, string)) (string, error)
-	repoless, err := d.repoless(ctx, svc)
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case repoless:
-		// No repo to cut a version in: production runs as staging did, by the
-		// image's tag.
-		v.Forge.Version = stagingVersion
-	case d.o.Releases != nil:
-		owner, repo, err := d.serviceRepo(ctx, svc)
-		if err != nil {
-			return nil, err
-		}
-		commit := v.Forge.Commit
-		if v.Forge.Version, err = d.plannedVersion(ctx, owner, repo, commit, to, bump); err != nil {
-			return nil, err
-		}
-		cut = func(ctx context.Context, emit func(string, string)) (string, error) {
-			return d.cutVersion(ctx, owner, repo, commit, to, bump, emit)
-		}
-	}
-	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, to); err != nil {
-		return nil, err
-	}
-	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, svc+"-"+to); err != nil {
-		return nil, err
-	}
+	v, moved, cut := m.v, m.moved, m.cut
 	preview := d.deploymentFrom(svc, to, v, "", AppStatus{})
 	if req.Msg.GetValidateOnly() {
 		return connect.NewResponse(&forgev1.PromoteDeployResponse{Deployment: preview}), nil
@@ -933,6 +883,101 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 		return nil, err
 	}
 	return connect.NewResponse(&forgev1.PromoteDeployResponse{Operation: op, Deployment: preview}), nil
+}
+
+// planPromote checks a promotion of what svc runs in from to the
+// environment to and returns what it would apply.
+func (d *Deploys) planPromote(ctx context.Context, svc, from, to string, bumpIn forgev1.Bump) (mutation, error) {
+	if err := authorize(ctx, ActDeployPromote, servicePrefix+svc); err != nil {
+		return mutation{}, err
+	}
+	if err := d.requireBoth(ctx, svc); err != nil {
+		return mutation{}, err
+	}
+	src, srcCommit, err := d.current(ctx, svc, from)
+	if connect.CodeOf(err) == connect.CodeNotFound {
+		return mutation{}, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s has nothing in %s to promote", servicePrefix+svc, from))
+	}
+	if err != nil {
+		return mutation{}, err
+	}
+	if err := d.promotionAllowed(ctx, svc, from, to, src, srcCommit); err != nil {
+		return mutation{}, err
+	}
+	bump, err := bumpOf(bumpIn, to)
+	if err != nil {
+		return mutation{}, err
+	}
+	var addr address
+	var moved string
+	if !src.Worker {
+		if addr, moved, err = d.addressFor(ctx, svc, to, wanted{domain: src.Forge.Domain, host: src.Forge.Host, stagingInternal: src.Forge.StagingInternal}, d.currentValues(ctx, svc, to)); err != nil {
+			return mutation{}, err
+		}
+	}
+	v := src
+	v.Env = to
+	v.setAddress(addr)
+	v.forEnv(to)
+	// The same parts, at their addresses in the next environment.
+	if v.Links, err = d.links(ctx, svc, v.Forge.Links, to); err != nil {
+		return mutation{}, err
+	}
+	if _, err := d.linkedDatabase(ctx, svc, v.Forge.Links, to); err != nil {
+		return mutation{}, err
+	}
+	if v.Chart != nil {
+		// The chart and its shared values go as staging ran them; the next
+		// environment's own values come from forge.yaml as it is now.
+		mc, err := d.manifestChart(ctx, svc)
+		if err != nil {
+			return mutation{}, connect.NewError(connect.CodeUnavailable, fmt.Errorf("read the forge.yaml of %s in the deploy repo: %w", svc, err))
+		}
+		c := *v.Chart
+		c.EnvValues = mc.EnvValues(to)
+		v.Chart, v.Replicas = &c, 0
+		if err := d.chartAllowed(ctx, svc, to, &c); err != nil {
+			return mutation{}, err
+		}
+	}
+	if err := d.secretsAllowed(v); err != nil {
+		return mutation{}, err
+	}
+	v.Forge.Env, v.Forge.Kind, v.Forge.Actor = to, kindPromote, actorOf(ctx)
+	// Staging's candidate number is not production's version: that is cut
+	// below, or there is none.
+	stagingVersion := v.Forge.Version
+	v.Forge.Version = ""
+	var cut func(context.Context, func(string, string)) (string, error)
+	repoless, err := d.repoless(ctx, svc)
+	if err != nil {
+		return mutation{}, err
+	}
+	switch {
+	case repoless:
+		// No repo to cut a version in: production runs as staging did, by the
+		// image's tag.
+		v.Forge.Version = stagingVersion
+	case d.o.Releases != nil:
+		owner, repo, err := d.serviceRepo(ctx, svc)
+		if err != nil {
+			return mutation{}, err
+		}
+		commit := v.Forge.Commit
+		if v.Forge.Version, err = d.plannedVersion(ctx, owner, repo, commit, to, bump); err != nil {
+			return mutation{}, err
+		}
+		cut = func(ctx context.Context, emit func(string, string)) (string, error) {
+			return d.cutVersion(ctx, owner, repo, commit, to, bump, emit)
+		}
+	}
+	if err := d.o.Cluster.ServiceNamespaceFree(ctx, svc, to); err != nil {
+		return mutation{}, err
+	}
+	if err := d.o.Cluster.ApplicationFree(ctx, d.o.ArgoNamespace, svc+"-"+to); err != nil {
+		return mutation{}, err
+	}
+	return mutation{svc: svc, env: to, v: v, cut: cut, moved: moved}, nil
 }
 
 // currentValues is what svc runs in env now, nil when that is nothing or

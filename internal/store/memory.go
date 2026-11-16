@@ -20,6 +20,9 @@ type Memory struct {
 	auditMu sync.Mutex
 	audit   []*forgev1.AuditEvent // index i holds id i+1
 
+	relMu    sync.Mutex
+	releases map[string][]Release // per application, oldest first
+
 	resMu     sync.Mutex
 	plans     map[string]*PlanRecord // never changed in place: a write replaces the entry
 	planSeq   int64

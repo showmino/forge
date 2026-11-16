@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -23,6 +24,10 @@ type applicationService struct {
 	// deploys says what each part runs; nil, or one that is not set up,
 	// leaves the parts' deployments empty.
 	deploys *Deploys
+	// releases keeps what each promotion and rollback of an application
+	// left in production; nil keeps none, and a rollback is refused.
+	releases store.ReleaseStore
+	now      func() time.Time
 }
 
 // applications groups the catalog's services by application, ordered by

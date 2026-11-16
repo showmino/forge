@@ -84,3 +84,58 @@ func TestApplicationShowsWhatPartsRun(t *testing.T) {
 		t.Errorf("heading: %q", r.err)
 	}
 }
+
+// The parts of an application go to production together, and the
+// promotion is recorded as a release.
+func TestApplicationPromote(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.serveDeploys(map[string]string{})
+	h.ok("service", "register", "payments", "--team", "billing", "--repo", "https://github.com/showmino/payments")
+	h.ok("create", "web", "--image", "nginx:1.27", "--port", "80", "--health", "/", "--team", "billing")
+	h.ok("service", "update", "payments", "--application", "shop")
+	h.ok("service", "update", "web", "--application", "shop")
+	h.ok("deploy", "start", "payments", "--env", "staging")
+
+	if r := h.ok("application", "releases", "shop"); !strings.Contains(r.err, "No releases yet") {
+		t.Errorf("no releases: %q", r.err)
+	}
+	h.fails(int(exitcode.Usage), "application", "promote", "shop") // asks for the name; not a terminal
+	golden(t, "application_promote_dry_run", h.ok("application", "promote", "shop", "--dry-run").out)
+
+	// A reader may not; a member of the team may.
+	h.env["FORGE_TOKEN"] = readerToken
+	h.fails(int(exitcode.PermissionDenied), "application", "promote", "shop", "--yes")
+	h.env["FORGE_TOKEN"] = teamToken
+	r := h.ok("application", "promote", "shop", "--yes")
+	for _, want := range []string{"payments: ", "web: ", "applications/shop release 1"} {
+		if !strings.Contains(r.err, want) {
+			t.Errorf("the promotion's events lack %q:\n%s", want, r.err)
+		}
+	}
+	if !strings.Contains(r.out, "payments   v0.1.0    v0.1.0") || !strings.Contains(r.out, "web        1.27      1.27") {
+		t.Errorf("the application after the promotion:\n%s", r.out)
+	}
+	h.env["FORGE_TOKEN"] = writerToken
+
+	rel := h.ok("application", "releases", "shop")
+	if !strings.Contains(rel.out, "payments v0.1.0, web 1.27") || !strings.Contains(rel.out, "cy@example.com") {
+		t.Errorf("releases:\n%s", rel.out)
+	}
+	if r := h.ok("application", "releases", "shop", "-o", "name"); r.out != "applications/shop/releases/1\n" {
+		t.Errorf("names: %q", r.out)
+	}
+	if r := h.fails(int(exitcode.Conflict), "application", "promote", "shop", "--yes"); !strings.Contains(r.err, "nothing to promote") {
+		t.Errorf("a second promotion: %q", r.err)
+	}
+	if r := h.fails(int(exitcode.Conflict), "application", "rollback", "shop", "--yes"); !strings.Contains(r.err, "no earlier release") {
+		t.Errorf("a rollback with one release: %q", r.err)
+	}
+	h.fails(int(exitcode.Usage), "application", "rollback", "shop", "--to", "-1", "--yes")
+	h.fails(int(exitcode.NotFound), "application", "rollback", "shop", "--to", "9", "--yes")
+
+	// Both are in the audit log, each once with its outcome.
+	if r := h.ok("audit", "list", "--action", "application.promote"); !strings.Contains(r.out, "applications/shop") {
+		t.Errorf("audit:\n%s", r.out)
+	}
+}
