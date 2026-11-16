@@ -123,11 +123,16 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	}
 	v.setAddress(addr)
 	v.setOptions(src.run)
+	v.Forge.Shares = src.shares
 	v.forEnv(env)
 	if src.chart != nil && len(v.Forge.Links) > 0 {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s runs a chart, which Forge gives no variables: remove run.links (other parts can still link to it)", servicePrefix, src.serviceID))
 	}
 	if v.Links, err = d.links(ctx, src.serviceID, v.Forge.Links, env); err != nil {
+		return nil, err
+	}
+	// Found now, before anything is built; apply decides again.
+	if _, err := d.linkedDatabase(ctx, src.serviceID, v.Forge.Links, env); err != nil {
 		return nil, err
 	}
 	if src.chart != nil {
@@ -251,11 +256,37 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 	if err != nil {
 		return fmt.Errorf("read the resources of %s%s in %s: %w", servicePrefix, svc, env, err)
 	}
-	if v.Database = db; db != nil {
+	linked, err := d.linkedDatabase(ctx, svc, v.Forge.Links, env)
+	if err != nil {
+		return err
+	}
+	switch {
+	case db != nil && linked != nil:
+		return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s has a database of its own in %s and run.links names %s; a service has one database", servicePrefix, svc, env, linked.values.From))
+	case db != nil:
+		db.Shared = slices.Contains(v.Forge.Shares, db.Resource)
 		emit("database", "DATABASE_URL comes from Secret "+db.Secret)
+		if db.Shared {
+			emit("database", "shared with the other parts of the application")
+		}
+		v.Database = db
+	case linked != nil:
+		emit("database", "DATABASE_URL comes from the database "+linked.values.From+", copied into Secret "+linked.values.Secret)
+		v.Database = &linked.values
+	default:
+		v.Database = nil
 	}
 	if v.Chart != nil {
 		return d.applyChart(ctx, svc, env, v, emit)
+	}
+	// A link that is gone takes its copy of the credentials with it, while
+	// the chart still lets forge-api delete it.
+	if prev := d.currentValues(ctx, svc, env); linked == nil && prev != nil && prev.Database != nil && prev.Database.From != "" {
+		if err := d.o.Cluster.DeleteLinkedDatabase(ctx, svc, env); err != nil {
+			emit("database", fmt.Sprintf("the copy of %s's credentials in Secret %s could not be removed (%v); delete it by hand", prev.Database.From, linkSecretName, err))
+		} else {
+			emit("database", "removed the copy of "+prev.Database.From+"'s credentials")
+		}
 	}
 	rec := v.Forge
 	rec.Image = v.Image
@@ -278,6 +309,11 @@ func (d *Deploys) apply(ctx context.Context, svc, env string, v deployValues, em
 		return stands(fmt.Errorf("pull secret for %s-%s: %w", svc, env, err))
 	}
 	emit("namespace", svc+"-"+env)
+	if linked != nil {
+		if err := d.o.Cluster.CopyDatabaseSecret(ctx, linked.part, svc, env, linked.secret); err != nil {
+			return stands(fmt.Errorf("copy the credentials of %s: %w", linked.values.From, err))
+		}
+	}
 	return stands(d.awaitSync(ctx, svc, env, commit, content, emit))
 }
 
@@ -303,7 +339,7 @@ func (d *Deploys) database(ctx context.Context, svc, env string) (*deployDatabas
 	}
 	for _, r := range rs {
 		if r.GetType() == resource.TypePostgres && r.GetSecret() != "" && r.GetState() != forgev1.Resource_STATE_DELETING {
-			return &deployDatabase{Secret: r.GetSecret()}, nil
+			return &deployDatabase{Secret: r.GetSecret(), Resource: resourceID(r.GetName())}, nil
 		}
 	}
 	return nil, nil

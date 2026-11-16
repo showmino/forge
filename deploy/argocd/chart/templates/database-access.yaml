@@ -1,0 +1,38 @@
+{{- /* A database that parts of an application share (forge.yaml's
+resources[].share and run.links: [<part>/<resource>]). A pod cannot read a
+Secret of another namespace, so forge-api copies the URL: it reads the
+owning part's Secret and writes the copy in the linking part's namespace.
+These Roles are all the access it has for that: one named Secret each, and
+only in the namespaces of a database that is shared or linked. */ -}}
+{{- $api := .Values.forgeApi | default dict }}
+{{- $db := .Values.database | default dict }}
+{{- if and $api.serviceAccount $api.namespace (or $db.shared $db.from) (not .Values.chart) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-database-link
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ required "database.secret" $db.secret | quote }}]
+    {{- if $db.from }}
+    # Forge's copy of {{ $db.from }}: kept up to date, and removed with the link.
+    verbs: [update, delete]
+    {{- else }}
+    # Read to copy it to the parts that link to this database.
+    verbs: [get]
+    {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-database-link
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-database-link
+subjects:
+  - kind: ServiceAccount
+    name: {{ $api.serviceAccount | quote }}
+    namespace: {{ $api.namespace | quote }}
+{{- end }}

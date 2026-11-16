@@ -102,13 +102,25 @@ func TestLinks(t *testing.T) {
 	if err != nil || len(m.Run.Links) != 2 || LinkEnv(m.Run.Links[0]) != "SHOP_API_URL" {
 		t.Fatalf("set: %+v %v", m.Run, err)
 	}
+	// A part's shared database, and sharing one.
+	if m, err := Parse([]byte(base + "  application: shop\nrun:\n  links: [shop-api, shop-api/main]\n")); err != nil || len(m.Run.Links) != 2 {
+		t.Fatalf("a database link: %v", err)
+	}
+	if m, err := Parse([]byte(base + "  application: shop\nresources:\n  - {name: main, type: postgres, share: true}\n")); err != nil || len(m.Shares()) != 1 || m.Shares()[0] != "main" {
+		t.Fatalf("share: %v", err)
+	}
 	for _, bad := range []string{
-		"run:\n  links: [shop-api]\n",                                            // no application
-		"  application: shop\nrun:\n  links: [shop]\n",                           // itself
-		"  application: shop\nrun:\n  links: [Shop_API]\n",                       // not a name
-		"  application: shop\nrun:\n  links: [shop-api, shop-api]\n",             // twice
-		"  application: shop\nrun:\n  links: [a-b, a_b]\n",                       // not a name
-		"  application: shop\nrun:\n  env: {LEDGER_URL: x}\n  links: [ledger]\n", // the variable is taken
+		"  application: shop\nrun:\n  links: [shop-api/]\n",                                                   // no resource
+		"  application: shop\nrun:\n  links: [shop-api/main/x]\n",                                             // not a name
+		"  application: shop\nrun:\n  links: [shop-api/main, ledger/main]\n",                                  // two databases
+		"  application: shop\nrun:\n  links: [shop-api/main]\nresources:\n  - {name: main, type: postgres}\n", // and its own
+		"resources:\n  - {name: main, type: postgres, share: true}\n",                                         // shared with no application
+		"run:\n  links: [shop-api]\n",                                                                         // no application
+		"  application: shop\nrun:\n  links: [shop]\n",                                                        // itself
+		"  application: shop\nrun:\n  links: [Shop_API]\n",                                                    // not a name
+		"  application: shop\nrun:\n  links: [shop-api, shop-api]\n",                                          // twice
+		"  application: shop\nrun:\n  links: [a-b, a_b]\n",                                                    // not a name
+		"  application: shop\nrun:\n  env: {LEDGER_URL: x}\n  links: [ledger]\n",                              // the variable is taken
 	} {
 		if _, err := Parse([]byte(base + bad)); err == nil {
 			t.Errorf("accepted %q", bad)

@@ -144,6 +144,14 @@ func LinkEnv(part string) string {
 	return strings.ToUpper(strings.ReplaceAll(part, "-", "_")) + "_URL"
 }
 
+// SplitLink splits an entry of run.links into the part and, for a link to
+// a part's shared database ("shop-api/main"), the resource; res is ""
+// for a link to the part itself.
+func SplitLink(l string) (part, res string) {
+	part, res, _ = strings.Cut(l, "/")
+	return part, res
+}
+
 // ValidGroup reports whether s is a secret group name run.secrets can use.
 func ValidGroup(s string) bool { return vaultName.MatchString(s) }
 
@@ -191,9 +199,18 @@ func (r *Run) validateOptions() error {
 	if len(r.Links) > MaxLinks {
 		return fmt.Errorf("run.links has %d parts; at most %d", len(r.Links), MaxLinks)
 	}
+	database := ""
 	for i, l := range r.Links {
-		if !ValidID(l) {
-			return fmt.Errorf("run.links[%d] %q must be the name of a part of the application, such as shop-api", i, l)
+		part, res := SplitLink(l)
+		if !ValidID(part) || (res != "" && !ValidID(res)) || strings.HasSuffix(l, "/") {
+			return fmt.Errorf("run.links[%d] %q must be the name of a part of the application, such as shop-api, or a part's shared database, such as shop-api/main", i, l)
+		}
+		if res != "" {
+			if database != "" {
+				return fmt.Errorf("run.links: %s and %s are both databases; a service has one database", database, l)
+			}
+			database = l
+			continue
 		}
 		if err := use(LinkEnv(l), "run.links"); err != nil {
 			return err

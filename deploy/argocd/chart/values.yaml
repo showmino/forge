@@ -27,6 +27,13 @@ dns: null
 resources: null
 # run.env: plain environment variables, NAME: value.
 vars: {}
+# forge-api's ServiceAccount, set by the platform (the ApplicationSet), not
+# per service. With it, a database that is shared (database.shared) or
+# linked (database.from) gets a Role that lets forge-api read, or keep, that
+# one Secret (templates/database-access.yaml). Unset, no Role is made and
+# databases cannot be shared.
+#   forgeApi: {serviceAccount: forge-api, namespace: forge}
+forgeApi: {}
 # run.links: the addresses of other parts of the service's application,
 # by the variable each is given as. {SHOP_API_URL: http://shop-api.shop-api-staging.svc}
 links: {}

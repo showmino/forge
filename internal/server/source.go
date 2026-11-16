@@ -26,6 +26,9 @@ type source struct {
 	stagingInternal bool
 	// run is forge.yaml's run section, nil without one.
 	run *manifest.Run
+	// shares are the resources forge.yaml shares with the other parts of
+	// the service's application.
+	shares []string
 	// imageOnly is set for a service without a repo: the image its
 	// forge.yaml in the deploy repo names, in full. Then commit is the
 	// image's digest, ref its tag and image the image pinned to the digest.
@@ -110,6 +113,7 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 		s.domain, s.host = mf.RunDomain(), mf.RunHost()
 		s.stagingInternal = mf.StagingInternal()
 		s.run = mf.Run
+		s.shares = mf.Shares()
 	}
 	s.image = imageName(registry, s.owner, s.serviceID, s.commit)
 	return s, nil

@@ -307,6 +307,23 @@ Service) but cannot have links itself. Previews get no links, as they get no
 `run.env`. The service chart sets the variables from its value `links`, so
 the service chart (`deploys.chartRevision`) must be at this release too.
 
+A part can also use another part's database. The owning part says so in its
+forge.yaml (`resources: [{name: main, type: postgres, share: true}]`) and is
+deployed; the other part names it, `run.links: [shop-api/main]`, and gets
+`DATABASE_URL` for it, the same credentials the owner has. A service has one
+database: its own or a linked one. A pod cannot read a Secret of another
+namespace, so at every deploy of the linking part forge-api copies the URL
+(and nothing else) from the owner's Secret into the Secret
+`forge-linked-database` in the linking part's namespace; a deploy without
+the link removes the copy. A changed password therefore reaches the linking
+part at its next deploy. forge-api has no cluster-wide access to Secrets for
+this: the service chart gives it a Role on that one Secret, to read it in
+the namespace of a shared database and to replace or delete it in the
+namespace of a linked one (`templates/database-access.yaml`, from the value
+`forgeApi` the `forge` chart sets), and the services' Argo CD project allows
+`Role` and `RoleBinding` for it. The older `deploy/k3s` manifests do not
+have this.
+
 The owner team also gets the role `maintain` on the service's repo, when
 forge-api has a GitHub App: `forge create` gives it right after making the
 repo (step `grant_team`; if that fails the repo is deleted again),

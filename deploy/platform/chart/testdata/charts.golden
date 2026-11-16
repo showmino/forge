@@ -923,6 +923,11 @@ spec:
     - {group: onepassword.com, kind: OnePasswordItem}
     - {group: batch, kind: CronJob}
     - {group: keda.sh, kind: ScaledObject}
+    # A database shared between the parts of an application: the Role that
+    # lets forge-api read, or keep, that one Secret (the service chart's
+    # database-access.yaml).
+    - {group: rbac.authorization.k8s.io, kind: Role}
+    - {group: rbac.authorization.k8s.io, kind: RoleBinding}
     - {group: argoproj.io, kind: AppProject}
     # Not deployed by the chart: Argo CD leaves out of an application's tree
     # every kind its project does not allow, so without these the UI shows a
@@ -1060,6 +1065,8 @@ spec:
               - {name: secretBackend, value: "onepassword"}
             # How every service is reached: the platform's choice, not the service's.
             valuesObject:
+              # Who may copy the URL of a database that parts share.
+              forgeApi: {serviceAccount: forge-api, namespace: "forge"}
               route:
                 kind: "gateway"
                 gateway: {name: forge-previews, namespace: "forge"}

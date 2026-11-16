@@ -123,7 +123,8 @@ func partLinks(p *forgev1.ApplicationPart) string {
 		}
 	}
 	for i, l := range links {
-		links[i] = strings.TrimPrefix(l, "services/")
+		// "services/shop-api/resources/main" is that part's database.
+		links[i] = strings.Replace(strings.TrimPrefix(l, "services/"), "/resources/", "/", 1)
 	}
 	return strings.Join(links, ", ")
 }

@@ -226,6 +226,9 @@ type deployRecord struct {
 	// Links is run.links, kept so that a promotion links the service to the
 	// same parts in the next environment.
 	Links []string `yaml:"links,omitempty"`
+	// Shares are the resources forge.yaml shares with the other parts of
+	// the service's application, kept for the same reason.
+	Shares []string `yaml:"shares,omitempty"`
 	// Image and DeployCommit come from the commit, not the values file.
 	Image        string `yaml:"-"`
 	DeployCommit string `yaml:"-"`
@@ -334,8 +337,19 @@ var onePasswordID = regexp.MustCompile(`^[a-z0-9]{26}$`)
 
 // deployDatabase tells the chart where the app's DATABASE_URL comes from.
 type deployDatabase struct {
-	// Secret is the Secret CloudNativePG wrote; its "uri" key is the URL.
+	// Secret is the Secret whose "uri" key is the URL: the one
+	// CloudNativePG wrote, or Forge's copy of another part's (From).
 	Secret string `yaml:"secret"`
+	// Resource is the service's resource the database is; empty for
+	// another part's.
+	Resource string `yaml:"resource,omitempty"`
+	// Shared is set when other parts of the application may use the
+	// database: the chart then lets forge-api read Secret, to copy it.
+	Shared bool `yaml:"shared,omitempty"`
+	// From is "<part>/<resource>" when the database is another part's,
+	// linked with run.links: Secret is then Forge's copy, which the chart
+	// lets forge-api keep up to date.
+	From string `yaml:"from,omitempty"`
 }
 
 func (v deployValues) marshal() []byte {
@@ -838,6 +852,9 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	v.forEnv(to)
 	// The same parts, at their addresses in the next environment.
 	if v.Links, err = d.links(ctx, svc, v.Forge.Links, to); err != nil {
+		return nil, err
+	}
+	if _, err := d.linkedDatabase(ctx, svc, v.Forge.Links, to); err != nil {
 		return nil, err
 	}
 	if v.Chart != nil {

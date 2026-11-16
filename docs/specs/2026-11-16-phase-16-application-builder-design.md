@@ -137,8 +137,16 @@ and the builder with E.
 deploys and promotes. Two things differ from the above. A part that runs a
 chart cannot have links of its own, because Forge gives a chart no
 variables; it can be linked to. Previews get no links, as they get no
-`run.env` either. The shared database is not built yet: how the owning
-part's credentials reach another namespace is the owner's to decide.
+`run.env` either.
+
+**The shared database, as built (2026-11-16).** The owning part opts in
+with `share: true` on the resource; the link is refused until it is
+deployed that way in the same environment. The owner chose how the
+credentials cross namespaces (2026-11-16): forge-api copies the URL into
+the Secret `forge-linked-database` in the linking part's namespace at each
+of its deploys, with access scoped by the service chart, a Role on the one
+named Secret in each of the two namespaces, and no cluster-wide access to
+Secrets. A changed password reaches the linking part at its next deploy.
 
 ## C. Workers
 

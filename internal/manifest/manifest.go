@@ -14,7 +14,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -103,9 +102,10 @@ type Run struct {
 	Secrets     []Secret          `yaml:"secrets,omitempty" json:"secrets,omitempty"`
 	Jobs        []Job             `yaml:"jobs,omitempty" json:"jobs,omitempty"`
 	Autoscaling *Autoscaling      `yaml:"autoscaling,omitempty" json:"autoscaling,omitempty"`
-	// Links are other parts of the service's application that it calls:
-	// for each, its pods get <PART>_URL (LinkEnv), the part's address
-	// inside the cluster in the same environment.
+	// Links are other parts of the service's application that it uses. A
+	// part's name gives the pods <PART>_URL (LinkEnv), the part's address
+	// inside the cluster in the same environment. "<part>/<resource>" gives
+	// them DATABASE_URL for that part's shared database (SplitLink).
 	Links []string `yaml:"links,omitempty" json:"links,omitempty"`
 	// Staging holds what differs in staging.
 	Staging *StagingRun `yaml:"staging,omitempty" json:"staging,omitempty"`
@@ -215,6 +215,20 @@ type Resource struct {
 	Instances int `yaml:"instances,omitempty"`
 	// Environments overrides storage and instances per environment.
 	Environments map[string]ResourceOverride `yaml:"environments,omitempty"`
+	// Share lets other parts of the service's application use the database
+	// (their run.links names it as "<service>/<name>").
+	Share bool `yaml:"share,omitempty"`
+}
+
+// Shares names the resources other parts of the application may use.
+func (m *Manifest) Shares() []string {
+	var out []string
+	for _, r := range m.Resources {
+		if r.Share {
+			out = append(out, r.Name)
+		}
+	}
+	return out
 }
 
 // ResourceOverride replaces a resource's values in one environment.
@@ -312,9 +326,18 @@ func (m *Manifest) Validate() error {
 		if m.Service.Application == "" {
 			return errors.New("run.links names parts of the service's application: set service.application")
 		}
-		if slices.Contains(r.Links, m.Service.Name) {
-			return fmt.Errorf("run.links: %s cannot link to itself", m.Service.Name)
+		for _, l := range r.Links {
+			part, res := SplitLink(l)
+			if part == m.Service.Name {
+				return fmt.Errorf("run.links: %s cannot link to itself", m.Service.Name)
+			}
+			if res != "" && len(m.Resources) > 0 {
+				return fmt.Errorf("run.links: %s is another part's database, and the service has resources of its own; a service has one database", l)
+			}
 		}
+	}
+	if len(m.Shares()) > 0 && m.Service.Application == "" {
+		return errors.New("resources: share is for the other parts of the service's application: set service.application")
 	}
 	if m.Service.Tier < 0 || m.Service.Tier > 3 {
 		return fmt.Errorf("service.tier %d must be 1 (critical), 2 (high) or 3 (medium)", m.Service.Tier)
