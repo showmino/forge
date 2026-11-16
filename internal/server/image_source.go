@@ -199,7 +199,7 @@ func (d *Deploys) imageSource(ctx context.Context, sid, ref string, chartValues 
 	src = source{
 		serviceID: sid, ref: p.version(), commit: p.digest, image: p.pinned,
 		port: int32(mf.RunPort()), health: mf.RunHealth(), //nolint:gosec // Parse checks run.port is 1-65535
-		domain: mf.RunDomain(), host: mf.RunHost(), stagingInternal: mf.StagingInternal(), run: mf.Run, shares: mf.Shares(),
+		domain: mf.RunDomain(), host: mf.RunHost(), stagingInternal: mf.StagingInternal(), run: mf.Run, shares: mf.Shares(), worker: mf.Worker(),
 		imageOnly: p.full,
 	}
 	return src, retag, nil

@@ -74,6 +74,17 @@ func TestDeployLinks(t *testing.T) {
 		t.Errorf("the deployment's links: %v", got)
 	}
 
+	// A worker has no address to link to.
+	head, tree, err := f.repo.Head(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := deployValues{Name: "ledger", Env: "staging", Worker: true, Forge: deployRecord{Service: "services/ledger", Env: "staging", Worker: true}}
+	if _, err := f.repo.CommitFile(context.Background(), head, tree, valuesPath("ledger", "staging"), w.marshal(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	refused("services/ledger is a worker and has no address to link to")
+
 	// A part that left the application cannot be linked to any more.
 	join("ledger", "")
 	refused("services/ledger is not a part of the application shop")

@@ -163,6 +163,10 @@ shares. A changed password reaches the linking part at its next deploy.
 - Everything else is unchanged: deploys, versions, restart, scale, logs,
   previews (a preview of a worker has no address).
 
+**As built (2026-11-16):** as above, with one difference: a worker has no
+preview at all (`forge env create` refuses it), because a preview is an
+address to look at.
+
 ## D. Promote and roll back as one
 
 - `PromoteApplication` (`forge application promote <name>`): promotes every

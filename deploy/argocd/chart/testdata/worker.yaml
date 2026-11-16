@@ -1,0 +1,22 @@
+name: payments-worker
+env: staging
+image: ghcr.io/showmino/payments-worker:1a2b3c4
+port: 0
+health: ""
+replicas: 1
+host: ""
+worker: true
+vars:
+  QUEUE: orders
+links:
+  PAYMENTS_URL: http://payments.payments-staging.svc
+forge:
+  service: services/payments-worker
+  env: staging
+  ref: main
+  commit: 1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d
+  actor: ana@example.com
+  operation: operations/op_000000000001
+  kind: deploy
+  time: "2026-10-09T12:00:00Z"
+  worker: true

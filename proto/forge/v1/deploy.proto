@@ -133,6 +133,9 @@ message Deployment {
   // "services/{service}/resources/{name}" is a part's shared database,
   // which its pods have in DATABASE_URL. Output only.
   repeated string links = 20;
+  // The service is a worker (forge.yaml's run.worker): it serves nothing,
+  // and url is empty. Output only.
+  bool worker = 21;
 }
 
 // DeployRecord is one change of one environment.

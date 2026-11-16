@@ -2,7 +2,7 @@
 {{- if not (has $kind (list "gateway" "ingress")) }}
 {{- fail (printf "route.kind %q must be gateway or ingress" $kind) }}
 {{- end }}
-{{- if eq $kind "ingress" }}
+{{- if and (eq $kind "ingress") (not .Values.worker) }}
 {{- $i := .Values.route.ingress }}
 {{- $host := required "host" .Values.host }}
 {{- with $i.domain }}

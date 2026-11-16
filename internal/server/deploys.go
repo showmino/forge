@@ -226,6 +226,9 @@ type deployRecord struct {
 	// Links is run.links, kept so that a promotion links the service to the
 	// same parts in the next environment.
 	Links []string `yaml:"links,omitempty"`
+	// Worker is run.worker, kept so that a promotion gives the next
+	// environment no address either.
+	Worker bool `yaml:"worker,omitempty"`
 	// Shares are the resources forge.yaml shares with the other parts of
 	// the service's application, kept for the same reason.
 	Shares []string `yaml:"shares,omitempty"`
@@ -249,6 +252,10 @@ type deployValues struct {
 	DNS      *deployDNS `yaml:"dns,omitempty"`
 	// Public marks a public address with no record of Forge's: the root of a domain.
 	Public bool `yaml:"public,omitempty"`
+	// Worker is set for a service that serves nothing (run.worker): the
+	// chart then makes no Service, no route and no HTTP probes, and Port,
+	// Health and Host are empty.
+	Worker bool `yaml:"worker,omitempty"`
 	// Database is set when the service has a database in this environment.
 	Database *deployDatabase `yaml:"database,omitempty"`
 	// forge.yaml's run options; Autoscaling only in production.
@@ -448,7 +455,10 @@ func (d *Deploys) deploymentFrom(svc, env string, v deployValues, deployCommit s
 		Image: v.Image, Ref: v.Forge.Ref, Commit: v.Forge.Commit, Url: hostURL(v.Host, v.isPublic()),
 		Sync: forgev1.Deployment_SYNC_STATUS_UNKNOWN, Health: forgev1.Deployment_HEALTH_UNKNOWN,
 		Message: st.Message, DeployCommit: deployCommit, DeployedBy: v.Forge.Actor, Version: v.Forge.Version,
-		Links: linkNames(v.Forge.Links),
+		Links: linkNames(v.Forge.Links), Worker: v.Worker,
+	}
+	if v.Worker {
+		dep.Url = ""
 	}
 	if s, ok := syncStates[st.Sync]; ok {
 		dep.Sync = s
@@ -767,9 +777,12 @@ func (d *Deploys) RollbackDeploy(ctx context.Context, req *connect.Request[forge
 	if cur != nil && cur.Forge.StagingInternal {
 		v.Forge.StagingInternal = true
 	}
-	addr, moved, err := d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host, stagingInternal: v.Forge.StagingInternal}, cur)
-	if err != nil {
-		return nil, err
+	var addr address
+	var moved string
+	if !v.Worker {
+		if addr, moved, err = d.addressFor(ctx, svc, env, wanted{domain: v.Forge.Domain, host: v.Forge.Host, stagingInternal: v.Forge.StagingInternal}, cur); err != nil {
+			return nil, err
+		}
 	}
 	v.setAddress(addr)
 	// Like the address: under today's settings, not the restored deploy's.
@@ -842,9 +855,12 @@ func (d *Deploys) PromoteDeploy(ctx context.Context, req *connect.Request[forgev
 	if err != nil {
 		return nil, err
 	}
-	addr, moved, err := d.addressFor(ctx, svc, to, wanted{domain: src.Forge.Domain, host: src.Forge.Host, stagingInternal: src.Forge.StagingInternal}, d.currentValues(ctx, svc, to))
-	if err != nil {
-		return nil, err
+	var addr address
+	var moved string
+	if !src.Worker {
+		if addr, moved, err = d.addressFor(ctx, svc, to, wanted{domain: src.Forge.Domain, host: src.Forge.Host, stagingInternal: src.Forge.StagingInternal}, d.currentValues(ctx, svc, to)); err != nil {
+			return nil, err
+		}
 	}
 	v := src
 	v.Env = to

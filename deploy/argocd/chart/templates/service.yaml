@@ -1,5 +1,6 @@
 {{- /* With a chart, the route goes to the chart's own Service. */ -}}
-{{- if not .Values.chart }}
+{{- /* A worker serves nothing: no Service. */ -}}
+{{- if not (or .Values.chart .Values.worker) }}
 apiVersion: v1
 kind: Service
 metadata:
