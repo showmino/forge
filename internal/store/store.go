@@ -58,6 +58,9 @@ type Tx interface {
 	Recall(ctx context.Context, requestID string) (*forgev1.Service, error)
 	// Remember records svc as the result of requestID.
 	Remember(ctx context.Context, requestID string, svc *forgev1.Service) error
+	// Parts returns the sorted names of the services whose application is
+	// application.
+	Parts(ctx context.Context, application string) ([]string, error)
 	// ForRepo is Store.ForRepo with this write's own changes.
 	ForRepo(ctx context.Context, owner, repo string) ([]string, error)
 }

@@ -172,6 +172,29 @@ func runSuite(t *testing.T, open func(t *testing.T) Store) {
 		}
 	})
 
+	t.Run("parts see the transaction's writes", func(t *testing.T) {
+		s := open(t)
+		a, b := svc("a", "x", ""), svc("b", "x", "")
+		a.Application, b.Application = "shop", "shop"
+		put(t, s, a, b, svc("c", "x", ""))
+		if err := s.Write(ctx, func(tx Tx) error {
+			got, err := tx.Parts(ctx, "shop")
+			if err != nil || !slices.Equal(got, []string{"services/a", "services/b"}) {
+				return fmt.Errorf("parts of shop: %v %w", got, err)
+			}
+			if err := tx.Delete(ctx, "services/a"); err != nil {
+				return err
+			}
+			got, err = tx.Parts(ctx, "shop")
+			if err != nil || !slices.Equal(got, []string{"services/b"}) {
+				return fmt.Errorf("after deleting a: %v %w", got, err)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("dependents see the transaction's writes", func(t *testing.T) {
 		s := open(t)
 		put(t, s, svc("b", "x", ""), svc("a", "x", "", "services/b"), svc("c", "x", "", "services/b", "services/a"))

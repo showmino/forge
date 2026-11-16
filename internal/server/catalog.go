@@ -308,6 +308,9 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 		if err := checkDependencies(ctx, tx, name, in); err != nil {
 			return err
 		}
+		if err := checkApplication(ctx, tx, name, in); err != nil {
+			return err
+		}
 		s := cloneSvc(in)
 		s.Name = name
 		// Only SetAddress sets an address: it checks the names it takes.
@@ -341,7 +344,7 @@ func (c *Catalog) register(ctx context.Context, req *connect.Request[forgev1.Reg
 }
 
 // updatable lists the field mask paths UpdateService accepts.
-var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels", "environments", "tier", "slo"}
+var updatable = []string{"display_name", "owner_team", "owners", "lifecycle", "repo_url", "dependencies", "labels", "environments", "tier", "slo", "application"}
 
 func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev1.UpdateServiceRequest]) (*connect.Response[forgev1.UpdateServiceResponse], error) {
 	if _, ok := PrincipalFrom(ctx); !ok {
@@ -459,12 +462,17 @@ func (c *Catalog) UpdateService(ctx context.Context, req *connect.Request[forgev
 				next.Tier = in.GetTier()
 			case "slo":
 				next.Slo = in.GetSlo()
+			case "application":
+				next.Application = in.GetApplication()
 			}
 		}
 		if err := validateService(next); err != nil {
 			return err
 		}
 		if err := checkDependencies(ctx, tx, name, next); err != nil {
+			return err
+		}
+		if err := checkApplication(ctx, tx, name, next); err != nil {
 			return err
 		}
 		next.UpdateTime = timestamppb.New(c.now())
@@ -544,6 +552,51 @@ func checkDependencies(ctx context.Context, tx store.Tx, name string, s *forgev1
 	return nil
 }
 
+// checkApplication keeps applications in order when the service called name
+// is written as s: every part of an application has the same team, and an
+// application shares its name with one of its own parts or with no service.
+func checkApplication(ctx context.Context, tx store.Tx, name string, s *forgev1.Service) error {
+	id := strings.TrimPrefix(name, servicePrefix)
+	if app := s.GetApplication(); app != "" {
+		parts, err := tx.Parts(ctx, app)
+		if err != nil {
+			return err
+		}
+		for _, p := range parts {
+			if p == name {
+				continue
+			}
+			other, _, err := tx.Get(ctx, p)
+			if err != nil {
+				return err
+			}
+			if other.GetOwnerTeam() != s.GetOwnerTeam() {
+				return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("application %s belongs to team %s (%s is a part of it): %s of team %s cannot be a part; every part of an application has the same team", app, other.GetOwnerTeam(), p, name, s.GetOwnerTeam()))
+			}
+		}
+		if app != id {
+			switch namesake, _, err := tx.Get(ctx, servicePrefix+app); {
+			case errors.Is(err, store.ErrNotFound):
+			case err != nil:
+				return err
+			case namesake.GetApplication() != app:
+				return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("an application cannot be called %s: %s is a service that is not a part of it", app, servicePrefix+app))
+			}
+		}
+	}
+	if s.GetApplication() != id {
+		// The service's own name must not be another application's.
+		parts, err := tx.Parts(ctx, id)
+		if err != nil {
+			return err
+		}
+		if parts = slices.DeleteFunc(parts, func(p string) bool { return p == name }); len(parts) > 0 {
+			return connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s has the name of the application %s (%s is a part of it): make it a part with application %q, or choose another name", name, id, parts[0], id))
+		}
+	}
+	return nil
+}
+
 func validateService(s *forgev1.Service) error {
 	if s.GetOwnerTeam() == "" {
 		return invalid("service.owner_team is required")
@@ -552,6 +605,9 @@ func validateService(s *forgev1.Service) error {
 		if !strings.HasPrefix(d, servicePrefix) || !manifest.ValidID(strings.TrimPrefix(d, servicePrefix)) {
 			return invalid(fmt.Sprintf("dependency %q must be a service name like services/payments", d))
 		}
+	}
+	if a := s.GetApplication(); a != "" && !manifest.ValidID(a) {
+		return invalid(fmt.Sprintf("application %q must be a lowercase DNS label (a-z, 0-9, '-', max 63)", a))
 	}
 	if s.GetTier() < 0 || s.GetTier() > 3 {
 		return invalid(fmt.Sprintf("tier %d must be 1 (critical), 2 (high), 3 (medium) or 0 (not set)", s.GetTier()))

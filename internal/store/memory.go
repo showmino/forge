@@ -188,6 +188,24 @@ func (t *memTx) Dependents(_ context.Context, name string) ([]string, error) {
 	return out, nil
 }
 
+func (t *memTx) Parts(_ context.Context, application string) ([]string, error) {
+	seen := map[string]bool{}
+	for n := range t.m.services {
+		seen[n] = true
+	}
+	for n := range t.services {
+		seen[n] = true
+	}
+	var out []string
+	for n := range seen {
+		if e, ok := t.lookup(n); ok && e.svc.GetApplication() == application {
+			out = append(out, n)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
 func (t *memTx) ForRepo(_ context.Context, owner, repo string) ([]string, error) {
 	key := strings.ToLower(owner + "/" + repo)
 	seen := map[string]bool{}

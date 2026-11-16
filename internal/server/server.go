@@ -173,6 +173,7 @@ func New(o Options) (http.Handler, error) {
 	}
 	mux.Handle(forgev1connect.NewPolicyServiceHandler(&policyService{st: o.RuleModes, now: time.Now}, opts))
 	mux.Handle(forgev1connect.NewTeamServiceHandler(&teamService{src: o.Teams, org: o.GitHubOrg, log: o.Logger, now: time.Now}, opts))
+	mux.Handle(forgev1connect.NewApplicationServiceHandler(&applicationService{catalog: o.Catalog, deploys: o.Deploys}, opts))
 	mux.Handle(forgev1connect.NewOperationServiceHandler(&operationService{ops: o.Operations}, opts))
 	mux.Handle(forgev1connect.NewEnvironmentServiceHandler(o.Environments, opts))
 	mux.Handle(forgev1connect.NewDeployServiceHandler(o.Deploys, opts))

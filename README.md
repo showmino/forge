@@ -285,6 +285,16 @@ critical, 2 high, 3 medium) and `slo` (its availability target, such as
 team changes them with `forge service update payments --tier 1 --slo 99.95%`
 (`--tier 0` and `--slo ""` clear them). `forge service get` shows them.
 
+Services that belong together (a web app, its API, its worker) are grouped
+into an **application**. A service is a part of one when its `application`
+names it: `service.application` in forge.yaml at create or register, or
+`forge service update shop-worker --application shop` (`--application ""`
+takes it out). Every part of an application has the same team, and an
+application shares its name with one of its own parts or with no service.
+`forge application list` shows the applications and `forge application get
+shop` each part with what it runs in staging and production. An application
+exists while a service names it; nothing else is stored.
+
 The owner team also gets the role `maintain` on the service's repo, when
 forge-api has a GitHub App: `forge create` gives it right after making the
 repo (step `grant_team`; if that fails the repo is deleted again),

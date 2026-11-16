@@ -103,6 +103,11 @@ message Service {
   string slo = 16;
   // Removed in Forge 0.57.0 with the golden-path checks: always false.
   bool tracing = 17 [deprecated = true];
+  // The application this service is a part of, such as "shop"; "" when it
+  // is part of none. From forge.yaml's service.application at create; the
+  // owning team changes it. Every part of an application has the same
+  // owner_team (ApplicationService).
+  string application = 18;
 }
 
 // InfrastructureRepo is a repo of infrastructure code that its own GitHub

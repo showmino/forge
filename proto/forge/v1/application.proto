@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package forge.v1;
+
+import "forge/v1/deploy.proto";
+
+// ApplicationService reads applications: services ("parts") that belong
+// together under one name and one team, such as a web app, its API and its
+// worker. A service joins an application through its `application` field;
+// an application exists while a service names it, and nothing else is
+// stored. Resource names follow AIP style: "applications/{application}".
+service ApplicationService {
+  // ListApplications returns every application, ordered by name, with its
+  // parts but without their deployments.
+  rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // GetApplication returns one application with what each part runs in
+  // staging and production.
+  rpc GetApplication(GetApplicationRequest) returns (GetApplicationResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// Application is a group of services with one name and one team.
+message Application {
+  // "applications/{application}".
+  string name = 1;
+  // The team that owns every part.
+  string owner_team = 2;
+  // The parts, ordered by service name.
+  repeated ApplicationPart parts = 3;
+}
+
+// ApplicationPart is one service of an application.
+message ApplicationPart {
+  // "services/{service}".
+  string service = 1;
+  string display_name = 2;
+  // The part's repository; "" for a part without one (an image or a chart).
+  string repo_url = 3;
+  // What the part runs in staging and in production. GetApplication only,
+  // and empty when this Forge has no deploys.
+  repeated Deployment deployments = 4;
+}
+
+message ListApplicationsRequest {}
+
+message ListApplicationsResponse {
+  repeated Application applications = 1;
+}
+
+message GetApplicationRequest {
+  // "applications/{application}".
+  string name = 1;
+}
+
+message GetApplicationResponse {
+  Application application = 1;
+}

@@ -545,6 +545,8 @@ var auditReads = []string{
 	forgev1connect.TemplateServiceListTemplatesProcedure,
 	forgev1connect.TemplateServiceGetTemplateProcedure,
 	forgev1connect.TeamServiceListTeamsProcedure,
+	forgev1connect.ApplicationServiceListApplicationsProcedure,
+	forgev1connect.ApplicationServiceGetApplicationProcedure,
 	forgev1connect.ServiceCatalogServiceListServiceChecksProcedure, // removed in 0.57.0
 	forgev1connect.PolicyServiceListRulesProcedure,
 	forgev1connect.AuditServiceGetAdoptionProcedure,

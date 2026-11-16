@@ -192,6 +192,10 @@ func (t pgTx) Dependents(ctx context.Context, name string) ([]string, error) {
 		WHERE name <> $1 AND data->'dependencies' ? $1 ORDER BY name`, name)
 }
 
+func (t pgTx) Parts(ctx context.Context, application string) ([]string, error) {
+	return names(ctx, t.tx, "SELECT name FROM services WHERE data->>'application' = $1 ORDER BY name", application)
+}
+
 func (t pgTx) ForRepo(ctx context.Context, owner, repo string) ([]string, error) {
 	return names(ctx, t.tx, "SELECT name FROM services WHERE repo = $1 ORDER BY name", strings.ToLower(owner+"/"+repo))
 }
