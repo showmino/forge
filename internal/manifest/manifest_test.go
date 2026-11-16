@@ -94,6 +94,24 @@ func TestApplication(t *testing.T) {
 	}
 }
 
+// run.worker: a service that serves nothing (phase 16).
+func TestWorker(t *testing.T) {
+	t.Parallel()
+	base := "apiVersion: forge.dev/v1\nservice:\n  name: shop-worker\n  team: billing\n"
+	m, err := Parse([]byte(base + "run:\n  worker: true\n  replicas: 2\n  env: {QUEUE: orders}\n  jobs: [{name: sweep, schedule: \"0 3 * * *\", command: [sweep]}]\n"))
+	if err != nil || !m.Worker() {
+		t.Fatalf("a worker: %v", err)
+	}
+	if m, _ := Parse([]byte(base)); m.Worker() {
+		t.Error("a service without run.worker is a worker")
+	}
+	for _, bad := range []string{"  port: 9090\n", "  health: /ready\n", "  domain: example.com\n", "  host: pay\n", "  staging: {public: false}\n"} {
+		if _, err := Parse([]byte(base + "run:\n  worker: true\n" + bad)); err == nil || !strings.Contains(err.Error(), "does not apply to a worker") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}
+
 // run.links: the parts of its application a service calls (phase 16).
 func TestLinks(t *testing.T) {
 	t.Parallel()

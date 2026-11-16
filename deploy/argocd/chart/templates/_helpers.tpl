@@ -3,7 +3,9 @@ run.env (vars) and the fields of run.secrets. The Deployment and the CronJobs
 share them. FORGE_ENVIRONMENT (staging or production) lets an app pick its
 dependencies' addresses for the environment it runs in. */}}
 {{- define "forge.env" -}}
+{{- if not .Values.worker -}}
 - {name: PORT, value: "{{ .Values.port }}"}
+{{ end -}}
 - {name: FORGE_ENVIRONMENT, value: {{ required "env" .Values.env | quote }}}
 {{- with .Values.database }}
 # The connection string CloudNativePG keeps for the service's database.

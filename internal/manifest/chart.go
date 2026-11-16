@@ -143,7 +143,7 @@ func (m *Manifest) checkChart() error {
 		name string
 		set  bool
 	}{
-		{"image", r.Image != ""}, {"port", r.Port != 0}, {"health", r.Health != ""}, {"writable", len(r.Writable) > 0},
+		{"image", r.Image != ""}, {"worker", r.Worker}, {"port", r.Port != 0}, {"health", r.Health != ""}, {"writable", len(r.Writable) > 0},
 		{"replicas", r.Replicas != 0}, {"resources", r.Resources != nil}, {"env", len(r.Env) > 0},
 		{"secrets", len(r.Secrets) > 0}, {"jobs", len(r.Jobs) > 0}, {"autoscaling", r.Autoscaling != nil},
 	} {

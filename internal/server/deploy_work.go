@@ -113,9 +113,13 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 		return nil, err
 	}
 	env, actor := m.GetEnv(), actorOf(ctx)
-	addr, moved, err := d.addressFor(ctx, src.serviceID, env, wanted{domain: src.domain, host: src.host, stagingInternal: src.stagingInternal}, d.currentValues(ctx, src.serviceID, env))
-	if err != nil {
-		return nil, err
+	var addr address
+	var moved string
+	if !src.worker {
+		// A worker serves nothing, so it has no address to work out.
+		if addr, moved, err = d.addressFor(ctx, src.serviceID, env, wanted{domain: src.domain, host: src.host, stagingInternal: src.stagingInternal}, d.currentValues(ctx, src.serviceID, env)); err != nil {
+			return nil, err
+		}
 	}
 	v := deployValues{
 		Name: src.serviceID, Env: env, Image: src.image, Port: src.port, Health: src.health, Replicas: 1,
@@ -124,6 +128,9 @@ func (d *Deploys) StartDeploy(ctx context.Context, req *connect.Request[forgev1.
 	v.setAddress(addr)
 	v.setOptions(src.run)
 	v.Forge.Shares = src.shares
+	if src.worker {
+		v.Worker, v.Forge.Worker, v.Port, v.Health = true, true, 0, ""
+	}
 	v.forEnv(env)
 	if src.chart != nil && len(v.Forge.Links) > 0 {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s runs a chart, which Forge gives no variables: remove run.links (other parts can still link to it)", servicePrefix, src.serviceID))

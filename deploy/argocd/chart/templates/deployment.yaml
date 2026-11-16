@@ -40,14 +40,19 @@ spec:
       containers:
         - name: {{ .Values.name }}
           image: {{ required "image" .Values.image }}
+          {{- if not .Values.worker }}
           ports:
             - {name: http, containerPort: {{ .Values.port }}}
+          {{- end }}
           env:
             {{- include "forge.env" . | nindent 12 }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- /* A worker (run.worker) serves nothing to probe: it is ready
+          when its process runs, and restarted when that exits. */}}
+          {{- if not .Values.worker }}
           readinessProbe:
             httpGet: {path: {{ .Values.health }}, port: {{ .Values.port }}}
             periodSeconds: 5
@@ -55,6 +60,7 @@ spec:
             httpGet: {path: {{ .Values.health }}, port: {{ .Values.port }}}
             initialDelaySeconds: 10
             periodSeconds: 5
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

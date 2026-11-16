@@ -57,6 +57,9 @@ func (d *Deploys) SetAddress(ctx context.Context, req *connect.Request[forgev1.S
 	// Only the environments it has: one it lacks gets no address.
 	for _, env := range serviceEnvs(entry) {
 		cur := d.currentValues(ctx, svc, env)
+		if cur != nil && cur.Worker {
+			return nil, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s%s is a worker (run.worker) and has no address", servicePrefix, svc))
+		}
 		// run.staging.public stays as the last deploy here had it.
 		internal := cur != nil && cur.Forge.StagingInternal
 		want := wanted{domain: domain, host: host, set: true, stagingInternal: internal}

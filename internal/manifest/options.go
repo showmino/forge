@@ -320,6 +320,16 @@ func (m *Manifest) checkRun() error {
 	if r == nil {
 		r = &Run{}
 	}
+	if r.Worker {
+		for _, f := range []struct {
+			name string
+			set  bool
+		}{{"port", r.Port != 0}, {"health", r.Health != ""}, {"domain", r.Domain != ""}, {"host", r.Host != ""}, {"staging", r.Staging != nil}} {
+			if f.set {
+				return fmt.Errorf("run.%s does not apply to a worker (run.worker), which has no port and no address", f.name)
+			}
+		}
+	}
 	for i, j := range r.Jobs {
 		// A CronJob's name has at most 52 characters.
 		if n := len(m.Service.Name) + 1 + len(j.Name); n > 52 {

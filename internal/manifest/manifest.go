@@ -76,6 +76,9 @@ type Run struct {
 	// Its forge.yaml lives in the deploy repo; a service with a repo runs
 	// what its own CI builds and has none.
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
+	// Worker marks a service that serves nothing: it has no port, no
+	// health check and no address, and is ready when its process runs.
+	Worker bool `yaml:"worker,omitempty" json:"worker,omitempty"`
 	// Port the service listens on for HTTP.
 	Port int `yaml:"port,omitempty" json:"port,omitempty"`
 	// Health is the HTTP path probed for readiness and liveness.
@@ -123,6 +126,9 @@ type StagingRun struct {
 func (m *Manifest) StagingInternal() bool {
 	return m.Run != nil && m.Run.Staging != nil && m.Run.Staging.Public != nil && !*m.Run.Staging.Public
 }
+
+// Worker reports whether run.worker is set.
+func (m *Manifest) Worker() bool { return m.Run != nil && m.Run.Worker }
 
 // RunHost returns run.host as it is written: "" for the service's name.
 func (m *Manifest) RunHost() string {

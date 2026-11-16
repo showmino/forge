@@ -42,6 +42,9 @@ func (d *Deploys) links(ctx context.Context, svc string, parts []string, env str
 		if res != "" {
 			continue // a database: linkedDatabase
 		}
+		if cur := d.currentValues(ctx, p, env); cur != nil && cur.Worker {
+			return nil, refuseLink(svc, "%s%s is a worker and has no address to link to", servicePrefix, p)
+		}
 		// A part's Service is in the namespace <part>-<env>: Forge's own on
 		// port 80, or the one a chart exposes.
 		name, port := p, int32(80)

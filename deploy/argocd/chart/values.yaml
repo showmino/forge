@@ -27,6 +27,9 @@ dns: null
 resources: null
 # run.env: plain environment variables, NAME: value.
 vars: {}
+# run.worker: the service serves nothing. No Service, no route, no DNS
+# record, no PORT and no HTTP probes; port, health and host are then unset.
+worker: false
 # forge-api's ServiceAccount, set by the platform (the ApplicationSet), not
 # per service. With it, forge-api may replace and delete the Secret
 # forge-linked-database (its copy of a linked database's URL) in the

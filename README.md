@@ -307,6 +307,19 @@ Service) but cannot have links itself. Previews get no links, as they get no
 `run.env`. The service chart sets the variables from its value `links`, so
 the service chart (`deploys.chartRevision`) must be at this release too.
 
+A part that serves nothing, such as a queue consumer, is a **worker**:
+`run.worker: true` in its forge.yaml. It has no port, no health check and no
+address (`run.port`, `run.health`, `run.domain`, `run.host` and `run.staging`
+are refused with it), the service chart makes no Service, no route and no DNS
+record for it and sets no `PORT`, and its pod is ready when its process runs
+and restarted when that exits. Everything else is as for any service:
+deploys, versions, promote and rollback, replicas, autoscaling, env, secrets,
+jobs, links, restart and scale. A worker cannot be linked to, has no address
+to set (`forge service address`), and has no preview: `forge env create`
+refuses it, since a preview is an address to look at. A service that runs a
+chart cannot be a worker. The service chart must be at this release: an
+older one would give the worker a Service, a route and HTTP probes.
+
 A part can also use another part's database. The owning part says so in its
 forge.yaml (`resources: [{name: main, type: postgres, share: true}]`) and is
 deployed; the other part names it, `run.links: [shop-api/main]`, and gets

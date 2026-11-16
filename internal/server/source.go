@@ -26,6 +26,8 @@ type source struct {
 	stagingInternal bool
 	// run is forge.yaml's run section, nil without one.
 	run *manifest.Run
+	// worker is run.worker: the service has no port and no address.
+	worker bool
 	// shares are the resources forge.yaml shares with the other parts of
 	// the service's application.
 	shares []string
@@ -114,6 +116,7 @@ func resolveSource(ctx context.Context, cat *Catalog, gh EnvGitHub, org, registr
 		s.stagingInternal = mf.StagingInternal()
 		s.run = mf.Run
 		s.shares = mf.Shares()
+		s.worker = mf.Worker()
 	}
 	s.image = imageName(registry, s.owner, s.serviceID, s.commit)
 	return s, nil

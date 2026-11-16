@@ -22,6 +22,10 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	  -f deploy/argocd/chart/testdata/database-shared.yaml | diff -u deploy/argocd/chart/testdata/database-shared.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
 	  -f deploy/argocd/chart/testdata/database-linked.yaml | diff -u deploy/argocd/chart/testdata/database-linked.golden -
+	$(HELM) template payments-worker deploy/argocd/chart --namespace payments-worker-staging \
+	  -f deploy/argocd/chart/testdata/worker.yaml | diff -u deploy/argocd/chart/testdata/worker.golden -
+	$(HELM) template payments-worker deploy/argocd/chart --namespace payments-worker-staging \
+	  -f deploy/argocd/chart/testdata/worker.yaml --set route.kind=ingress | diff -u deploy/argocd/chart/testdata/worker.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
 	  -f deploy/argocd/chart/testdata/public.yaml | diff -u deploy/argocd/chart/testdata/public.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-production \

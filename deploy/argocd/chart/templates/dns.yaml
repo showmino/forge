@@ -1,3 +1,4 @@
+{{- if not .Values.worker }}
 {{- with .Values.dns }}
 # The public address's DNS record: the platform's CloudflareRecordsApplication
 # makes a proxied CNAME <name>.<the zone's domain> to the cluster's Cloudflare
@@ -13,4 +14,5 @@ spec:
   environment: {{ required "dns.tunnel" .tunnel | quote }}
   dnsZones:
     zones: {{ .zone | quote }}
+{{- end }}
 {{- end }}

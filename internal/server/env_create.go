@@ -99,6 +99,9 @@ func (e *Environments) plan(ctx context.Context, m *forgev1.CreateEnvironmentReq
 	if err != nil {
 		return p, err
 	}
+	if src.worker {
+		return p, connect.NewError(connect.CodeFailedPrecondition, fmt.Errorf("%s is a worker (run.worker): a preview is an address to look at, and a worker has none; deploy it to staging instead", m.GetService()))
+	}
 	p.source = src
 	// A person by email, as deploys record them: the token's subject is an
 	// opaque id nobody can read.

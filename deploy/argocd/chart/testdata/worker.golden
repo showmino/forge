@@ -1,0 +1,65 @@
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: forge
+spec:
+  hard:
+    # Room for the app and, next to it, a database of up to three instances.
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    pods: "15"
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: forge
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {cpu: 500m, memory: 512Mi}
+---
+# Source: forge-chart/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-worker
+  labels: {app: payments-worker}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: payments-worker}
+  template:
+    metadata:
+      labels: {app: payments-worker}
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: forge-pull
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      # The root filesystem is read-only; /tmp and run.writable are the
+      # writable paths.
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+      containers:
+        - name: payments-worker
+          image: ghcr.io/showmino/payments-worker:1a2b3c4
+          env:
+            - {name: FORGE_ENVIRONMENT, value: "staging"}
+            - {name: QUEUE, value: "orders"}
+            # The address of a part of the same application (run.links).
+            - {name: PAYMENTS_URL, value: "http://payments.payments-staging.svc"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
