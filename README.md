@@ -307,6 +307,35 @@ Service) but cannot have links itself. Previews get no links, as they get no
 `run.env`. The service chart sets the variables from its value `links`, so
 the service chart (`deploys.chartRevision`) must be at this release too.
 
+A part can also use another part's database. The owning part says so in its
+forge.yaml (`resources: [{name: main, type: postgres, share: true}]`) and is
+deployed; the other part names it, `run.links: [shop-api/main]`, and gets
+`DATABASE_URL` for it, the same credentials the owner has. A service has one
+database: its own or a linked one. A pod cannot read a Secret of another
+namespace, so at every deploy of the linking part forge-api copies the URL
+(the Secret's `fqdn-uri`, and nothing else) from the owner's Secret into the
+Secret `forge-linked-database` in the linking part's namespace. A changed
+password therefore reaches the linking part at its next deploy. The copy
+goes when it is no longer due, each time once the deploy stands: after a
+deploy of the linking part without the link (tried again at every later
+deploy if it fails), and, for every part that linked, after a deploy of the
+owner without `share: true`. A service cannot change application while what
+it runs has links or shares its database, so it never keeps what the
+application gave it.
+
+forge-api's access to Secrets for this is three things. It creates the copy
+with the `secrets: create` it already has cluster-wide (for the pull
+secret). The service chart (`templates/database-access.yaml`, from the value
+`forgeApi` the `forge` chart sets) lets it replace and delete the one Secret
+`forge-linked-database` in every service's namespace, and read the one
+Secret of a database in the namespace of a service that shares it. It can
+read no other Secret. The services' Argo CD project allows `Role` and
+`RoleBinding` for it; a service that runs someone else's chart has a project
+of its own, which does not. Not checked by Forge: that a pod of one
+namespace reaches PostgreSQL in another, which is the cluster's network
+policy to allow. The older `deploy/k3s` manifests do not
+have this.
+
 The owner team also gets the role `maintain` on the service's repo, when
 forge-api has a GitHub App: `forge create` gives it right after making the
 repo (step `grant_team`; if that fails the repo is deleted again),

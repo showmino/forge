@@ -230,9 +230,11 @@ type Deployment struct {
 	// When RestartDeployment last restarted its pods since the deploy; unset
 	// once a deploy, promote or rollback replaces them.
 	RestartTime *timestamppb.Timestamp `protobuf:"bytes,19,opt,name=restart_time,json=restartTime,proto3" json:"restart_time,omitempty"`
-	// The parts of the service's application it is linked to, as service
-	// names: forge.yaml's run.links of the commit that runs. Its pods have
-	// each one's address in <PART>_URL. Output only.
+	// What the service is linked to in its application: forge.yaml's
+	// run.links of the commit that runs. "services/{service}" is a part,
+	// whose address its pods have in <PART>_URL;
+	// "services/{service}/resources/{name}" is a part's shared database,
+	// which its pods have in DATABASE_URL. Output only.
 	Links         []string `protobuf:"bytes,20,rep,name=links,proto3" json:"links,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

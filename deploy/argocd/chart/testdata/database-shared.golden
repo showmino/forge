@@ -1,0 +1,156 @@
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: forge
+spec:
+  hard:
+    # Room for the app and, next to it, a database of up to three instances.
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    pods: "15"
+---
+# Source: forge-chart/templates/limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: forge
+spec:
+  limits:
+    - type: Container
+      defaultRequest: {cpu: 50m, memory: 64Mi}
+      default: {cpu: 500m, memory: 512Mi}
+---
+# Source: forge-chart/templates/database-access.yaml
+# The copy is Forge's own Secret, by a fixed name. forge-api may replace and
+# delete it in every service's namespace, so that it can also remove a copy
+# after the link is gone; it reads no Secret here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-linked-database
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [forge-linked-database]
+    verbs: [update, delete]
+---
+# Source: forge-chart/templates/database-access.yaml
+# The service shares its database: forge-api may read this one Secret, to
+# copy its URL to the parts that link to it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: forge-shared-database
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: ["main-app"]
+    verbs: [get]
+---
+# Source: forge-chart/templates/database-access.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-linked-database
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-linked-database
+subjects:
+  - kind: ServiceAccount
+    name: "forge-api"
+    namespace: "forge"
+---
+# Source: forge-chart/templates/database-access.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: forge-shared-database
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: forge-shared-database
+subjects:
+  - kind: ServiceAccount
+    name: "forge-api"
+    namespace: "forge"
+---
+# Source: forge-chart/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments
+spec:
+  selector: {app: payments}
+  ports:
+    - {name: http, port: 80, targetPort: 9090}
+---
+# Source: forge-chart/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments
+  labels: {app: payments}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: payments}
+  template:
+    metadata:
+      labels: {app: payments}
+    spec:
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: forge-pull
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      # The root filesystem is read-only; /tmp and run.writable are the
+      # writable paths.
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 256Mi}
+      containers:
+        - name: payments
+          image: ghcr.io/showmino/payments:1a2b3c4
+          ports:
+            - {name: http, containerPort: 9090}
+          env:
+            - {name: PORT, value: "9090"}
+            - {name: FORGE_ENVIRONMENT, value: "staging"}
+            # The connection string CloudNativePG keeps for the service's database.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: main-app, key: uri}
+          readinessProbe:
+            httpGet: {path: /ready, port: 9090}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /ready, port: 9090}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+---
+# Source: forge-chart/templates/httproute.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: payments
+spec:
+  parentRefs:
+    # A public address attaches to the Gateway's public listener; an internal
+    # one to the listener of its environment.
+    - {name: forge-previews, namespace: forge, sectionName: staging}
+  hostnames: ["payments.staging.10.150.1.222.nip.io"]
+  rules:
+    - backendRefs:
+        - {name: payments, port: 80}

@@ -19,6 +19,10 @@ chart-test: ## Render deploy/argocd/chart and compare it with its goldens
 	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
 	  -f deploy/argocd/chart/testdata/database.yaml | diff -u deploy/argocd/chart/testdata/database.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
+	  -f deploy/argocd/chart/testdata/database-shared.yaml | diff -u deploy/argocd/chart/testdata/database-shared.golden -
+	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
+	  -f deploy/argocd/chart/testdata/database-linked.yaml | diff -u deploy/argocd/chart/testdata/database-linked.golden -
+	$(HELM) template payments deploy/argocd/chart --namespace payments-staging \
 	  -f deploy/argocd/chart/testdata/public.yaml | diff -u deploy/argocd/chart/testdata/public.golden -
 	$(HELM) template payments deploy/argocd/chart --namespace payments-production \
 	  -f deploy/argocd/chart/testdata/options.yaml | diff -u deploy/argocd/chart/testdata/options.golden -

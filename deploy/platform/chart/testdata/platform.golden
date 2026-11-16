@@ -997,6 +997,12 @@ spec:
     - {group: onepassword.com, kind: OnePasswordItem}
     - {group: batch, kind: CronJob}
     - {group: keda.sh, kind: ScaledObject}
+    # A database shared between the parts of an application: the Roles that
+    # let forge-api read the one Secret of a shared database and keep its
+    # copy in a linking part's namespace (the service chart's
+    # database-access.yaml).
+    - {group: rbac.authorization.k8s.io, kind: Role}
+    - {group: rbac.authorization.k8s.io, kind: RoleBinding}
     # The DNS record of a public address (apps.publicDomains).
     - {group: kro.run, kind: CloudflareRecordsApplication}
     # Not deployed by the chart: Argo CD leaves out of an application's tree
@@ -1055,6 +1061,8 @@ spec:
               - {name: secretBackend, value: "onepassword"}
             # How every service is reached: the platform's choice, not the service's.
             valuesObject:
+              # Who may copy the URL of a database that parts share.
+              forgeApi: {serviceAccount: forge-api, namespace: "forge"}
               route:
                 kind: "gateway"
                 gateway: {name: forge-previews, namespace: "forge"}
