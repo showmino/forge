@@ -245,14 +245,17 @@ func (m *Manifest) Declarations() []*forgev1.ResourceDeclaration {
 
 // Service is the catalog part of the manifest.
 type Service struct {
-	Name         string            `yaml:"name"`
-	DisplayName  string            `yaml:"displayName,omitempty"`
-	Team         string            `yaml:"team"`
-	Owners       []string          `yaml:"owners,omitempty"`
-	Lifecycle    string            `yaml:"lifecycle,omitempty"`
-	Repo         string            `yaml:"repo,omitempty"`
-	Dependencies []string          `yaml:"dependencies,omitempty"`
-	Labels       map[string]string `yaml:"labels,omitempty"`
+	Name         string   `yaml:"name"`
+	DisplayName  string   `yaml:"displayName,omitempty"`
+	Team         string   `yaml:"team"`
+	Owners       []string `yaml:"owners,omitempty"`
+	Lifecycle    string   `yaml:"lifecycle,omitempty"`
+	Repo         string   `yaml:"repo,omitempty"`
+	Dependencies []string `yaml:"dependencies,omitempty"`
+	// Application is the application the service is a part of, such as
+	// "shop"; empty when it is part of none.
+	Application string            `yaml:"application,omitempty"`
+	Labels      map[string]string `yaml:"labels,omitempty"`
 	// Tier is how critical the service is: 1 critical, 2 high, 3 medium;
 	// 0 (unset) is not set.
 	Tier int `yaml:"tier,omitempty"`
@@ -296,6 +299,9 @@ func (m *Manifest) Validate() error {
 	case "", "experimental", "production", "deprecated":
 	default:
 		return fmt.Errorf("service.lifecycle %q must be experimental, production or deprecated", m.Service.Lifecycle)
+	}
+	if a := m.Service.Application; a != "" && !ValidID(a) {
+		return fmt.Errorf("service.application %q must be a lowercase DNS label (a-z, 0-9, '-', max 63)", a)
 	}
 	if m.Service.Tier < 0 || m.Service.Tier > 3 {
 		return fmt.Errorf("service.tier %d must be 1 (critical), 2 (high) or 3 (medium)", m.Service.Tier)

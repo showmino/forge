@@ -181,6 +181,7 @@ match nothing). TestChartRoutesEveryService (internal/server) fails when a
 service is missing here.
 */}}
 {{- define "forge.apiPaths" -}}
+- /forge.v1.ApplicationService
 - /forge.v1.ApprovalService
 - /forge.v1.AuditService
 - /forge.v1.AuthService

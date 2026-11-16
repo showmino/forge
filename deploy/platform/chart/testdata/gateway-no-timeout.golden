@@ -651,6 +651,10 @@ spec:
       backendRefs:
         - {group: "", kind: Service, name: forge-web, port: 80, weight: 1}
     - matches:
+        - path: {type: PathPrefix, value: /forge.v1.ApplicationService}
+      backendRefs:
+        - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}
+    - matches:
         - path: {type: PathPrefix, value: /forge.v1.ApprovalService}
       backendRefs:
         - {group: "", kind: Service, name: forge-api, port: 80, weight: 1}

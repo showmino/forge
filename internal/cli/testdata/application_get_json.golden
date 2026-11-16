@@ -1,0 +1,15 @@
+{
+  "name": "applications/shop",
+  "ownerTeam": "billing",
+  "parts": [
+    {
+      "service": "services/shop"
+    },
+    {
+      "service": "services/shop-api"
+    },
+    {
+      "service": "services/shop-worker"
+    }
+  ]
+}

@@ -218,6 +218,7 @@ func newServiceGetCmd(f *Factory) *cobra.Command {
 				{"lifecycle", lifecycleString(s.GetLifecycle())},
 				{"tier", tierText(s.GetTier())},
 				{"slo", s.GetSlo()},
+				{"application", s.GetApplication()},
 				{"repo", s.GetRepoUrl()},
 				{"environments", serviceEnvsText(s)},
 				{"dependencies", strings.Join(s.GetDependencies(), ", ")},
@@ -450,6 +451,7 @@ func fromManifest(m *manifest.Manifest) *forgev1.Service {
 	return &forgev1.Service{
 		Tier:         int32(m.Service.Tier), //nolint:gosec // Validate keeps it 0-3
 		Slo:          m.Service.SLO,
+		Application:  m.Service.Application,
 		DisplayName:  m.Service.DisplayName,
 		OwnerTeam:    m.Service.Team,
 		Owners:       m.Service.Owners,
@@ -485,7 +487,7 @@ func newServiceUpdateCmd(f *Factory) *cobra.Command {
 	var dryRun bool
 	var addOwners, removeOwners, environments []string
 	var tier int
-	var slo string
+	var slo, application string
 	cmd := &cobra.Command{
 		Use:   "update [name]",
 		Short: "Change fields of a service",
@@ -497,9 +499,13 @@ down first ('forge deploy remove'). An infrastructure repo keeps the
 environments it was made with.
 
 --tier says how critical the service is: 1 critical, 2 high, 3 medium; 0
-clears it. --slo is its availability target, such as 99.9%; "" clears it.`,
+clears it. --slo is its availability target, such as 99.9%; "" clears it.
+
+--application makes the service a part of an application ('forge application
+list'); "" takes it out. Every part of an application has the same team.`,
 		Example: `  forge service update payments --lifecycle deprecated
   forge service update payments --tier 1 --slo 99.95%
+  forge service update shop-worker --application shop
   forge service update payments --add-owner li@example.com --remove-owner ana@example.com
   forge service update payments --environments staging,production`,
 		Args:              cobra.MaximumNArgs(1),
@@ -545,6 +551,7 @@ clears it. --slo is its availability target, such as 99.9%; "" clears it.`,
 					return nil
 				}},
 				{"slo", "slo", func() error { svc.Slo = slo; return nil }},
+				{"application", "application", func() error { svc.Application = application; return nil }},
 			}
 			for _, s := range steps {
 				if err := set(s.flag, s.path, s.apply); err != nil {
@@ -600,6 +607,7 @@ clears it. --slo is its availability target, such as 99.9%; "" clears it.`,
 	cmd.Flags().StringSliceVar(&environments, "environments", nil, "the deploy environments it has: staging, production or both")
 	cmd.Flags().IntVar(&tier, "tier", 0, "how critical it is: 1 critical, 2 high, 3 medium; 0 clears it")
 	cmd.Flags().StringVar(&slo, "slo", "", "its availability target, such as 99.9%; \"\" clears it")
+	cmd.Flags().StringVar(&application, "application", "", "the application it is a part of; \"\" takes it out")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "validate on the server without changing anything")
 	return cmd
 }

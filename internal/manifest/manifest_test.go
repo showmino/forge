@@ -79,6 +79,21 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// service.application: the application the service is a part of (phase 16).
+func TestApplication(t *testing.T) {
+	t.Parallel()
+	base := "apiVersion: forge.dev/v1\nservice:\n  name: shop-api\n  team: billing\n"
+	m, err := Parse([]byte(base + "  application: shop\n"))
+	if err != nil || m.Service.Application != "shop" {
+		t.Fatalf("set: %+v %v", m.Service, err)
+	}
+	for _, bad := range []string{"  application: Shop\n", "  application: \"my shop\"\n", "  application: -shop\n"} {
+		if _, err := Parse([]byte(base + bad)); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
 // service.tier and service.slo: how critical a service is, and its
 // availability target (phase 15).
 func TestTierAndSLO(t *testing.T) {

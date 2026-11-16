@@ -1,0 +1,4 @@
+PART          STAGING   PRODUCTION
+shop          -         -
+shop-api      -         -
+shop-worker   -         -
