@@ -76,10 +76,30 @@ spec:
     {{- end }}
     {{- end }}
   hostnames: [{{ $host | quote }}]
+  {{- /* One rule for the paths of one Service, eight paths at most in each:
+  a route may have 16 rules, and a rule 8 matches (64 since Gateway API
+  1.2). A rule for every path made the 17th API service one rule too many.
+  Which rule answers is decided by the longest matching prefix, not by the
+  order here. */}}
+  {{- $rules := list }}
+  {{- range $paths }}
+  {{- $last := dict }}
+  {{- if $rules }}{{- $last = last $rules }}{{- end }}
+  {{- if and $last (eq $last.service .service) (lt (len $last.paths) 8) }}
+  {{- $_ := set $last "paths" (append $last.paths .path) }}
+  {{- else }}
+  {{- $rules = append $rules (dict "service" .service "port" .port "paths" (list .path)) }}
+  {{- end }}
+  {{- end }}
+  {{- if gt (len $rules) 16 }}
+  {{- fail (printf "the HTTPRoute for %s would have %d rules; Gateway API allows 16" $host (len $rules)) }}
+  {{- end }}
   rules:
-    {{- range $paths }}
+    {{- range $rules }}
     - matches:
-        - path: {type: PathPrefix, value: {{ .path }}}
+        {{- range .paths }}
+        - path: {type: PathPrefix, value: {{ . }}}
+        {{- end }}
       backendRefs:
         - {group: "", kind: Service, name: {{ .service }}, port: {{ .port }}, weight: 1}
       {{- if and (eq .service "forge-api") $.Values.gateway.apiTimeout }}
