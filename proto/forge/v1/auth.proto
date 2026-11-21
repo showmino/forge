@@ -166,6 +166,12 @@ message GetStatusResponse {
   // The slugs of the organization's teams the caller is in. A team's members
   // work on the services it owns.
   repeated string teams = 7;
+  // The GitHub organization this Forge serves, as in URLs: "my-org". Empty
+  // when the server has no GitHub organization configured.
+  string organization = 8;
+  // The organization's name as GitHub shows it, "My Org"; its slug when it
+  // has none or GitHub cannot be asked. Empty with organization.
+  string organization_display_name = 9;
 }
 
 // Token is a personal token, without its secret.
