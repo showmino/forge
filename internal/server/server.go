@@ -163,7 +163,11 @@ func New(o Options) (http.Handler, error) {
 		create.oidc = oidc
 	}
 	mux.Handle(forgev1connect.NewServiceCatalogServiceHandler(&catalogService{Catalog: o.Catalog, create: create}, opts))
-	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o}, opts))
+	org := &orgName{org: o.Authorizer.Org, log: o.Logger, now: time.Now}
+	if namer, ok := o.Teams.(OrgNamer); ok {
+		org.src = namer
+	}
+	mux.Handle(forgev1connect.NewAuthServiceHandler(&authService{o: o, org: org}, opts))
 	mux.Handle(forgev1connect.NewTemplateServiceHandler(&templateService{src: o.Templates, log: o.Logger, infra: o.Infrastructure}, opts))
 	if o.RuleModes != nil {
 		var engines []*policy.Engine
@@ -222,7 +226,10 @@ func versionHeaders(v, minClient string, next http.Handler) http.Handler {
 	})
 }
 
-type authService struct{ o Options }
+type authService struct {
+	o   Options
+	org *orgName
+}
 
 // webScopes is what the web dashboard asks for: the CLI's scopes without
 // offline_access, so a browser is never handed a refresh token.
@@ -260,6 +267,9 @@ func (a *authService) GetStatus(ctx context.Context, _ *connect.Request[forgev1.
 		Permissions: slices.Clone(p.Permissions),
 		Admin:       isAdmin(p),
 		Teams:       teamsOf(p, a.o.Authorizer.Org),
+	}
+	if a.org != nil && a.o.Authorizer.Org != "" {
+		out.Organization, out.OrganizationDisplayName = a.o.Authorizer.Org, a.org.get(ctx)
 	}
 	if p.Session != "" && p.Client != ClientToken && a.o.Sessions != nil {
 		if all, err := a.o.Sessions.o.Store.ListSessions(ctx, p.Subject); err == nil {
